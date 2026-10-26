@@ -189,6 +189,8 @@ function buildTrees(spots: [number, number, number][], r: () => number): THREE.G
     trunks.setMatrixAt(i, m);
     crowns.setColorAt(i, greens[Math.floor(r() * greens.length)]);
   });
+  crowns.name = 'crowns';
+  trunks.name = 'trunks';
   crowns.castShadow = trunks.castShadow = true;
   crowns.receiveShadow = true;
   g.add(trunks, crowns);

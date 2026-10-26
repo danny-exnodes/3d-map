@@ -30,7 +30,15 @@
 - **Bấm vào một nhà** để xem tên, loại, số tầng, chiều cao, nguồn dữ liệu, kèm link sửa hoặc vẽ thêm trên OpenStreetMap.
 
 **Hiển thị**
-- Chế độ **Có màu / Đơn sắc** (phong cách mô hình kiến trúc, đèn đêm vẫn giữ màu ấm). Lựa chọn được ghi nhớ, đặt được qua URL `?style=mono`.
+- Ba chế độ xem **Có màu / Đơn sắc / Siêu thực**. Lựa chọn được ghi nhớ, đặt được qua URL `?style=mono|real`.
+  - Đơn sắc theo phong cách mô hình kiến trúc, đèn đêm vẫn giữ màu ấm.
+  - **Siêu thực** (#19) dùng vật liệu PBR sinh hoàn toàn bằng shader, không tải texture nên chạy được offline:
+    - mặt tiền: vữa loang, vệt mưa, gờ sàn, cửa sổ có khung và bậu, kính phản chiếu trời, cục lạnh, cửa cuốn và bảng hiệu tầng trệt, tường kính, gạch, ốp kim loại;
+    - mái: mái bằng bê tông có vết ố, mái tôn sóng có gỉ, mái ngói;
+    - mặt đất: đường nhựa có vá và ướt khi mưa, vỉa hè lát gạch, cỏ;
+    - sông hồ có sóng động và phản chiếu bầu trời;
+    - tán cây nhiều khối;
+    - bầu trời khí quyển có mây, chiếu sáng môi trường, ambient occlusion (tự tắt khi máy yếu), bóng mềm.
 - Chế độ pixel.
 - Thanh thời gian 24h + chọn ngày. Mặt trời đặt đúng vị trí thiên văn theo toạ độ. Ban đêm có ánh trăng, cửa sổ và đèn xe sáng, bloom.
 - **Giao thông (mô phỏng)**: xe máy, ô tô, xe buýt chạy theo làn bên phải, mật độ đổi theo giờ cao điểm. Lớp 🚦 tô màu tốc độ. Có tàu chạy trên ray.
@@ -50,6 +58,14 @@
 | Ngã Tư Sở (OSM + Overture + Google 2.5D) | Nguồn chiều cao 📏 | Đơn sắc |
 | --- | --- | --- |
 | ![ngatuso](docs/ngatuso.png) | ![sources](docs/height-sources.png) | ![mono](docs/mono.png) |
+
+| Có màu | Siêu thực | Siêu thực – cận cảnh |
+| --- | --- | --- |
+| ![before](docs/real-before.jpg) | ![after](docs/real-after.jpg) | ![street](docs/real-street.jpg) |
+
+| Siêu thực – sông, cầu cạn | Siêu thực – ban đêm | |
+| --- | --- | --- |
+| ![river](docs/real-river.jpg) | ![night](docs/real-night.jpg) | |
 
 | Én Nam – Q.8, TP.HCM | Thông tin toà nhà | Ban đêm |
 | --- | --- | --- |
@@ -113,6 +129,7 @@ src/
   scene/roofs.ts          # OBB, mái dốc/chóp/vòm/chùa
   scene/details.ts        # ban công, tum thang, bồn nước (instanced, LOD)
   scene/colorMode.ts      # Có màu / Đơn sắc
+  scene/realistic.ts      # Siêu thực: vật liệu PBR thủ tục, bầu trời, nước, cây
   scene/roads.ts …        # đường, cầu, ray; landscape.ts; traffic.ts; sun.ts
 tools/
   gob-heights.mjs         # CLI trích lưới chiều cao

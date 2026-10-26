@@ -513,13 +513,16 @@ $('btn-traffic').addEventListener('click', () => {
   city?.setTrafficOverlay(trafficOn);
   $('btn-traffic').classList.toggle('on', trafficOn);
 });
-// Colour / monochrome (#7): remembered per browser, overridable with ?style=mono|color.
+// Colour / monochrome (#7) / realistic (#19): remembered per browser, overridable with ?style=mono|color|real.
 const COLOR_KEY = 'tinymap:colorMode';
+const MODES: ColorMode[] = ['color', 'mono', 'real'];
+const MODE_LABEL: Record<ColorMode, string> = { color: '◑ Có màu', mono: '◐ Đơn sắc', real: '✦ Siêu thực' };
 function initialColorMode(): ColorMode {
-  const q = /[?&]style=(mono|color)\b/.exec(location.search)?.[1];
+  const q = /[?&]style=(mono|color|real)\b/.exec(location.search)?.[1];
   if (q) return q as ColorMode;
   try {
-    return localStorage.getItem(COLOR_KEY) === 'mono' ? 'mono' : 'color';
+    const v = localStorage.getItem(COLOR_KEY) as ColorMode | null;
+    return v && MODES.includes(v) ? v : 'color';
   } catch {
     return 'color';
   }
@@ -528,11 +531,11 @@ let colorMode = initialColorMode();
 function applyColorMode() {
   city?.setColorMode(colorMode);
   const btn = $('btn-mono');
-  btn.classList.toggle('on', colorMode === 'mono');
-  btn.textContent = colorMode === 'mono' ? '◐ Đơn sắc' : '◑ Có màu';
+  btn.classList.toggle('on', colorMode !== 'color');
+  btn.textContent = MODE_LABEL[colorMode];
 }
 $('btn-mono').addEventListener('click', () => {
-  colorMode = colorMode === 'mono' ? 'color' : 'mono';
+  colorMode = MODES[(MODES.indexOf(colorMode) + 1) % MODES.length];
   try {
     localStorage.setItem(COLOR_KEY, colorMode);
   } catch {
