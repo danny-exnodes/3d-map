@@ -11,7 +11,7 @@
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-    "types": ["vite/client", "geojson"]
+    "types": ["vite/client", "geojson", "node"]
   },
   "include": ["src", "tests"]
 }

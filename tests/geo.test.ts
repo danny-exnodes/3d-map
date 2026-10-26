@@ -62,3 +62,33 @@ describe('demo city', () => {
     expect(a.roads.some((r) => r.bridge)).toBe(true);
   });
 });
+
+describe('mono colour mode', () => {
+  it('maps colours to the tint while keeping relative brightness', async () => {
+    const THREE = await import('three');
+    const { monoColor, MONO_TINT } = await import('../src/scene/colorMode');
+    const water = monoColor(new THREE.Color('#5fa8d8'));
+    const road = monoColor(new THREE.Color('#40444d'));
+    const white = monoColor(new THREE.Color('#ffffff'));
+    expect(white.r).toBeCloseTo(MONO_TINT.r, 5);
+    expect(road.r).toBeLessThan(water.r);
+    // Near-neutral: channels follow the tint ratios.
+    expect(water.r / water.b).toBeCloseTo(MONO_TINT.r / MONO_TINT.b, 5);
+    // amount = 0 is identity.
+    expect(monoColor(new THREE.Color('#ff0000'), 0).getHexString()).toBe('ff0000');
+  });
+});
+
+describe('clipping to the area', () => {
+  it('cuts polylines and polygons at the bbox', async () => {
+    const { clipPolyline, clipPolygon } = await import('../src/data/clip');
+    const b = { south: 0, west: 0, north: 1, east: 1 };
+    expect(clipPolyline([[-1, 0.5], [2, 0.5]], b)).toEqual([[[0, 0.5], [1, 0.5]]]);
+    // Leaves and re-enters: two pieces.
+    expect(clipPolyline([[0.2, 0.2], [0.2, 2], [0.8, 2], [0.8, 0.2]], b)).toHaveLength(2);
+    expect(clipPolyline([[2, 2], [3, 3]], b)).toEqual([]);
+    const sq = clipPolygon([[[-1, -1], [0.5, -1], [0.5, 0.5], [-1, 0.5]]], b)!;
+    expect(sq[0]).toHaveLength(4);
+    expect(clipPolygon([[[2, 2], [3, 2], [3, 3]]], b)).toBeNull();
+  });
+});

@@ -5,11 +5,13 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import type { CityData, ProgressFn } from '../data/types';
+import type { Building, CityData, ProgressFn } from '../data/types';
 import { bboxSizeMeters, LocalProjection } from '../geo/projection';
-import { buildBuildings } from './buildings';
-import { buildLandscape, type LandscapeResult } from './landscape';
-import { buildRoads } from './roads';
+import { cityWorker } from '../worker/client';
+import { buildCity } from './buildCity';
+import { bakeMono, type ColorMode, colorModeUniforms, monoSky, patchObject } from './colorMode';
+import type { RailPath, RoadPath } from './roads';
+import { deserializeObjects } from './serialize';
 import { lighting, sunState, type SunState } from './sun';
 import { Traffic } from './traffic';
 
@@ -34,8 +36,17 @@ export class CityScene {
   private hemi = new THREE.HemisphereLight('#bcd8ff', '#d8c9a8', 1.2);
   private city = new THREE.Group();
   private traffic: Traffic | null = null;
-  private landscape: LandscapeResult | null = null;
-  private buildingUniforms: { uNight: { value: number } } | null = null;
+  private lampBulbs: THREE.InstancedMesh | null = null;
+  /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
+  private details: THREE.Object3D[] = [];
+  private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number } } | null = null;
+  private buildingsMesh: THREE.Mesh | null = null;
+  private buildingIds: string[] = [];
+  private buildingById = new Map<string, Building>();
+  private raycaster = new THREE.Raycaster();
+  /** Called with the picked building (or null) when the user clicks the model (#10). */
+  onPick?: (b: Building | null) => void;
+  private sourceView = false;
   private rain: THREE.Points | null = null;
   private timer = new THREE.Timer();
   private size = { width: 1000, depth: 1000 };
@@ -43,7 +54,20 @@ export class CityScene {
   private labels: { el: HTMLElement; pos: THREE.Vector3 }[] = [];
   private raf = 0;
   private pixelMode = false;
+  private maxPixelRatio = Math.min(window.devicePixelRatio, 2);
+  private pixelRatio = this.maxPixelRatio;
+  private fpsWindow = { start: performance.now(), frames: 0 };
+  /** Skip rendering (used by the benchmark to measure pure build cost). */
+  paused = false;
+  /** Durations (ms) of the synchronous main-thread steps of the last build (benchmark). */
+  mainThreadSlices: Record<string, number> = {};
+  /** Average FPS over the last 2 s window. */
+  fps = 0;
   private cloud = 0;
+  private colorMode: ColorMode = 'color';
+  private modeFrom = 0;
+  private modeChangedAt = 0;
+  private lastSky = new THREE.Color('#9fd3f2');
   data: CityData | null = null;
   sunInfo: SunState | null = null;
   onFrame?: () => void;
@@ -52,6 +76,9 @@ export class CityScene {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
+    // Shadows only change with the sun or the model, so render them on demand (#8).
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -78,6 +105,14 @@ export class CityScene {
     this.composer.addPass(new OutputPass());
 
     new ResizeObserver(() => this.resize()).observe(container);
+    // Click (not drag) on the model picks a building.
+    let down: { x: number; y: number } | null = null;
+    const el = this.renderer.domElement;
+    el.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }));
+    el.addEventListener('pointerup', (e) => {
+      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) this.pick(e.clientX, e.clientY);
+      down = null;
+    });
     this.resize();
     this.loop();
   }
@@ -87,7 +122,7 @@ export class CityScene {
     const h = this.container.clientHeight || 1;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    const pr = this.pixelMode ? 0.3 : Math.min(window.devicePixelRatio, 2);
+    const pr = this.pixelMode ? 0.3 : this.pixelRatio;
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h);
     this.composer.setPixelRatio(pr);
@@ -97,29 +132,49 @@ export class CityScene {
   async build(data: CityData, onProgress: ProgressFn): Promise<BuildStats> {
     const t0 = performance.now();
     this.clear();
+    this.mainThreadSlices = {};
     this.data = data;
     const proj = (this.proj = new LocalProjection(data.bbox));
     this.size = bboxSizeMeters(data.bbox);
 
-    onProgress('build', 0.05, 'Đường & cầu');
-    await nextFrame();
-    const roads = buildRoads(data.roads, data.rails, proj);
-    this.city.add(roads.group);
+    // Geometry is generated off the main thread when module workers are available (#8).
+    let built: { group: THREE.Group; paths: RoadPath[]; railPaths: RailPath[]; buildings: number; trees: number; buildingIds: string[] };
+    const report = (f: number, d: string) => onProgress('build', Math.min(0.9, f), d);
+    if (cityWorker.available) {
+      try {
+        const r = await cityWorker.build(data, report);
+        const t = performance.now();
+        built = { ...r, group: deserializeObjects(r.objects) };
+        this.mainThreadSlices.deserialize = performance.now() - t;
+      } catch (e) {
+        console.warn('Worker build failed, building inline', e);
+        await nextFrame();
+        const t = performance.now();
+        built = buildCity(data, report);
+        this.mainThreadSlices.inlineBuild = performance.now() - t;
+      }
+    } else {
+      await nextFrame();
+      const t = performance.now();
+      built = buildCity(data, report);
+      this.mainThreadSlices.inlineBuild = performance.now() - t;
+    }
+    this.city.add(built.group);
+    const buildingsMesh = built.group.getObjectByName('buildings') as THREE.Mesh | undefined;
+    this.buildingUniforms = (buildingsMesh?.material as THREE.Material | undefined)?.userData.uniforms ?? null;
+    this.buildingsMesh = buildingsMesh ?? null;
+    this.buildingIds = built.buildingIds;
+    this.buildingById = new Map(data.buildings.map((b) => [b.id, b]));
+    if (this.buildingUniforms) this.buildingUniforms.uSourceView.value = this.sourceView ? 1 : 0;
+    this.lampBulbs = (built.group.getObjectByName('lampBulbs') as THREE.InstancedMesh | undefined) ?? null;
+    this.details = [];
+    built.group.traverse((o) => o.name.startsWith('detail-') && this.details.push(o));
 
-    onProgress('build', 0.25, 'Nhà cửa');
+    onProgress('build', 0.92, 'Giao thông');
     await nextFrame();
-    const b = buildBuildings(data.buildings, proj);
-    this.city.add(b.mesh);
-    this.buildingUniforms = b.material.userData.uniforms;
-
-    onProgress('build', 0.6, 'Cây, sông, đèn đường');
-    await nextFrame();
-    this.landscape = buildLandscape(data, proj, roads.paths, b.footprints, roads.lampSpots);
-    this.city.add(this.landscape.group);
-
-    onProgress('build', 0.85, 'Giao thông');
-    await nextFrame();
-    this.traffic = new Traffic(roads.paths, roads.railPaths);
+    const tTraffic = performance.now();
+    this.traffic = new Traffic(built.paths, built.railPaths);
+    this.mainThreadSlices.traffic = performance.now() - tTraffic;
     this.scene.add(this.traffic.group);
 
     for (const p of data.pois) {
@@ -132,6 +187,13 @@ export class CityScene {
     }
 
     const ext = Math.max(this.size.width, this.size.depth);
+    const mapSize = ext > 1200 ? 2048 : 4096;
+    if (this.sun.shadow.mapSize.x !== mapSize) {
+      this.sun.shadow.mapSize.set(mapSize, mapSize);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+    this.renderer.shadowMap.needsUpdate = true;
     const cam = this.sun.shadow.camera;
     cam.left = cam.bottom = -ext * 0.65;
     cam.right = cam.top = ext * 0.65;
@@ -143,10 +205,13 @@ export class CityScene {
     this.controls.minDistance = 20;
     this.resetView();
 
+    patchObject(this.city);
+    patchObject(this.traffic.group);
+
     onProgress('build', 1, 'Xong');
     return {
-      buildings: b.count,
-      trees: this.landscape.treeCount,
+      buildings: built.buildings,
+      trees: built.trees,
       vehicles: this.traffic.stats.vehicles,
       seconds: (performance.now() - t0) / 1000,
       areaKm2: (this.size.width * this.size.depth) / 1e6,
@@ -164,6 +229,9 @@ export class CityScene {
       });
     dispose(this.city);
     this.city.clear();
+    this.buildingsMesh = null;
+    this.buildingIds = [];
+    this.buildingById.clear();
     if (this.traffic) {
       dispose(this.traffic.group);
       this.scene.remove(this.traffic.group);
@@ -194,8 +262,9 @@ export class CityScene {
     this.hemi.intensity = L.hemiIntensity;
     this.hemi.color.copy(L.hemiSky);
     this.hemi.groundColor.copy(L.hemiGround);
-    this.scene.background = L.sky;
-    (this.scene.fog as THREE.Fog).color.copy(L.sky);
+    this.renderer.shadowMap.needsUpdate = true;
+    this.lastSky.copy(L.sky);
+    this.applySky();
     this.bloom.strength = 0.06 + s.night * 0.4;
     this.bloom.threshold = s.night > 0.5 ? 0.8 : 0.95;
     // Warm sodium glow on streets after dark.
@@ -204,9 +273,52 @@ export class CityScene {
       if (!Array.isArray(m) && m?.userData?.streetGlow) m.emissive.setRGB(0.32, 0.17, 0.06).multiplyScalar(s.night * m.userData.streetGlow);
     });
     if (this.buildingUniforms) this.buildingUniforms.uNight.value = s.night;
-    if (this.landscape?.lampBulbs) this.landscape.lampBulbs.visible = s.night > 0.35;
+    if (this.lampBulbs) this.lampBulbs.visible = s.night > 0.35;
     this.traffic?.setHour(localHour);
     this.traffic?.setNight(s.night);
+  }
+
+  private applySky() {
+    const sky = monoSky(this.lastSky, colorModeUniforms.uMono.value);
+    this.scene.background = sky;
+    (this.scene.fog as THREE.Fog).color.copy(sky);
+  }
+
+  setColorMode(mode: ColorMode) {
+    if (mode === this.colorMode) return;
+    this.colorMode = mode;
+    this.modeFrom = colorModeUniforms.uMono.value;
+    this.modeChangedAt = performance.now();
+  }
+
+  get currentColorMode() {
+    return this.colorMode;
+  }
+
+  /** Raycasts the buildings mesh at a screen point and selects the building under it. */
+  pick(clientX: number, clientY: number): Building | null {
+    const mesh = this.buildingsMesh;
+    if (!mesh) return null;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.intersectObject(mesh, false)[0];
+    const bidAttr = mesh.geometry.getAttribute('aBid');
+    const bid = hit?.face && bidAttr ? Math.round(bidAttr.getX(hit.face.a)) : -1;
+    const b = bid >= 0 ? (this.buildingById.get(this.buildingIds[bid]) ?? null) : null;
+    this.select(b ? bid : -1);
+    this.onPick?.(b);
+    return b;
+  }
+
+  select(bid: number) {
+    if (this.buildingUniforms) this.buildingUniforms.uSelected.value = bid;
+  }
+
+  /** Colour buildings by where their height comes from (#3). */
+  setSourceView(on: boolean) {
+    this.sourceView = on;
+    if (this.buildingUniforms) this.buildingUniforms.uSourceView.value = on ? 1 : 0;
   }
 
   setCloud(c: number) {
@@ -291,7 +403,12 @@ export class CityScene {
 
   async exportGLB(): Promise<Blob> {
     const exporter = new GLTFExporter();
-    const result = await exporter.parseAsync(this.city, { binary: true });
+    let root: THREE.Object3D = this.city;
+    if (this.colorMode === 'mono') {
+      root = this.city.clone(true);
+      bakeMono(root);
+    }
+    const result = await exporter.parseAsync(root, { binary: true });
     return new Blob([result as ArrayBuffer], { type: 'model/gltf-binary' });
   }
 
@@ -304,7 +421,22 @@ export class CityScene {
     this.timer.update();
     const dt = Math.min(this.timer.getDelta(), 0.1);
     this.controls.update();
+    // Ease towards the target colour mode over ~300 ms of wall-clock time (frame-rate independent).
+    const u = colorModeUniforms.uMono;
+    const target = this.colorMode === 'mono' ? 1 : 0;
+    if (u.value !== target) {
+      const t = Math.min(1, (performance.now() - this.modeChangedAt) / 300);
+      u.value = this.modeFrom + (target - this.modeFrom) * t;
+      this.applySky();
+    }
     this.traffic?.update(dt);
+    if (this.details.length) {
+      const near = this.camera.position.distanceTo(this.controls.target) < 700;
+      if (this.details[0].visible !== near) {
+        for (const d of this.details) d.visible = near;
+        this.renderer.shadowMap.needsUpdate = true;
+      }
+    }
     if (this.rain) {
       const p = this.rain.geometry.attributes.position as THREE.BufferAttribute;
       for (let i = 0; i < p.count; i++) {
@@ -314,10 +446,42 @@ export class CityScene {
       }
       p.needsUpdate = true;
     }
+    if (this.paused) return;
     this.composer.render();
+    this.adaptPixelRatio();
     this.updateLabels();
     this.onFrame?.();
   };
+
+  /** Lower the pixel ratio step by step while FPS stays under 40 (#8). */
+  private adaptPixelRatio() {
+    const w = this.fpsWindow;
+    w.frames++;
+    const now = performance.now();
+    if (now - w.start < 2000) return;
+    this.fps = (w.frames * 1000) / (now - w.start);
+    w.start = now;
+    w.frames = 0;
+    if (this.pixelMode || !this.data) return;
+    if (this.fps < 40 && this.pixelRatio > 1) {
+      this.pixelRatio = Math.max(1, this.pixelRatio - 0.25);
+      this.resize();
+    } else if (this.fps > 58 && this.pixelRatio < this.maxPixelRatio) {
+      this.pixelRatio = Math.min(this.maxPixelRatio, this.pixelRatio + 0.25);
+      this.resize();
+    }
+  }
+
+  /** Draw calls / triangles of one scene render, without post-processing passes (benchmark). */
+  measureRender() {
+    const info = this.renderer.info;
+    info.autoReset = false;
+    info.reset();
+    this.renderer.render(this.scene, this.camera);
+    const r = { calls: info.render.calls, triangles: info.render.triangles };
+    info.autoReset = true;
+    return r;
+  }
 
   private updateLabels() {
     if (!this.labels.length) return;

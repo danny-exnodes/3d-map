@@ -9,7 +9,9 @@ export class MeshBuilder {
   normals: number[] = [];
   colors: number[] = [];
   seeds: number[] = [];
+  bids: number[] = [];
   private seed = 0;
+  private bid = -1;
   private color = new THREE.Color();
 
   setColor(c: THREE.ColorRepresentation) {
@@ -19,6 +21,12 @@ export class MeshBuilder {
 
   setSeed(s: number) {
     this.seed = s;
+    return this;
+  }
+
+  /** Building index written to the aBid attribute (picking, #10). */
+  setBid(i: number) {
+    this.bid = i;
     return this;
   }
 
@@ -35,7 +43,32 @@ export class MeshBuilder {
       this.normals.push(nx, ny, nz);
       this.colors.push(this.color.r, this.color.g, this.color.b);
       this.seeds.push(this.seed);
+      this.bids.push(this.bid);
     }
+  }
+
+  /** Triangle forced to face up (+y), whatever the input winding. */
+  triUp(a: THREE.Vector3Like, b: THREE.Vector3Like, c: THREE.Vector3Like) {
+    const ny = (c.x - a.x) * (b.z - a.z) - (b.x - a.x) * (c.z - a.z);
+    if (ny >= 0) this.tri(a, b, c);
+    else this.tri(a, c, b);
+  }
+
+  /** Triangle forced to face down (−y). */
+  triDown(a: THREE.Vector3Like, b: THREE.Vector3Like, c: THREE.Vector3Like) {
+    const ny = (c.x - a.x) * (b.z - a.z) - (b.x - a.x) * (c.z - a.z);
+    if (ny <= 0) this.tri(a, b, c);
+    else this.tri(a, c, b);
+  }
+
+  /** Triangle facing away from `centre`. */
+  triOut(a: THREE.Vector3Like, b: THREE.Vector3Like, c: THREE.Vector3Like, centre: THREE.Vector3Like) {
+    const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+    const vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const mx = (a.x + b.x + c.x) / 3 - centre.x, my = (a.y + b.y + c.y) / 3 - centre.y, mz = (a.z + b.z + c.z) / 3 - centre.z;
+    if (nx * mx + ny * my + nz * mz < 0) this.tri(a, c, b);
+    else this.tri(a, b, c);
   }
 
   /** Quad a-b-c-d, counter-clockwise when seen from the front. */
@@ -48,12 +81,13 @@ export class MeshBuilder {
     return this.positions.length === 0;
   }
 
-  build(withSeed = false): THREE.BufferGeometry {
+  build(withSeed = false, withBid = false): THREE.BufferGeometry {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.normals, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.colors, 3));
     if (withSeed) g.setAttribute('aSeed', new THREE.Float32BufferAttribute(this.seeds, 1));
+    if (withBid) g.setAttribute('aBid', new THREE.Float32BufferAttribute(this.bids, 1));
     g.computeBoundingSphere();
     return g;
   }

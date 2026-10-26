@@ -1,0 +1,24 @@
+[
+  {
+    "id": "ennam",
+    "name": "Én Nam – 101 Châu Thị Hoá, TP.HCM",
+    "bbox": {
+      "south": 10.73414,
+      "west": 106.67271,
+      "north": 10.74138,
+      "east": 106.68003
+    },
+    "created": "2026-10-26"
+  },
+  {
+    "id": "ngatuso",
+    "name": "Ngã Tư Sở, Hà Nội",
+    "bbox": {
+      "south": 20.9992,
+      "west": 105.8152,
+      "north": 21.0068,
+      "east": 105.8238
+    },
+    "created": "2026-10-26"
+  }
+]

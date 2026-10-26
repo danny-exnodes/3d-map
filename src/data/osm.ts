@@ -1,9 +1,11 @@
-import { hashString, pick, rng } from './rand';
+import { buildingFromOsm, parseNumber } from './buildings';
+import { pointInRing } from '../geo/projection';
 import { joinRings, openRing } from './rings';
+
+export { FACADE_COLORS, ROOF_COLORS, normalizeColor, parseNumber } from './buildings';
 import type {
   AreaFeature,
   BBox,
-  Building,
   CityData,
   LngLat,
   Polygon,
@@ -24,6 +26,7 @@ export function buildOverpassQuery(b: BBox): string {
   return `[out:json][timeout:90];
 (
   way["building"](${bb});
+  way["building:part"](${bb});
   relation["building"]["type"="multipolygon"](${bb});
   way["highway"](${bb});
   way["railway"~"^(rail|subway|light_rail|tram|monorail|narrow_gauge)$"](${bb});
@@ -38,7 +41,7 @@ export function buildOverpassQuery(b: BBox): string {
   node["amenity"~"^(place_of_worship|hospital|university|marketplace)$"]["name"](${bb});
   way["amenity"~"^(place_of_worship|hospital|university|marketplace)$"]["name"](${bb});
 );
-out geom;`;
+out geom qt;`;
 }
 
 interface OsmGeomPoint {
@@ -63,30 +66,110 @@ export interface OverpassResponse {
   elements: OsmElement[];
 }
 
-export async function fetchOverpass(
+export interface OverpassProgress {
+  endpoint: string;
+  bytes: number;
+  /** Seconds until a query slot frees up, when the server is rate limiting us. */
+  waitSeconds?: number;
+}
+
+/** Reads a fetch body while reporting received bytes (Overpass sends no Content-Length). */
+export async function readTextWithProgress(res: Response, onBytes: (n: number) => void): Promise<string> {
+  if (!res.body) return res.text();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    text += decoder.decode(value, { stream: true });
+    onBytes(n);
+  }
+  return text + decoder.decode();
+}
+
+/**
+ * Parses Overpass `/api/status`: returns 0 when a slot is free, the wait in seconds when
+ * rate limited, or null when the status cannot be read.
+ */
+export function parseOverpassStatus(text: string): number | null {
+  const free = /(\d+) slots? available now/.exec(text);
+  if (free && Number(free[1]) > 0) return 0;
+  const waits = [...text.matchAll(/in (\d+) seconds/g)].map((m) => Number(m[1]));
+  return waits.length ? Math.min(...waits) : null;
+}
+
+async function overpassWait(endpoint: string, signal?: AbortSignal): Promise<number | null> {
+  try {
+    const res = await fetch(endpoint.replace(/interpreter$/, 'status'), { signal });
+    return res.ok ? parseOverpassStatus(await res.text()) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetches raw Overpass JSON text, trying mirrors in order and respecting rate limits (#9). */
+export async function fetchOverpassText(
   bbox: BBox,
   signal?: AbortSignal,
-  onAttempt?: (endpoint: string) => void,
-): Promise<OverpassResponse> {
+  onProgress?: (p: OverpassProgress) => void,
+): Promise<string> {
   const body = 'data=' + encodeURIComponent(buildOverpassQuery(bbox));
   let lastErr: unknown;
-  for (const ep of OVERPASS_ENDPOINTS) {
-    onAttempt?.(ep);
+  for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
-      const res = await fetch(ep, {
+      const wait = await overpassWait(endpoint, signal);
+      if (wait && wait > 0) {
+        onProgress?.({ endpoint, bytes: 0, waitSeconds: wait });
+        if (wait > 20) throw new Error(`${new URL(endpoint).host}: hết lượt, cần chờ ${wait} s`);
+        await sleep(wait * 1000, signal);
+      }
+      onProgress?.({ endpoint, bytes: 0 });
+      const res = await fetch(endpoint, {
         method: 'POST',
         body,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         signal,
       });
-      if (!res.ok) throw new Error(`${ep}: HTTP ${res.status}`);
-      return (await res.json()) as OverpassResponse;
+      if (!res.ok) throw new Error(`${new URL(endpoint).host}: HTTP ${res.status}`);
+      return await readTextWithProgress(res, (bytes) => onProgress?.({ endpoint, bytes }));
     } catch (e) {
       if (signal?.aborted) throw e;
       lastErr = e;
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('Overpass request failed');
+}
+
+function sleep(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(new DOMException('Aborted', 'AbortError'));
+    });
+  });
+}
+
+/** Tags the parser reads; everything else is dropped before caching (~40–60% smaller). */
+const KEPT_TAGS = new Set([
+  'building', 'building:part', 'building:levels', 'building:min_level', 'building:height', 'height', 'min_height',
+  'roof:shape', 'roof:height', 'roof:levels', 'roof:colour', 'roof:material', 'roof:direction', 'roof:orientation',
+  'building:colour', 'building:material', 'name', 'amenity', 'religion', 'highway', 'lanes', 'width', 'oneway',
+  'junction', 'layer', 'bridge', 'tunnel', 'area', 'railway', 'waterway', 'natural', 'landuse', 'leisure', 'shop',
+  'addr:housenumber', 'addr:street', 'addr:district', 'addr:city',
+]);
+
+export function slimOverpass(data: OverpassResponse): OverpassResponse {
+  return {
+    elements: data.elements.map((el) => {
+      const tags: Record<string, string> = {};
+      for (const [k, v] of Object.entries(el.tags ?? {})) if (KEPT_TAGS.has(k)) tags[k] = v;
+      return { ...el, tags };
+    }),
+  };
 }
 
 const toLL = (g: OsmGeomPoint[]): LngLat[] => g.map((p) => [p.lon, p.lat]);
@@ -113,82 +196,6 @@ function polygonsOf(el: OsmElement): Polygon[] {
     return outer.map((o, i) => (i === 0 ? [o, ...inner] : [o]));
   }
   return [];
-}
-
-export function parseNumber(v: string | undefined): number | undefined {
-  if (!v) return undefined;
-  const m = /-?\d+(?:[.,]\d+)?/.exec(v);
-  if (!m) return undefined;
-  const n = parseFloat(m[0].replace(',', '.'));
-  if (!isFinite(n)) return undefined;
-  // Feet → meters.
-  if (/ft|'/.test(v)) return n * 0.3048;
-  return n;
-}
-
-const LEVEL_H = 3.3;
-
-/** Pastel facade palette reminiscent of Hanoi tube houses. */
-export const FACADE_COLORS = [
-  '#f4b6c2', '#c9b6f0', '#f7e08a', '#b9e4c9', '#f5ecd7', '#a9d4f5', '#f7c59f',
-  '#e8e8e8', '#fde2a7', '#d7c4f2', '#f2a7a7', '#c5e3a5', '#fff4d6', '#b6d0e2',
-];
-export const ROOF_COLORS = ['#d9533b', '#e0663f', '#c44536', '#4f9a6a', '#e07a3f', '#b8453a'];
-const FLAT_ROOF_COLORS = ['#d8d2c4', '#cfc8b8', '#bdb7ab', '#e4dccb', '#c9c2b5'];
-
-function estimateHeight(id: string, kind: string, tags: Record<string, string>): number {
-  const h = parseNumber(tags['height']) ?? parseNumber(tags['building:height']);
-  if (h && h > 1) return h;
-  const levels = parseNumber(tags['building:levels']);
-  if (levels && levels > 0) return levels * LEVEL_H;
-  const r = rng(hashString(id));
-  switch (kind) {
-    case 'house':
-    case 'detached':
-    case 'terrace':
-    case 'semidetached_house':
-      return LEVEL_H * (2 + Math.floor(r() * 4));
-    case 'apartments':
-    case 'residential':
-      return LEVEL_H * (4 + Math.floor(r() * 10));
-    case 'commercial':
-    case 'office':
-    case 'retail':
-    case 'hotel':
-      return LEVEL_H * (3 + Math.floor(r() * 12));
-    case 'school':
-    case 'university':
-    case 'hospital':
-    case 'public':
-    case 'government':
-      return LEVEL_H * (3 + Math.floor(r() * 4));
-    case 'industrial':
-    case 'warehouse':
-    case 'garage':
-    case 'garages':
-    case 'shed':
-    case 'roof':
-      return 4 + r() * 4;
-    case 'temple':
-    case 'church':
-    case 'pagoda':
-      return 6 + r() * 6;
-    default:
-      // Dense mid-rise fabric: mostly 2–6 storeys.
-      return LEVEL_H * (2 + Math.floor(r() * r() * 7));
-  }
-}
-
-function normalizeColor(c?: string): string | undefined {
-  if (!c) return undefined;
-  const s = c.trim().toLowerCase();
-  if (/^#[0-9a-f]{3}([0-9a-f]{3})?$/.test(s)) return s;
-  const named: Record<string, string> = {
-    white: '#f4f4f0', red: '#c44536', yellow: '#f7e08a', blue: '#7fb3e6', green: '#8fcf9a',
-    grey: '#b9b9b9', gray: '#b9b9b9', brown: '#9b6b4a', orange: '#f2a65a', pink: '#f4b6c2',
-    beige: '#efe3c8', black: '#444444', silver: '#c8ccd0', cream: '#fbf3dc',
-  };
-  return named[s];
 }
 
 function roadClassOf(hw: string): RoadClass | null {
@@ -250,31 +257,10 @@ export function parseOverpass(bbox: BBox, data: OverpassResponse): CityData {
       continue;
     }
 
-    if (t['building'] && t['building'] !== 'no') {
-      const kind = t['building'];
-      const height = estimateHeight(id, kind, t);
-      const minLevel = parseNumber(t['building:min_level']);
-      const minHeight = parseNumber(t['min_height']) ?? (minLevel ? minLevel * LEVEL_H : 0);
-      const r = rng(hashString(id) ^ 0x9e3779b9);
-      const shape = t['roof:shape'];
-      for (const polygon of polygonsOf(el)) {
-        const small = height <= LEVEL_H * 3.2;
-        let roof: Building['roof'] = 'flat';
-        if (shape === 'gabled' || shape === 'hipped') roof = shape;
-        else if (!shape && small && polygon[0].length <= 5 && r() < 0.55) roof = r() < 0.5 ? 'gabled' : 'hipped';
-        out.buildings.push({
-          id,
-          polygon,
-          height: Math.max(height, minHeight + 2),
-          minHeight,
-          kind,
-          roof,
-          color: normalizeColor(t['building:colour']) ?? pick(r, FACADE_COLORS),
-          roofColor: normalizeColor(t['roof:colour']) ?? (roof === 'flat' ? pick(r, FLAT_ROOF_COLORS) : pick(r, ROOF_COLORS)),
-          name: t['name'],
-        });
-      }
-      if (t['name'] && t['amenity']) {
+    const isPart = !!t['building:part'] && t['building:part'] !== 'no';
+    if ((t['building'] && t['building'] !== 'no') || isPart) {
+      for (const polygon of polygonsOf(el)) out.buildings.push(buildingFromOsm(id, polygon, t, isPart));
+      if (t['name'] && t['amenity'] && !isPart) {
         const p = polygonsOf(el)[0]?.[0];
         if (p) addPoi(out.pois, poiSeen, { id, pos: centroid(p), name: t['name'], kind: t['amenity'] });
       }
@@ -338,7 +324,23 @@ export function parseOverpass(bbox: BBox, data: OverpassResponse): CityData {
       }
     }
   }
+  out.buildings = dropOutlinesWithParts(out.buildings);
   return out;
+}
+
+/**
+ * Simple 3D Buildings: when a building outline contains building:part features, the parts
+ * describe the volume and the outline itself must not be drawn.
+ */
+export function dropOutlinesWithParts<T extends { polygon: LngLat[][]; isPart?: boolean }>(list: T[]): T[] {
+  const parts = list.filter((b) => b.isPart);
+  if (!parts.length) return list;
+  const centroids = parts.map((p) => centroid(p.polygon[0]));
+  return list.filter((b) => {
+    if (b.isPart) return true;
+    const ring = b.polygon[0].map((p) => [p[0], p[1]] as [number, number]);
+    return !centroids.some(([x, y]) => pointInRing(x, y, ring));
+  });
 }
 
 function addPoi(list: PointOfInterest[], seen: Set<string>, p: PointOfInterest) {

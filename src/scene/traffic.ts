@@ -96,7 +96,8 @@ export class Traffic {
 
     const box = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
     this.bodies = new THREE.InstancedMesh(box, new THREE.MeshLambertMaterial(), Math.max(1, this.vehicles.length));
-    this.bodies.castShadow = true;
+    // Shadow maps are rendered on demand, so moving vehicles must not cast shadows.
+    this.bodies.castShadow = false;
     this.bodies.name = 'vehicles';
     const palette = ['#e8e8e8', '#2b2d33', '#c0392b', '#2e86de', '#f1c40f', '#7f8c8d', '#d35400', '#ffffff'];
     const busColors = ['#27ae60', '#2e86de', '#16a085'];
@@ -127,7 +128,6 @@ export class Traffic {
     if (this.trainState.length) {
       const geo = new THREE.BoxGeometry(2.9, 3.4, 18).translate(0, 1.7, 0);
       this.trains = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: '#f2f2f2' }), this.trainState.length * trainCars);
-      this.trains.castShadow = true;
       this.trains.name = 'trains';
       this.group.add(this.trains);
     }

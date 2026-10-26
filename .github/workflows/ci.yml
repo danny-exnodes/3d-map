@@ -13,6 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,6 +24,18 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Benchmark (budgets in bench/budget.json)
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+          # The server must not keep the step's stdout open, or the step never ends.
+          npx vite preview --port 4173 > /tmp/preview.log 2>&1 &
+          PREVIEW_PID=$!
+          for i in $(seq 30); do curl -sf http://localhost:4173 >/dev/null && break; sleep 1; done
+          status=0
+          timeout 300 node bench/run.cjs || status=$?
+          kill $PREVIEW_PID || true
+          exit $status
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name == 'push'
         with:
