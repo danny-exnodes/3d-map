@@ -8,6 +8,7 @@ import type { ColorMode } from './scene/colorMode';
 import { compassLabel } from './scene/sun';
 import { searchPlaces, type Place } from './services/geocode';
 import { fetchWeather } from './services/weather';
+import { cityWorker } from './worker/client';
 import { DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
 import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
 import { bboxAround, MapView } from './ui/MapView';
@@ -202,7 +203,7 @@ async function build(source: 'osm' | 'demo') {
     let data: CityData;
     if (source === 'demo') {
       progress('osm', 1, 'bỏ qua (offline)');
-      data = generateDemoCity(b);
+      data = cityWorker.available ? await cityWorker.demo(b).catch(() => generateDemoCity(b)) : generateDemoCity(b);
       progress('merge', 1, `${fmt(data.buildings.length)} nhà`);
     } else {
       data = await loadData(b);
@@ -211,7 +212,9 @@ async function build(source: 'osm' | 'demo') {
     city ??= new CityScene($('canvas'), $('labels'));
     city.onFrame = updateHud;
     city.setColorMode(colorMode);
+    const bench = /[?&]bench\b/.test(location.search) ? startBench(city) : null;
     const stats = await city.build(data, progress);
+    bench?.(stats.seconds, data);
     applyTime();
     const km2 = bboxAreaKm2(b);
     $('i-title').textContent = source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
@@ -404,6 +407,41 @@ $('btn-glb').addEventListener('click', async () => {
   download(url, 'tiny-map.glb');
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 });
+
+// ---------- Benchmark (?demo&bench, used by CI — issue #8) ----------
+
+/** Starts collecting long tasks; returns a function to call once the build finished. */
+function startBench(scene: CityScene) {
+  const longTasks: number[] = [];
+  let obs: PerformanceObserver | null = null;
+  try {
+    obs = new PerformanceObserver((list) => list.getEntries().forEach((e) => longTasks.push(e.duration)));
+    obs.observe({ type: 'longtask', buffered: false });
+  } catch {
+    /* longtask unsupported */
+  }
+  // Rendering is paused while building so long tasks measure build work only.
+  scene.paused = true;
+  return async (buildSeconds: number, data: CityData) => {
+    obs?.disconnect();
+    const render = scene.measureRender();
+    scene.paused = false;
+    await new Promise((r) => setTimeout(r, 4500));
+    (window as unknown as { __bench: unknown }).__bench = {
+      buildMs: Math.round(buildSeconds * 1000),
+      // Longest synchronous step of our own build code on the main thread.
+      mainThreadMaxMs: Math.round(Math.max(0, ...Object.values(scene.mainThreadSlices))),
+      mainThreadSlices: scene.mainThreadSlices,
+      // All long tasks in the window (includes MapLibre etc.); informational only.
+      longTasks: longTasks.map(Math.round),
+      drawCalls: render.calls,
+      triangles: render.triangles,
+      buildings: data.buildings.length,
+      fps: Math.round(scene.fps * 10) / 10,
+      worker: cityWorker.available,
+    };
+  };
+}
 
 // ---------- Boot ----------
 

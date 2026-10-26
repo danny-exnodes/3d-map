@@ -1,0 +1,7 @@
+{
+  "//": "Deterministic budgets for the offline demo city (?demo&bench). CI fails when a metric exceeds its budget by more than 20%. FPS is logged only (SwiftShader renders on the CPU).",
+  "buildMs": 800,
+  "mainThreadMaxMs": 60,
+  "drawCalls": 40,
+  "triangles": 300000
+}

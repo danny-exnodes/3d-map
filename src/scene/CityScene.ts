@@ -7,10 +7,11 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import type { CityData, ProgressFn } from '../data/types';
 import { bboxSizeMeters, LocalProjection } from '../geo/projection';
-import { buildBuildings } from './buildings';
-import { buildLandscape, type LandscapeResult } from './landscape';
+import { cityWorker } from '../worker/client';
+import { buildCity } from './buildCity';
 import { bakeMono, type ColorMode, colorModeUniforms, monoSky, patchObject } from './colorMode';
-import { buildRoads } from './roads';
+import type { RailPath, RoadPath } from './roads';
+import { deserializeObjects } from './serialize';
 import { lighting, sunState, type SunState } from './sun';
 import { Traffic } from './traffic';
 
@@ -35,7 +36,7 @@ export class CityScene {
   private hemi = new THREE.HemisphereLight('#bcd8ff', '#d8c9a8', 1.2);
   private city = new THREE.Group();
   private traffic: Traffic | null = null;
-  private landscape: LandscapeResult | null = null;
+  private lampBulbs: THREE.InstancedMesh | null = null;
   private buildingUniforms: { uNight: { value: number } } | null = null;
   private rain: THREE.Points | null = null;
   private timer = new THREE.Timer();
@@ -44,6 +45,15 @@ export class CityScene {
   private labels: { el: HTMLElement; pos: THREE.Vector3 }[] = [];
   private raf = 0;
   private pixelMode = false;
+  private maxPixelRatio = Math.min(window.devicePixelRatio, 2);
+  private pixelRatio = this.maxPixelRatio;
+  private fpsWindow = { start: performance.now(), frames: 0 };
+  /** Skip rendering (used by the benchmark to measure pure build cost). */
+  paused = false;
+  /** Durations (ms) of the synchronous main-thread steps of the last build (benchmark). */
+  mainThreadSlices: Record<string, number> = {};
+  /** Average FPS over the last 2 s window. */
+  fps = 0;
   private cloud = 0;
   private colorMode: ColorMode = 'color';
   private modeFrom = 0;
@@ -57,6 +67,9 @@ export class CityScene {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
+    // Shadows only change with the sun or the model, so render them on demand (#8).
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -92,7 +105,7 @@ export class CityScene {
     const h = this.container.clientHeight || 1;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    const pr = this.pixelMode ? 0.3 : Math.min(window.devicePixelRatio, 2);
+    const pr = this.pixelMode ? 0.3 : this.pixelRatio;
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h);
     this.composer.setPixelRatio(pr);
@@ -102,29 +115,43 @@ export class CityScene {
   async build(data: CityData, onProgress: ProgressFn): Promise<BuildStats> {
     const t0 = performance.now();
     this.clear();
+    this.mainThreadSlices = {};
     this.data = data;
     const proj = (this.proj = new LocalProjection(data.bbox));
     this.size = bboxSizeMeters(data.bbox);
 
-    onProgress('build', 0.05, 'Đường & cầu');
-    await nextFrame();
-    const roads = buildRoads(data.roads, data.rails, proj);
-    this.city.add(roads.group);
+    // Geometry is generated off the main thread when module workers are available (#8).
+    let built: { group: THREE.Group; paths: RoadPath[]; railPaths: RailPath[]; buildings: number; trees: number };
+    const report = (f: number, d: string) => onProgress('build', Math.min(0.9, f), d);
+    if (cityWorker.available) {
+      try {
+        const r = await cityWorker.build(data, report);
+        const t = performance.now();
+        built = { ...r, group: deserializeObjects(r.objects) };
+        this.mainThreadSlices.deserialize = performance.now() - t;
+      } catch (e) {
+        console.warn('Worker build failed, building inline', e);
+        await nextFrame();
+        const t = performance.now();
+        built = buildCity(data, report);
+        this.mainThreadSlices.inlineBuild = performance.now() - t;
+      }
+    } else {
+      await nextFrame();
+      const t = performance.now();
+      built = buildCity(data, report);
+      this.mainThreadSlices.inlineBuild = performance.now() - t;
+    }
+    this.city.add(built.group);
+    const buildingsMesh = built.group.getObjectByName('buildings') as THREE.Mesh | undefined;
+    this.buildingUniforms = (buildingsMesh?.material as THREE.Material | undefined)?.userData.uniforms ?? null;
+    this.lampBulbs = (built.group.getObjectByName('lampBulbs') as THREE.InstancedMesh | undefined) ?? null;
 
-    onProgress('build', 0.25, 'Nhà cửa');
+    onProgress('build', 0.92, 'Giao thông');
     await nextFrame();
-    const b = buildBuildings(data.buildings, proj);
-    this.city.add(b.mesh);
-    this.buildingUniforms = b.material.userData.uniforms;
-
-    onProgress('build', 0.6, 'Cây, sông, đèn đường');
-    await nextFrame();
-    this.landscape = buildLandscape(data, proj, roads.paths, b.footprints, roads.lampSpots);
-    this.city.add(this.landscape.group);
-
-    onProgress('build', 0.85, 'Giao thông');
-    await nextFrame();
-    this.traffic = new Traffic(roads.paths, roads.railPaths);
+    const tTraffic = performance.now();
+    this.traffic = new Traffic(built.paths, built.railPaths);
+    this.mainThreadSlices.traffic = performance.now() - tTraffic;
     this.scene.add(this.traffic.group);
 
     for (const p of data.pois) {
@@ -137,6 +164,13 @@ export class CityScene {
     }
 
     const ext = Math.max(this.size.width, this.size.depth);
+    const mapSize = ext > 1200 ? 2048 : 4096;
+    if (this.sun.shadow.mapSize.x !== mapSize) {
+      this.sun.shadow.mapSize.set(mapSize, mapSize);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+    this.renderer.shadowMap.needsUpdate = true;
     const cam = this.sun.shadow.camera;
     cam.left = cam.bottom = -ext * 0.65;
     cam.right = cam.top = ext * 0.65;
@@ -153,8 +187,8 @@ export class CityScene {
 
     onProgress('build', 1, 'Xong');
     return {
-      buildings: b.count,
-      trees: this.landscape.treeCount,
+      buildings: built.buildings,
+      trees: built.trees,
       vehicles: this.traffic.stats.vehicles,
       seconds: (performance.now() - t0) / 1000,
       areaKm2: (this.size.width * this.size.depth) / 1e6,
@@ -202,6 +236,7 @@ export class CityScene {
     this.hemi.intensity = L.hemiIntensity;
     this.hemi.color.copy(L.hemiSky);
     this.hemi.groundColor.copy(L.hemiGround);
+    this.renderer.shadowMap.needsUpdate = true;
     this.lastSky.copy(L.sky);
     this.applySky();
     this.bloom.strength = 0.06 + s.night * 0.4;
@@ -212,7 +247,7 @@ export class CityScene {
       if (!Array.isArray(m) && m?.userData?.streetGlow) m.emissive.setRGB(0.32, 0.17, 0.06).multiplyScalar(s.night * m.userData.streetGlow);
     });
     if (this.buildingUniforms) this.buildingUniforms.uNight.value = s.night;
-    if (this.landscape?.lampBulbs) this.landscape.lampBulbs.visible = s.night > 0.35;
+    if (this.lampBulbs) this.lampBulbs.visible = s.night > 0.35;
     this.traffic?.setHour(localHour);
     this.traffic?.setNight(s.night);
   }
@@ -352,10 +387,42 @@ export class CityScene {
       }
       p.needsUpdate = true;
     }
+    if (this.paused) return;
     this.composer.render();
+    this.adaptPixelRatio();
     this.updateLabels();
     this.onFrame?.();
   };
+
+  /** Lower the pixel ratio step by step while FPS stays under 40 (#8). */
+  private adaptPixelRatio() {
+    const w = this.fpsWindow;
+    w.frames++;
+    const now = performance.now();
+    if (now - w.start < 2000) return;
+    this.fps = (w.frames * 1000) / (now - w.start);
+    w.start = now;
+    w.frames = 0;
+    if (this.pixelMode || !this.data) return;
+    if (this.fps < 40 && this.pixelRatio > 1) {
+      this.pixelRatio = Math.max(1, this.pixelRatio - 0.25);
+      this.resize();
+    } else if (this.fps > 58 && this.pixelRatio < this.maxPixelRatio) {
+      this.pixelRatio = Math.min(this.maxPixelRatio, this.pixelRatio + 0.25);
+      this.resize();
+    }
+  }
+
+  /** Draw calls / triangles of one scene render, without post-processing passes (benchmark). */
+  measureRender() {
+    const info = this.renderer.info;
+    info.autoReset = false;
+    info.reset();
+    this.renderer.render(this.scene, this.camera);
+    const r = { calls: info.render.calls, triangles: info.render.triangles };
+    info.autoReset = true;
+    return r;
+  }
 
   private updateLabels() {
     if (!this.labels.length) return;

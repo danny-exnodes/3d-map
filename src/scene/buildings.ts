@@ -146,6 +146,7 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   const uniforms = { uNight: { value: 0 } };
   mat.userData.uniforms = uniforms;
+  mat.userData.isBuildingMaterial = true;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
     shader.vertexShader = shader.vertexShader

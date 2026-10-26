@@ -9,14 +9,20 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench": "node bench/run.cjs",
+    "heights": "node tools/gob-heights.mjs"
   },
   "dependencies": {
+    "@mapbox/vector-tile": "^3.0.0",
     "maplibre-gl": "^6.16.0",
+    "pbf": "^5.1.2",
+    "pmtiles": "^4.5.0",
     "three": "^0.186.1"
   },
   "devDependencies": {
     "@types/three": "^0.186.0",
+    "geotiff": "^3.0.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
