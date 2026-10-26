@@ -1,6 +1,6 @@
 {
   "name": "tiny-map",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Vẽ một khu trên bản đồ, dựng thành mô hình thành phố 3D low-poly từ dữ liệu OpenStreetMap.",
   "license": "MIT",
   "type": "module",
