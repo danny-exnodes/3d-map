@@ -161,13 +161,15 @@ const V = (p: XZ, y: number) => new THREE.Vector3(p[0], y, p[1]);
  */
 export function createBuildingMaterial(): THREE.MeshLambertMaterial {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  const uniforms = { uNight: { value: 0 }, uSourceView: { value: 0 }, uSelected: { value: -1 } };
+  // uLit: share of windows lit at the current hour (#25).
+  const uniforms = { uNight: { value: 0 }, uSourceView: { value: 0 }, uSelected: { value: -1 }, uLit: { value: 0.35 } };
   mat.userData.uniforms = uniforms;
   mat.userData.isBuildingMaterial = true;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
     shader.uniforms.uSourceView = uniforms.uSourceView;
     shader.uniforms.uSelected = uniforms.uSelected;
+    shader.uniforms.uLit = uniforms.uLit;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -194,12 +196,13 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
         `#include <common>
         uniform float uNight;
         uniform float uSourceView;
+        uniform float uLit;
         varying float vSelected;
         varying vec3 vWPos;
         varying vec3 vWNormal;
         varying float vSeed;
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-        float winMask; float winLit; vec3 winColor;`,
+        float winMask; float winLit; vec3 winColor; float winBright;`,
       )
       .replace(
         '#include <color_fragment>',
@@ -214,7 +217,7 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
           diffuseColor.rgb = src < 0.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[0])}) : src < 1.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[1])})
             : src < 2.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[2])}) : vec3(${hexToVec(HEIGHT_SOURCE_COLORS[3])});
         }
-        winMask = 0.0; winLit = 0.0; winColor = vec3(0.0);
+        winMask = 0.0; winLit = 0.0; winColor = vec3(0.0); winBright = 0.0;
         if (abs(vWNormal.y) < 0.3 && vWPos.y > 0.6) {
           vec2 t = normalize(vec2(-vWNormal.z, vWNormal.x));
           float u = dot(vWPos.xz, t);
@@ -231,13 +234,14 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
           winMask = mx * my;
           float r = h21(cell + fract(vSeed) * 97.0);
           float floorDark = step(0.82, h21(vec2(cell.y, fract(vSeed) * 31.0)));
-          winLit = step(r, 0.42) * (1.0 - floorDark);
-          winColor = mix(vec3(1.0, 0.78, 0.45), vec3(0.95, 0.95, 1.0), step(0.75, h21(cell.yx + fract(vSeed))));
+          winLit = step(r, uLit) * (1.0 - floorDark);
+          winBright = 0.3 + 0.7 * h21(cell * 1.7 + 3.1);
+          winColor = mix(vec3(1.0, 0.72, 0.42), vec3(0.9, 0.93, 1.0), step(0.8, h21(cell.yx + fract(vSeed))));
           vec3 glass = mix(vec3(0.42, 0.52, 0.62), vec3(0.08, 0.1, 0.16), uNight);
           if (glassWall) {
             // Curtain wall: bluish, a little brighter towards the top (sky reflection).
             glass = mix(vec3(0.30, 0.45, 0.62) + 0.12 * clamp(vWPos.y / 120.0, 0.0, 1.0), vec3(0.06, 0.08, 0.14), uNight);
-            winLit = step(r, 0.55) * (1.0 - floorDark);
+            winLit = step(r, uLit * 1.25) * (1.0 - floorDark);
           }
           diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 0.75));
         }
@@ -248,7 +252,7 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-        totalEmissiveRadiance += winColor * winMask * winLit * uNight * 1.6;
+        totalEmissiveRadiance += winColor * winMask * winLit * winBright * uNight * 0.75;
         // Selected building (#10): warm accent tint + glow.
         totalEmissiveRadiance += vec3(0.55, 0.14, 0.0) * vSelected;`,
       );

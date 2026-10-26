@@ -14,6 +14,7 @@ import { bakeMono, type ColorMode, colorModeUniforms, monoSky, patchObject } fro
 import type { RailPath, RoadPath } from './roads';
 import { Realism, realUniforms } from './realistic';
 import { deserializeObjects } from './serialize';
+import { createLampPools, litShare } from './nightLights';
 import { lighting, sunState, type SunState } from './sun';
 import { Traffic } from './traffic';
 
@@ -51,7 +52,8 @@ export class CityScene {
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
   private details: THREE.Object3D[] = [];
-  private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number } } | null = null;
+  private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number }; uLit: { value: number } } | null = null;
+  private lampPools: THREE.InstancedMesh | null = null;
   private buildingsMesh: THREE.Mesh | null = null;
   private buildingIds: string[] = [];
   private buildingById = new Map<string, Building>();
@@ -193,6 +195,8 @@ export class CityScene {
     this.buildingById = new Map(data.buildings.map((b) => [b.id, b]));
     if (this.buildingUniforms) this.buildingUniforms.uSourceView.value = this.sourceView ? 1 : 0;
     this.lampBulbs = (built.group.getObjectByName('lampBulbs') as THREE.InstancedMesh | undefined) ?? null;
+    this.lampPools = this.lampBulbs ? createLampPools(this.lampBulbs) : null;
+    if (this.lampPools) built.group.add(this.lampPools);
     this.details = [];
     built.group.traverse((o) => o.name.startsWith('detail-') && this.details.push(o));
 
@@ -304,6 +308,11 @@ export class CityScene {
     this.applyStreetGlow();
     if (this.buildingUniforms) this.buildingUniforms.uNight.value = s.night;
     if (this.lampBulbs) this.lampBulbs.visible = s.night > 0.35;
+    if (this.lampPools) {
+      this.lampPools.visible = s.night > 0.3;
+      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * (this.colorMode === 'real' ? 0.9 : 0.6);
+    }
+    if (this.buildingUniforms) this.buildingUniforms.uLit.value = litShare(localHour);
     this.traffic?.setHour(localHour);
     this.traffic?.setNight(s.night);
   }
@@ -344,7 +353,8 @@ export class CityScene {
 
   /** Warm sodium glow on streets after dark (dimmer in the realistic view, which has less ambient light). */
   private applyStreetGlow() {
-    const k = this.night * (this.colorMode === 'real' ? 0.3 : 1);
+    // Lamp pools carry most of the street light now; keep only a faint overall tint.
+    const k = this.night * (this.colorMode === 'real' ? 0.1 : 0.35);
     this.city.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
       if (!Array.isArray(m) && m?.userData?.streetGlow) m.emissive.setRGB(0.32, 0.17, 0.06).multiplyScalar(k * m.userData.streetGlow);

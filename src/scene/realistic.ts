@@ -279,7 +279,7 @@ function waterMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
  * stylised material so the rest of the app drives both the same way.
  */
 function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
-  const uniforms = orig.userData.uniforms as { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number } };
+  const uniforms = orig.userData.uniforms as { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number }; uLit: { value: number } };
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
   mat.userData.uniforms = uniforms;
   mat.userData.isBuildingMaterial = true;
@@ -287,6 +287,7 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
     shader.uniforms.uNight = uniforms.uNight;
     shader.uniforms.uSourceView = uniforms.uSourceView;
     shader.uniforms.uSelected = uniforms.uSelected;
+    shader.uniforms.uLit = uniforms.uLit;
     Object.assign(shader.uniforms, realUniforms);
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -313,9 +314,10 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
         ${NOISE}
         uniform float uNight;
         uniform float uSourceView;
+        uniform float uLit;
         varying float vSelected;
         varying float vSeed;
-        float winMask; float winLit; vec3 winColor;
+        float winMask; float winLit; vec3 winColor; float winBright;
         float box(vec2 f, vec2 a, vec2 b, float aa) {
           vec2 s = smoothstep(a - aa, a + aa, f) * (1.0 - smoothstep(b - aa, b + aa, f));
           return s.x * s.y;
@@ -329,7 +331,7 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
         float matCode = floor(code / 4.0 + 0.001);
         float rnd = fract(vSeed);
         rRough = 0.9; rMetal = 0.0; rH = 0.0;
-        winMask = 0.0; winLit = 0.0; winColor = vec3(0.0);
+        winMask = 0.0; winLit = 0.0; winColor = vec3(0.0); winBright = 0.3 + 0.7 * rHash(vWPos.xz * 0.37 + floor(vWPos.y / 3.3));
         vec3 base = diffuseColor.rgb;
         if (uSourceView > 0.5) {
           base = src < 0.5 ? vec3(0.016, 0.61, 0.21) : src < 1.5 ? vec3(0.046, 0.25, 0.92) : src < 2.5 ? vec3(0.91, 0.37, 0.004) : vec3(0.33, 0.35, 0.40);
@@ -380,7 +382,7 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
             rMetal = mix(0.6, 0.0, isGlass); rRough = mix(0.35, 0.1, isGlass);
             rH += mull * 0.04;
             winMask = isGlass;
-            winLit = step(r, 0.55) * (1.0 - step(0.82, rHash(vec2(cell.y, rnd * 31.0))));
+            winLit = step(r, uLit * 1.25) * (1.0 - step(0.82, rHash(vec2(cell.y, rnd * 31.0))));
             winColor = mix(vec3(1.0, 0.85, 0.6), vec3(0.9, 0.95, 1.0), step(0.5, rHash(cell.yx)));
           } else if (ground) {
             // Ground floor: open shop fronts and rolling shutters (cửa cuốn).
@@ -396,7 +398,8 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
               base = mix(base, inside, m);
               rRough = mix(rRough, 0.1, m);
               base = mix(base, mix(rGlass(inside), inside, uNight), m * 0.6);
-              winMask = m; winLit = step(0.2, r); winColor = vec3(1.0, 0.82, 0.55);
+              // Shops stay lit in the evening, most close late at night.
+              winMask = m; winLit = step(r, 0.2 + uLit * 1.6); winColor = vec3(1.0, 0.8, 0.55);
             }
             // Sign board above the opening.
             float sign = box(f, vec2(0.05, 0.84), vec2(0.95, 0.97), aa) * step(0.35, rHash(cell + 3.1));
@@ -424,8 +427,8 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
             rRough = mix(rRough, 0.12, win);
             rH += (frame - win) * 0.015 + sill * 0.02;
             winMask = win;
-            winLit = step(r, 0.42) * (1.0 - step(0.82, rHash(vec2(cell.y, rnd * 31.0))));
-            winColor = mix(vec3(1.0, 0.78, 0.45), vec3(0.95, 0.95, 1.0), step(0.75, rHash(cell.yx + rnd)));
+            winLit = step(r, uLit) * (1.0 - step(0.82, rHash(vec2(cell.y, rnd * 31.0))));
+            winColor = mix(vec3(1.0, 0.72, 0.42), vec3(0.9, 0.93, 1.0), step(0.8, rHash(cell.yx + rnd)));
             // Air-conditioner boxes beside some windows.
             float ac = box(f, vec2(0.84, 0.32), vec2(0.97, 0.5), aa) * step(0.7, rHash(cell + 11.0));
             base = mix(base, vec3(0.82, 0.82, 0.8), ac);
@@ -478,7 +481,7 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-        totalEmissiveRadiance += winColor * winMask * winLit * uNight * 1.6;
+        totalEmissiveRadiance += winColor * winMask * winLit * winBright * uNight * 0.75;
         totalEmissiveRadiance += vec3(0.55, 0.14, 0.0) * vSelected;`,
       );
     addFade(shader);
@@ -604,7 +607,7 @@ export class Realism {
     for (const root of roots) {
       root.traverse((o) => {
         const mesh = o as THREE.Mesh;
-        if (!mesh.isMesh || mesh.userData.real || o === this.sky) return;
+        if (!mesh.isMesh || mesh.userData.real || o === this.sky || (mesh.material as THREE.ShaderMaterial).isShaderMaterial) return;
         const replaced = this.replacementFor(mesh);
         if (!replaced) return;
         this.saved.push({ mesh, material: mesh.material, geometry: replaced.geometry ? mesh.geometry : undefined });

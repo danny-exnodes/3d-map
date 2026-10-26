@@ -143,6 +143,15 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
       });
     }
 
+    if (road.cls === 'residential' && !isElevated) {
+      // Alleys and small streets: one lamp every ~30 m, alternating sides (#25).
+      let k = 0;
+      sampleAlong(pts, 30, (x, z, dx, dz) => {
+        const side = k++ % 2 ? 1 : -1;
+        const off = side * (road.width / 2 + 0.4);
+        lampSpots.push([x - dz * off, 0, z + dx * off, dx * side, dz * side]);
+      });
+    }
     if (['motorway', 'primary', 'secondary', 'tertiary'].includes(road.cls)) {
       sampleAlong(pts, 32, (x, z, dx, dz, i, d) => {
         const y = isElevated ? interp(dist, heights, i, d) : 0;
