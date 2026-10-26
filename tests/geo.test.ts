@@ -78,3 +78,17 @@ describe('mono colour mode', () => {
     expect(monoColor(new THREE.Color('#ff0000'), 0).getHexString()).toBe('ff0000');
   });
 });
+
+describe('clipping to the area', () => {
+  it('cuts polylines and polygons at the bbox', async () => {
+    const { clipPolyline, clipPolygon } = await import('../src/data/clip');
+    const b = { south: 0, west: 0, north: 1, east: 1 };
+    expect(clipPolyline([[-1, 0.5], [2, 0.5]], b)).toEqual([[[0, 0.5], [1, 0.5]]]);
+    // Leaves and re-enters: two pieces.
+    expect(clipPolyline([[0.2, 0.2], [0.2, 2], [0.8, 2], [0.8, 0.2]], b)).toHaveLength(2);
+    expect(clipPolyline([[2, 2], [3, 3]], b)).toEqual([]);
+    const sq = clipPolygon([[[-1, -1], [0.5, -1], [0.5, 0.5], [-1, 0.5]]], b)!;
+    expect(sq[0]).toHaveLength(4);
+    expect(clipPolygon([[[2, 2], [3, 2], [3, 3]]], b)).toBeNull();
+  });
+});

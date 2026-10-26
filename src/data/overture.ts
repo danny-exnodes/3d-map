@@ -6,8 +6,25 @@ import type { BBox, LngLat, Polygon } from './types';
 
 /** Overture Maps buildings as PMTiles (release listed in https://stac.overturemaps.org/catalog.json). */
 export const OVERTURE_RELEASE = '2026-10-21.0';
-export const OVERTURE_BUILDINGS_URL = `https://tiles.overturemaps.org/${OVERTURE_RELEASE}/buildings.pmtiles`;
+export const overtureUrl = (theme: 'buildings' | 'transportation' | 'base') => `https://tiles.overturemaps.org/${OVERTURE_RELEASE}/${theme}.pmtiles`;
+export const OVERTURE_BUILDINGS_URL = overtureUrl('buildings');
 const ZOOM = 14;
+
+const archives = new Map<string, PMTiles>();
+
+/** One PMTiles tile (raw MVT bytes), via the IndexedDB cache (30 days). Empty buffer when absent. */
+export async function fetchTileBytes(url: string, z: number, x: number, y: number, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const key = `${url}/${z}/${x}/${y}`;
+  const hit = await cacheGet<ArrayBuffer>('overture', key);
+  if (hit) return hit;
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  let pm = archives.get(url);
+  if (!pm) archives.set(url, (pm = new PMTiles(url)));
+  const t = await pm.getZxy(z, x, y, signal);
+  const bytes = t?.data ?? new ArrayBuffer(0);
+  void cacheSet('overture', key, bytes, 30 * 24 * 3600 * 1000, bytes.byteLength);
+  return bytes;
+}
 
 export interface OvertureBuilding {
   id: string;
@@ -104,7 +121,6 @@ export async function loadOvertureBuildings(
   const { x0, x1, y0, y1 } = tileRange(bbox);
   const total = (x1 - x0 + 1) * (y1 - y0 + 1);
   if (total > 9) throw new Error('Vùng quá lớn cho Overture');
-  let pm: PMTiles | null = null;
   const byId = new Map<string, OvertureBuilding>();
   const parts = new Map<string, OvertureBuilding>();
   let done = 0;
@@ -121,15 +137,7 @@ export async function loadOvertureBuildings(
   };
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
-      const key = `${OVERTURE_RELEASE}/${ZOOM}/${x}/${y}`;
-      let bytes = await cacheGet<ArrayBuffer>('overture', key);
-      if (!bytes) {
-        if (opts.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-        pm ??= new PMTiles(url);
-        const t = await pm.getZxy(ZOOM, x, y, opts.signal);
-        bytes = t?.data ?? new ArrayBuffer(0);
-        void cacheSet('overture', key, bytes, 30 * 24 * 3600 * 1000, bytes.byteLength);
-      }
+      const bytes = await fetchTileBytes(url, ZOOM, x, y, opts.signal);
       if (bytes.byteLength) {
         const d = decodeTile(new Uint8Array(bytes), x, y, ZOOM);
         for (const b of d.buildings) if (inBox(b.polygon)) keep(byId, b);

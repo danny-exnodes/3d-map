@@ -19,8 +19,15 @@ export class MapView {
   bbox: BBox | null = null;
   onChange?: (b: BBox | null) => void;
 
-  constructor(container: HTMLElement, center: [number, number] = [DEFAULT_LOCATION.lon, DEFAULT_LOCATION.lat], zoom = 15) {
-    this.map = new MapLibreMap({ container, style: STYLE, center, zoom, attributionControl: { compact: true } });
+  constructor(
+    container: HTMLElement,
+    center: [number, number] = [DEFAULT_LOCATION.lon, DEFAULT_LOCATION.lat],
+    zoom = 15,
+    basemap: 'carto' | 'offline' = 'carto',
+  ) {
+    // The offline style needs no network (preview build): a plain background, no tiles.
+    const style = basemap === 'offline' ? { version: 8 as const, sources: {}, layers: [{ id: 'bg', type: 'background' as const, paint: { 'background-color': '#0d0f17' } }] } : STYLE;
+    this.map = new MapLibreMap({ container, style, center, zoom, attributionControl: { compact: true } });
     this.map.addControl(new NavigationControl({ showCompass: true }), 'bottom-right');
     this.map.addControl(new ScaleControl({ unit: 'metric' }), 'bottom-left');
     this.map.on('load', () => {

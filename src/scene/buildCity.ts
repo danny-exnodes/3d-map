@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { clipCityToBBox } from '../data/clip';
 import type { CityData } from '../data/types';
 import { LocalProjection } from '../geo/projection';
 import { buildBuildings } from './buildings';
@@ -16,7 +17,8 @@ export interface BuiltCity {
 }
 
 /** Pure geometry generation: CityData → meshes. Runs in the build worker (or inline as a fallback). */
-export function buildCity(data: CityData, onProgress: (f: number, detail: string) => void = () => {}): BuiltCity {
+export function buildCity(input: CityData, onProgress: (f: number, detail: string) => void = () => {}): BuiltCity {
+  const data = clipCityToBBox(input);
   const proj = new LocalProjection(data.bbox);
   const group = new THREE.Group();
   onProgress(0.05, 'Đường & cầu');

@@ -18,8 +18,15 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const fmt = (n: number, d = 0) => n.toLocaleString('vi-VN', { maximumFractionDigits: d, minimumFractionDigits: d });
 const MAX_KM2 = 4;
 const EXAMPLE = EXAMPLE_BBOX;
+const PREVIEW = import.meta.env.VITE_PREVIEW === '1';
+interface SnapshotEntry {
+  id: string;
+  name: string;
+  bbox: BBox;
+  created: string;
+}
 
-const mapView = new MapView($('map'));
+const mapView = new MapView($('map'), undefined, undefined, PREVIEW ? 'offline' : 'carto');
 let city: CityScene | null = null;
 let busy = false;
 
@@ -185,8 +192,8 @@ async function loadData(b: BBox, signal: AbortSignal): Promise<CityData> {
   return loadCity(b, { ...opts, signal }, (p) => onProgress(p.f, p.detail, p.step));
 }
 
-async function build(source: 'osm' | 'demo') {
-  const b = mapView.bbox ?? (source === 'demo' ? mapView.bboxAroundCenter() : null);
+async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEntry) {
+  const b = snapshot?.bbox ?? mapView.bbox ?? (source === 'demo' ? mapView.bboxAroundCenter() : null);
   if (!b || busy) return;
   busy = true;
   $<HTMLButtonElement>('btn-build').disabled = true;
@@ -200,6 +207,10 @@ async function build(source: 'osm' | 'demo') {
       progress('heights', 1, 'bỏ qua');
       data = cityWorker.available ? await cityWorker.demo(b).catch(() => generateDemoCity(b)) : generateDemoCity(b);
       progress('merge', 1, `${fmt(data.buildings.length)} nhà`);
+    } else if (source === 'snapshot' && snapshot) {
+      const res = await fetch(`${import.meta.env.BASE_URL}snapshots/${snapshot.id}.json`);
+      if (!res.ok) throw new Error(`snapshot ${snapshot.id}: HTTP ${res.status}`);
+      data = (await res.json()) as CityData;
     } else {
       loadAbort = new AbortController();
       data = await loadData(b, loadAbort.signal);
@@ -214,13 +225,17 @@ async function build(source: 'osm' | 'demo') {
     bench?.(stats.seconds, data);
     applyTime();
     const km2 = bboxAreaKm2(b);
-    $('i-title').textContent = source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
+    $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
     $('i-stats').textContent = `${fmt(km2, 2)} km² · dựng xong trong ${fmt(stats.seconds, 1)} s · ${fmt(stats.buildings)} nhà · ${fmt(stats.trees)} cây · ${data.source}`;
     renderSourceStats(data);
     $('progress').hidden = true;
-    loadWeather(b);
+    if (PREVIEW) {
+      document.querySelector('.w-icon')!.textContent = '🌡️';
+      $('w-label').textContent = 'Không có thời tiết trong bản xem thử';
+      $('w-time').textContent = snapshot ? `Dữ liệu chụp ngày ${snapshot.created}` : '';
+    } else loadWeather(b);
   } catch (e) {
-    showMap();
+    if (!PREVIEW) showMap();
     if ((e as Error).name === 'AbortError') {
       $('progress').hidden = true;
       return;
@@ -558,7 +573,37 @@ function bboxFromHash(): BBox | null {
   return [south, west, north, east].every(Number.isFinite) ? { south, west, north, east } : null;
 }
 
+/**
+ * Preview build (VITE_PREVIEW=1, used for the hosted Artifact): the page may not reach any
+ * external service, so it opens straight into bundled data snapshots (tools/snapshot.ts).
+ */
+async function bootPreview() {
+  document.body.classList.add('preview');
+  showCity();
+  const select = $<HTMLSelectElement>('preview-area');
+  let list: SnapshotEntry[] = [];
+  try {
+    list = (await (await fetch(`${import.meta.env.BASE_URL}snapshots/index.json`)).json()) as SnapshotEntry[];
+  } catch {
+    /* no snapshots bundled: demo only */
+  }
+  // Default location first (issue #2), then the others, then the procedural demo.
+  list.sort((a, b) => (a.id === 'ennam' ? -1 : b.id === 'ennam' ? 1 : 0));
+  for (const e of list) select.add(new Option(e.name, e.id));
+  select.add(new Option('Thành phố mẫu (sinh ngẫu nhiên)', '__demo'));
+  select.hidden = false;
+  const open = (id: string) => {
+    closeBuildingInfo();
+    const e = list.find((x) => x.id === id);
+    if (e) build('snapshot', e);
+    else build('demo', undefined);
+  };
+  select.addEventListener('change', () => open(select.value));
+  open(select.value);
+}
+
 async function boot() {
+  if (PREVIEW) return bootPreview();
   const fromUrl = bboxFromHash();
   if (fromUrl) {
     mapView.setBBox(fromUrl);

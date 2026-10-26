@@ -2,6 +2,7 @@ import { cacheGet, cacheSet } from './cache';
 import { applyHeightGrid, computeStats, mergeOverture } from './enrich';
 import { loadHeightGrid } from './heights';
 import { loadOvertureBuildings } from './overture';
+import { loadOvertureContext } from './overtureBase';
 import { fetchOverpassText, parseOverpass, slimOverpass, type OverpassResponse } from './osm';
 import type { BBox, CityData } from './types';
 
@@ -71,7 +72,17 @@ export async function loadCity(bbox: BBox, opts: CityLoadOptions, onProgress: (p
     onProgress({ step: 'heights', f: 1, detail: g ? 'Google 2.5D' : 'không có — ước lượng' });
     return g;
   });
-  const [data, overture, grid] = await Promise.all([loadOsm(bbox, signal, (p) => onProgress(p)), overtureP, gridP]);
+  // Overpass is a shared public service and often rate limited: fall back to Overture's
+  // street network (itself derived from OSM) so the model still has roads and water.
+  const osmP = loadOsm(bbox, signal, (p) => onProgress(p)).catch(async (e) => {
+    if (signal?.aborted || opts.overture === false) throw e;
+    onProgress({ step: 'osm', f: 0.5, detail: 'Overpass lỗi — dùng Overture' });
+    const ctx = await loadOvertureContext(bbox, signal);
+    onProgress({ step: 'osm', f: 1, detail: `Overture: ${ctx.roads.length.toLocaleString('vi-VN')} đoạn đường` });
+    const fallback: CityData = { bbox, buildings: [], pois: [], source: 'Overture', ...ctx };
+    return fallback;
+  });
+  const [data, overture, grid] = await Promise.all([osmP, overtureP, gridP]);
 
   onProgress({ step: 'merge', f: 0.4, detail: 'ghép footprint' });
   if (overture) {
@@ -83,7 +94,7 @@ export async function loadCity(bbox: BBox, opts: CityLoadOptions, onProgress: (p
     applyHeightGrid(data.buildings, grid);
   }
   data.stats = computeStats(data);
-  if (overture) data.source = 'OpenStreetMap + Overture';
+  if (overture && data.source !== 'Overture') data.source = 'OpenStreetMap + Overture';
   onProgress({ step: 'merge', f: 1, detail: `${data.buildings.length.toLocaleString('vi-VN')} nhà` });
   return data;
 }
