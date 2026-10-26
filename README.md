@@ -51,6 +51,31 @@
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
 
+**Mới trong v0.0.3**
+- **Giao diện:**
+  - desktop chia đôi Bản đồ | 3D, thanh chia kéo được (#23);
+  - điện thoại có thanh tab, nút to, thẻ thông tin thu gọn;
+  - vẽ vùng bằng Shift+kéo hoặc chạm; kéo góc để đổi kích thước, kéo tâm để di chuyển.
+- **🌍 Space view (#24):** bay lên vũ trụ, xoay trái đất, rồi rơi về đúng vị trí cũ.
+- **Hiệu năng (#22):**
+  - nhà phổ thông dùng chung 4 hình mẫu (instancing), chỉ công trình công cộng, tôn giáo và toà lớn dựng chính xác;
+  - bộ nhớ hình học khối nhà giảm khoảng 83%;
+  - kéo thanh thời gian không còn giật/chớp.
+- **Ban đêm (#25):** cửa sổ sáng theo giờ, có vũng sáng đèn đường (cả trong hẻm).
+- **Cầu và hầm (#25):** cầu vượt có thành cầu và xà trụ; hầm chui có dốc, tường chắn, cửa hầm.
+- **Giao thông (#26):**
+  - có xe máy (~76%), ô tô, buýt, xe tải, xe đạp và người đi bộ;
+  - mật độ theo cấp đường, giờ, và mức gần chợ/trường/bệnh viện; tốc độ theo tỉ lệ lưu lượng/năng lực;
+  - lớp 🚦 tô theo mô hình này.
+
+| Chia đôi màn hình | Space view | Điện thoại |
+| --- | --- | --- |
+| ![split](docs/split-view.jpg) | ![space](docs/space-view.jpg) | ![phone](docs/phone.jpg) |
+
+| Đèn đường | Xe máy, người đi bộ | Hầm chui Kim Liên |
+| --- | --- | --- |
+| ![night](docs/night-lamps.jpg) | ![traffic](docs/traffic-motos.jpg) | ![tunnel](docs/tunnel.jpg) |
+
 **Bản đồ offline theo phường** (#18)
 - Nút 📥 trên bản đồ mở danh sách phường/xã của **TP.HCM** (167 đơn vị, 113 phường) và **Hà Nội** (130 đơn vị, 51 phường), theo địa giới sau sắp xếp 2025. Tìm không dấu cũng được (vd: `chanh hung`).
 - Chọn phường để xem ranh giới, rồi bấm “Tải về máy”. Gói gồm:
@@ -103,6 +128,7 @@ Yêu cầu Node 22.18+ (CLI chiều cao chạy thẳng file `.ts`) và trình du
 | [Google Open Buildings 2.5D Temporal](https://sites.research.google/gr/open-buildings/temporal/) | chiều cao nhà | GeoTIFF công khai, **không có CORS** → tiền xử lý | CC BY 4.0 |
 | [OpenFreeMap](https://openfreemap.org/) | bản đồ nền, địa điểm | vector tiles (CORS) | ODbL (dữ liệu OSM) |
 | [Overture divisions](https://docs.overturemaps.org/guides/divisions/) | ranh giới phường/xã | `tools/wards.mjs` → `public/wards/` | ODbL |
+| [NASA GIBS](https://earthdata.nasa.gov/gibs) Blue Marble | ảnh trái đất (Space view) | WMTS (CORS) | public domain |
 | [Open‑Meteo](https://open-meteo.com/) | thời tiết | trình duyệt | CC BY 4.0 |
 
 ### Lưới chiều cao Google 2.5D
@@ -152,6 +178,10 @@ src/
   scene/details.ts        # ban công, tum thang, bồn nước (instanced, LOD)
   scene/colorMode.ts      # Có màu / Đơn sắc
   scene/realistic.ts      # Siêu thực: vật liệu PBR thủ tục, bầu trời, nước, cây
+  scene/prototypes.ts     # nhà mẫu dùng chung (instancing)
+  scene/trafficModel.ts   # mô hình lưu lượng, tỉ lệ phương tiện
+  scene/nightLights.ts    # tỉ lệ cửa sổ sáng, vũng đèn đường
+  ui/SpaceView.ts         # Space view (globe)
   scene/roads.ts …        # đường, cầu, ray; landscape.ts; traffic.ts; sun.ts
 tools/
   gob-heights.mjs         # CLI trích lưới chiều cao
@@ -165,6 +195,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.3](docs/releases/v0.0.3.md) (2026-10-27): hiệu năng (nhà mẫu), chia đôi màn hình, mobile, Space view, ánh sáng đêm, cầu/hầm, giao thông xe máy.
 - [v0.0.2](docs/releases/v0.0.2.md) (2026-10-26): mật độ nhà thật, bỏ phụ thuộc Overpass, chế độ Siêu thực, bản đồ offline theo phường.
 - [v0.0.1](docs/releases/v0.0.1.md) (2026-10-26): release note kiêm checkpoint (kiến trúc, quy trình, giới hạn, việc tiếp theo).
 

@@ -38,8 +38,6 @@ function parseList(v: unknown): Ranged[] {
   }
 }
 
-/** Share (0..1) of the segment covered by a range rule. */
-const coverage = (r: Ranged) => (r.between ? r.between[1] - r.between[0] : 1);
 
 function lines(f: VectorTileFeature, x: number, y: number, z: number): LngLat[][] {
   const g = f.toGeoJSON(x, y, z).geometry;
@@ -56,34 +54,69 @@ function polygons(f: VectorTileFeature, x: number, y: number, z: number): Polygo
   return [];
 }
 
-export function roadFromSegment(props: Record<string, unknown>, line: LngLat[], id: string): Road | null {
+const covers = (r: Ranged, at: number) => !r.between || (at >= r.between[0] && at <= r.between[1]);
+
+/**
+ * Road(s) for one Overture segment. Bridge, tunnel and level rules often apply to part of a
+ * segment only (`between` as length fractions), so the line is cut at those fractions and each
+ * piece gets the flags that hold at its middle (#25).
+ */
+export function roadsFromSegment(props: Record<string, unknown>, line: LngLat[], id: string): Road[] {
   const cls = ROAD_CLASS[String(props['class'] ?? 'unknown')];
-  if (!cls) return null;
+  if (!cls) return [];
   const sub = String(props['subclass'] ?? '');
-  if (sub === 'sidewalk' || sub === 'crosswalk') return null; // drawn as part of the carriageway
-  const flags = parseList(props['road_flags']);
+  if (sub === 'sidewalk' || sub === 'crosswalk') return []; // drawn as part of the carriageway
+  const flags = parseList(props['road_flags']).filter((r) => r.values?.includes('is_bridge') || r.values?.includes('is_tunnel'));
   const levels = parseList(props['level_rules']);
-  const bridge = flags.some((r) => r.values?.includes('is_bridge') && coverage(r) > 0.4);
-  const level = Math.max(0, ...levels.filter((r) => coverage(r) > 0.3).map((r) => r.value ?? 0));
-  const tunnel = levels.some((r) => (r.value ?? 0) < 0 && coverage(r) > 0.5);
+  const cuts = [...new Set([...flags, ...levels].flatMap((r) => r.between ?? []).filter((f) => f > 0.01 && f < 0.99))].sort((a, b) => a - b);
   const widthRule = parseList(props['width_rules']).find((r) => !r.between && typeof r.value === 'number');
   const lanes = DEFAULT_LANES[cls];
   const width = widthRule?.value ?? lanes * LANE_W[cls] + (cls === 'path' ? 0 : 1);
   const oneway = parseList(props['access_restrictions']).some(
     (r) => (r as { access_type?: string }).access_type === 'denied' && JSON.stringify(r).includes('"backward"'),
   );
-  return {
-    id,
-    line,
-    cls,
-    lanes,
-    width: Math.min(Math.max(width, 1.5), 40),
-    oneway: oneway || cls === 'motorway',
-    layer: level,
-    bridge: bridge || level > 0,
-    tunnel,
-    name: typeof props['@name'] === 'string' ? (props['@name'] as string) : undefined,
+  const bounds = [0, ...cuts, 1];
+  const pieces: Road[] = [];
+  for (let k = 0; k < bounds.length - 1; k++) {
+    const part = cuts.length ? sliceLine(line, bounds[k], bounds[k + 1]) : line;
+    if (part.length < 2) continue;
+    const at = (bounds[k] + bounds[k + 1]) / 2;
+    const here = levels.filter((r) => covers(r, at));
+    const level = Math.max(0, ...here.map((r) => r.value ?? 0));
+    const tunnel = here.some((r) => (r.value ?? 0) < 0) || flags.some((r) => r.values?.includes('is_tunnel') && covers(r, at));
+    const bridge = flags.some((r) => r.values?.includes('is_bridge') && covers(r, at)) || level > 0;
+    pieces.push({
+      id: cuts.length ? `${id}/${k}` : id,
+      line: part,
+      cls,
+      lanes,
+      width: Math.min(Math.max(width, 1.5), 40),
+      oneway: oneway || cls === 'motorway',
+      layer: level,
+      bridge,
+      tunnel,
+      name: typeof props['@name'] === 'string' ? (props['@name'] as string) : undefined,
+    });
+  }
+  return pieces;
+}
+
+/** Part of a polyline between two length fractions. */
+export function sliceLine(line: LngLat[], f0: number, f1: number): LngLat[] {
+  const d = [0];
+  for (let i = 1; i < line.length; i++) d.push(d[i - 1] + Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]));
+  const L = d[d.length - 1];
+  const at = (t: number): LngLat => {
+    const s = t * L;
+    let i = 1;
+    while (i < d.length - 1 && d[i] < s) i++;
+    const u = d[i] > d[i - 1] ? (s - d[i - 1]) / (d[i] - d[i - 1]) : 0;
+    return [line[i - 1][0] + (line[i][0] - line[i - 1][0]) * u, line[i - 1][1] + (line[i][1] - line[i - 1][1]) * u];
   };
+  const out: LngLat[] = [at(f0)];
+  for (let i = 1; i < line.length - 1; i++) if (d[i] > f0 * L && d[i] < f1 * L) out.push(line[i]);
+  out.push(at(f1));
+  return out;
 }
 
 const inBox = (b: BBox, p: LngLat, pad = 0.002) =>
@@ -119,8 +152,7 @@ export async function loadOvertureContext(bbox: BBox, signal?: AbortSignal): Pro
               tunnel: levels.some((r) => (r.value ?? 0) < 0),
             });
           } else if (p['subtype'] === 'road') {
-            const road = roadFromSegment(p, line, id);
-            if (road && !road.tunnel) out.roads.push(road);
+            out.roads.push(...roadsFromSegment(p, line, id));
           }
         });
       }

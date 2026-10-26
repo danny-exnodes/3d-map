@@ -29,7 +29,7 @@ export function buildCity(input: CityData, onProgress: (f: number, detail: strin
     onProgress: (f) => onProgress(0.3 + f * 0.35, 'Nhà cửa'),
     roadDistance: roadDistanceField(roads.paths),
   });
-  group.add(b.mesh, b.details);
+  group.add(b.mesh, ...b.instanced, b.details);
   onProgress(0.7, 'Cây, sông, đèn đường');
   const land = buildLandscape(data, proj, roads.paths, b.footprints, roads.lampSpots);
   group.add(land.group);

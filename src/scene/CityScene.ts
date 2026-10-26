@@ -14,6 +14,7 @@ import { bakeMono, type ColorMode, colorModeUniforms, monoSky, patchObject } fro
 import type { RailPath, RoadPath } from './roads';
 import { Realism, realUniforms } from './realistic';
 import { deserializeObjects } from './serialize';
+import { createLampPools, litShare } from './nightLights';
 import { lighting, sunState, type SunState } from './sun';
 import { Traffic } from './traffic';
 
@@ -24,6 +25,9 @@ export interface BuildStats {
   seconds: number;
   areaKm2: number;
 }
+
+/** Phones and small tablets get lighter defaults (#23). */
+export const MOBILE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
@@ -41,6 +45,8 @@ export class CityScene {
   private sunDir = new THREE.Vector3(0, 1, 0);
   private night = 0;
   private wet = 0;
+  private lightDirty = false;
+  private lastLightUpdate = 0;
   private light = lighting(sunState(new Date(), 10.8, 106.7), 0);
   private sun = new THREE.DirectionalLight('#ffffff', 2.5);
   private hemi = new THREE.HemisphereLight('#bcd8ff', '#d8c9a8', 1.2);
@@ -49,8 +55,10 @@ export class CityScene {
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
   private details: THREE.Object3D[] = [];
-  private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number } } | null = null;
+  private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number }; uLit: { value: number } } | null = null;
+  private lampPools: THREE.InstancedMesh | null = null;
   private buildingsMesh: THREE.Mesh | null = null;
+  private protoMeshes: THREE.InstancedMesh[] = [];
   private buildingIds: string[] = [];
   private buildingById = new Map<string, Building>();
   private raycaster = new THREE.Raycaster();
@@ -64,7 +72,8 @@ export class CityScene {
   private labels: { el: HTMLElement; pos: THREE.Vector3 }[] = [];
   private raf = 0;
   private pixelMode = false;
-  private maxPixelRatio = Math.min(window.devicePixelRatio, 2);
+  // Phones: lower resolution cap; their screens are dense enough (#23).
+  private maxPixelRatio = Math.min(window.devicePixelRatio, MOBILE ? 1.5 : 2);
   private pixelRatio = this.maxPixelRatio;
   private fpsWindow = { start: performance.now(), frames: 0 };
   /** Skip rendering (used by the benchmark to measure pure build cost). */
@@ -84,7 +93,7 @@ export class CityScene {
 
   constructor(private readonly container: HTMLElement, private readonly labelLayer: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.maxPixelRatio);
     this.renderer.shadowMap.enabled = true;
     // Shadows only change with the sun or the model, so render them on demand (#8).
     this.renderer.shadowMap.autoUpdate = false;
@@ -187,17 +196,22 @@ export class CityScene {
     const buildingsMesh = built.group.getObjectByName('buildings') as THREE.Mesh | undefined;
     this.buildingUniforms = (buildingsMesh?.material as THREE.Material | undefined)?.userData.uniforms ?? null;
     this.buildingsMesh = buildingsMesh ?? null;
+    this.protoMeshes = [];
+    built.group.traverse((o) => o.name.startsWith('buildings-') && this.protoMeshes.push(o as THREE.InstancedMesh));
     this.buildingIds = built.buildingIds;
     this.buildingById = new Map(data.buildings.map((b) => [b.id, b]));
     if (this.buildingUniforms) this.buildingUniforms.uSourceView.value = this.sourceView ? 1 : 0;
     this.lampBulbs = (built.group.getObjectByName('lampBulbs') as THREE.InstancedMesh | undefined) ?? null;
+    this.lampPools = this.lampBulbs ? createLampPools(this.lampBulbs) : null;
+    if (this.lampPools) built.group.add(this.lampPools);
     this.details = [];
     built.group.traverse((o) => o.name.startsWith('detail-') && this.details.push(o));
 
     onProgress('build', 0.92, 'Giao thông');
     await nextFrame();
     const tTraffic = performance.now();
-    this.traffic = new Traffic(built.paths, built.railPaths);
+    const attractors = data.pois.filter((p) => /market|school|college|university|hospital|place_of_worship|stadium/.test(p.kind)).map((p) => proj.project(p.pos));
+    this.traffic = new Traffic(built.paths, built.railPaths, attractors, MOBILE ? 1100 : 2400, MOBILE ? 300 : 700);
     this.mainThreadSlices.traffic = performance.now() - tTraffic;
     this.scene.add(this.traffic.group);
 
@@ -211,7 +225,7 @@ export class CityScene {
     }
 
     const ext = Math.max(this.size.width, this.size.depth);
-    const mapSize = ext > 1200 ? 2048 : 4096;
+    const mapSize = ext > 1200 || MOBILE ? 2048 : 4096;
     if (this.sun.shadow.mapSize.x !== mapSize) {
       this.sun.shadow.mapSize.set(mapSize, mapSize);
       this.sun.shadow.map?.dispose();
@@ -256,6 +270,7 @@ export class CityScene {
     dispose(this.city);
     this.city.clear();
     this.buildingsMesh = null;
+    this.protoMeshes = [];
     this.buildingIds = [];
     this.buildingById.clear();
     if (this.traffic) {
@@ -276,14 +291,15 @@ export class CityScene {
     const ext = Math.max(this.size.width, this.size.depth);
     this.sun.position.copy(s.direction).multiplyScalar(ext * 1.5);
     this.sun.target.position.set(0, 0, 0);
-    if (s.direction.y > 0.02) {
+    if (s.direction.y > 0) {
       this.sun.color.copy(L.sunColor);
       this.sun.intensity = L.sunIntensity;
     } else {
       // Moonlight: a dim, cool key light from a fixed high angle so night scenes keep their shape.
+      // It fades in from zero as the sun sinks, so the switch of light direction is invisible (#22).
       this.sun.position.set(-0.4, 0.8, -0.45).normalize().multiplyScalar(ext * 1.5);
       this.sun.color.set('#8fa2ff');
-      this.sun.intensity = 0.55 * s.night;
+      this.sun.intensity = (this.colorMode === 'real' ? 0.3 : 0.55) * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25);
     }
     this.hemiBase = L.hemiIntensity;
     this.hemi.intensity = this.colorMode === 'real' ? L.hemiIntensity * 0.15 : L.hemiIntensity;
@@ -291,15 +307,21 @@ export class CityScene {
     this.night = s.night;
     this.hemi.color.copy(L.hemiSky);
     this.hemi.groundColor.copy(L.hemiGround);
-    this.renderer.shadowMap.needsUpdate = true;
+    // Shadows and image-based lighting are expensive; they are refreshed from the render loop at a
+    // limited rate instead of on every slider event (#22).
+    this.lightDirty = true;
     this.lastSky.copy(L.sky);
     this.applySky();
-    if (this.colorMode === 'real') this.realism.update(this.scene, this.sunDir, this.night, this.cloud, this.light);
     this.bloom.strength = 0.06 + s.night * 0.4;
     this.bloom.threshold = s.night > 0.5 ? 0.8 : 0.95;
     this.applyStreetGlow();
     if (this.buildingUniforms) this.buildingUniforms.uNight.value = s.night;
     if (this.lampBulbs) this.lampBulbs.visible = s.night > 0.35;
+    if (this.lampPools) {
+      this.lampPools.visible = s.night > 0.3;
+      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * (this.colorMode === 'real' ? 0.75 : 0.45);
+    }
+    if (this.buildingUniforms) this.buildingUniforms.uLit.value = litShare(localHour);
     this.traffic?.setHour(localHour);
     this.traffic?.setNight(s.night);
   }
@@ -340,7 +362,8 @@ export class CityScene {
 
   /** Warm sodium glow on streets after dark (dimmer in the realistic view, which has less ambient light). */
   private applyStreetGlow() {
-    const k = this.night * (this.colorMode === 'real' ? 0.3 : 1);
+    // Lamp pools carry most of the street light now; keep only a faint overall tint.
+    const k = this.night * (this.colorMode === 'real' ? 0.1 : 0.35);
     this.city.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
       if (!Array.isArray(m) && m?.userData?.streetGlow) m.emissive.setRGB(0.32, 0.17, 0.06).multiplyScalar(k * m.userData.streetGlow);
@@ -353,14 +376,14 @@ export class CityScene {
 
   /** Raycasts the buildings mesh at a screen point and selects the building under it. */
   pick(clientX: number, clientY: number): Building | null {
-    const mesh = this.buildingsMesh;
-    if (!mesh) return null;
+    if (!this.buildingsMesh) return null;
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
-    const hit = this.raycaster.intersectObject(mesh, false)[0];
-    const bidAttr = mesh.geometry.getAttribute('aBid');
-    const bid = hit?.face && bidAttr ? Math.round(bidAttr.getX(hit.face.a)) : -1;
+    // Exact buildings carry the id per vertex, prototype instances per instance (#22).
+    const hit = this.raycaster.intersectObjects([this.buildingsMesh, ...this.protoMeshes], false)[0];
+    const bidAttr = (hit?.object as THREE.Mesh | undefined)?.geometry.getAttribute('aBid');
+    const bid = !hit || !bidAttr ? -1 : hit.instanceId !== undefined ? Math.round(bidAttr.getX(hit.instanceId)) : hit.face ? Math.round(bidAttr.getX(hit.face.a)) : -1;
     const b = bid >= 0 ? (this.buildingById.get(this.buildingIds[bid]) ?? null) : null;
     this.select(b ? bid : -1);
     this.onPick?.(b);
@@ -413,13 +436,42 @@ export class CityScene {
   }
 
   get trafficStats() {
-    return this.traffic?.stats ?? { vehicles: 0, segments: 0, flow: 1 };
+    return this.traffic?.stats ?? { vehicles: 0, segments: 0, flow: 1, people: 0, byKind: {} as Record<string, number> };
   }
 
   setPixelMode(on: boolean) {
     this.pixelMode = on;
     this.renderer.domElement.classList.toggle('pixelated', on);
     this.resize();
+  }
+
+  /** Current camera pose, to come back to it later (space view, #24). */
+  saveView() {
+    return { pos: this.camera.position.clone(), target: this.controls.target.clone() };
+  }
+
+  /** Smoothly moves the camera (ease in-out). */
+  animateCamera(pos: THREE.Vector3, target: THREE.Vector3, ms: number): Promise<void> {
+    const p0 = this.camera.position.clone(), t0 = this.controls.target.clone();
+    const start = performance.now();
+    return new Promise((done) => {
+      const step = () => {
+        const k = Math.min(1, (performance.now() - start) / ms);
+        const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+        this.camera.position.lerpVectors(p0, pos, e);
+        this.controls.target.lerpVectors(t0, target, e);
+        this.controls.update();
+        if (k < 1) requestAnimationFrame(step);
+        else done();
+      };
+      step();
+    });
+  }
+
+  /** Straight up above the model, for the take-off into space. */
+  get skyPose() {
+    const ext = Math.max(this.size.width, this.size.depth);
+    return { pos: new THREE.Vector3(this.controls.target.x, ext * 4, this.controls.target.z + 0.01), target: this.controls.target.clone() };
   }
 
   resetView() {
@@ -487,6 +539,13 @@ export class CityScene {
       this.applySky();
     }
     this.traffic?.update(dt);
+    const now = performance.now();
+    if (this.lightDirty && now - this.lastLightUpdate > 120) {
+      this.lightDirty = false;
+      this.lastLightUpdate = now;
+      this.renderer.shadowMap.needsUpdate = true;
+      if (this.colorMode === 'real') this.realism.update(this.scene, this.sunDir, this.night, this.cloud, this.light);
+    }
     realUniforms.uTime.value = this.timer.getElapsed();
     realUniforms.uWet.value += (this.wet - realUniforms.uWet.value) * Math.min(1, dt * 0.5);
     if (this.realism.sky.visible) this.realism.sky.position.copy(this.camera.position);

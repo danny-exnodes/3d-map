@@ -5,6 +5,7 @@ import type { LocalProjection } from '../geo/projection';
 import { LEVEL_H } from '../data/buildings';
 import { DetailCollector } from './details';
 import { MeshBuilder, type XZ } from './geometry';
+import { PrototypeCollector } from './prototypes';
 import { buildRoof, flatCap, minAreaRect } from './roofs';
 import { SpatialGrid } from './spatial';
 
@@ -13,7 +14,10 @@ export const HEIGHT_SOURCE_CODE: Record<Building['heightSource'], number> = { os
 export const HEIGHT_SOURCE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#9ca3af'];
 
 export interface BuildingsResult {
+  /** Exactly modelled buildings (landmarks, complex shapes, parts). */
   mesh: THREE.Mesh;
+  /** Ordinary houses drawn from shared prototypes (#22). */
+  instanced: THREE.InstancedMesh[];
   material: THREE.MeshLambertMaterial;
   footprints: SpatialGrid<XZ[]>;
   details: THREE.Group;
@@ -66,6 +70,35 @@ export interface BuildOptions {
   onProgress?: (f: number) => void;
   /** Distance (m) from a point to the nearest road, used to find a house's street front. */
   roadDistance?: (x: number, z: number) => number;
+  /** Model every building exactly (no prototypes), e.g. for comparison. */
+  exactOnly?: boolean;
+}
+
+export interface BuildingUniforms {
+  uNight: { value: number };
+  uSourceView: { value: number };
+  uSelected: { value: number };
+  uLit: { value: number };
+}
+
+/** Kinds that are public, civic or national landmarks and deserve exact geometry. */
+const LANDMARK_KINDS = new Set([
+  'government', 'public', 'civic', 'townhall', 'church', 'cathedral', 'chapel', 'temple', 'pagoda', 'shrine', 'mosque', 'religious',
+  'school', 'university', 'college', 'kindergarten', 'hospital', 'train_station', 'transportation', 'stadium', 'sports_hall', 'museum',
+  'theatre', 'palace', 'castle', 'monument', 'memorial', 'mausoleum', 'market', 'grandstand', 'library', 'fire_station', 'police',
+]);
+
+/** Public buildings, national landmarks and big buildings are modelled exactly from their data (#22). */
+export function isLandmark(b: Building, area: number): boolean {
+  if (LANDMARK_KINDS.has(b.kind) || b.archetype === 'civic' || b.archetype === 'temple' || b.archetype === 'church') return true;
+  if (b.height > 40 || area > 2500) return true;
+  return !!b.name && area > 600;
+}
+
+/** Simple enough to be a scaled box with a standard roof. */
+function isPrototypeCandidate(b: Building, rings: XZ[][], fill: number, short: number): boolean {
+  if (b.isPart || rings.length !== 1 || b.minHeight > 0.5 || fill < 0.88 || short < 2.5) return false;
+  return b.roof === 'flat' || b.roof === 'gabled' || b.roof === 'hipped';
 }
 
 export function buildBuildings(list: Building[], proj: LocalProjection, opts: BuildOptions = {}): BuildingsResult {
@@ -75,6 +108,7 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
   const facade = new THREE.Color();
   const roofCol = new THREE.Color();
   const ids: string[] = [];
+  const protos = new PrototypeCollector();
   let count = 0;
 
   list.forEach((b, idx) => {
@@ -101,8 +135,27 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
     const rect = minAreaRect(rings[0]);
     const fill = area / Math.max(rect.area, 1e-6);
 
+    // Ordinary boxy houses share prototypes; landmarks and complex shapes are modelled exactly (#22).
+    const proto = !opts.exactOnly && isPrototypeCandidate(b, rings, fill, rect.short) && !isLandmark(b, area);
+    if (proto) {
+      const pitchedRoof = b.roof === 'gabled' || b.roof === 'hipped';
+      const lowPitch = arch === 'industrial' || arch === 'tube' || arch === 'shophouse';
+      protos.add({
+        centre: rect.centre,
+        angle: Math.atan2(rect.axis[0], rect.axis[1]),
+        w: rect.short,
+        l: rect.long,
+        height: y1,
+        roof: pitchedRoof ? (b.roof as 'gabled' | 'hipped') : 'flat',
+        rise: b.roofHeight ?? Math.min(rect.short * (lowPitch ? 0.16 : 0.4), lowPitch ? 3 : 5),
+        facade: facade.clone(),
+        roofColor: roofCol.clone(),
+        seed,
+        bid,
+      });
+    }
     // Tall blocks get a wider podium and a set-back tower (khối đế), when the shape allows it.
-    const podium = !b.isPart && rings.length === 1 && y0 === 0 && y1 > 30 && area > 600 && fill > 0.75 && (arch === 'apartment' || arch === 'office');
+    const podium = !proto && !b.isPart && rings.length === 1 && y0 === 0 && y1 > 30 && area > 600 && fill > 0.75 && (arch === 'apartment' || arch === 'office');
     if (podium) {
       const ph = LEVEL_H * (3 + (h % 2));
       const tower = scaleRing(rings[0], rect.centre, 0.72);
@@ -112,7 +165,7 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
       mb.setColor(facade);
       walls(mb, [tower], ph, y1);
       buildRoof(mb, { shape: b.roof, rings: [tower], y: y1, roof: roofCol, facade, height: b.roofHeight });
-    } else {
+    } else if (!proto) {
       walls(mb, rings, y0, y1);
       buildRoof(mb, { shape: b.roof, rings, y: y1, roof: roofCol, facade, height: b.roofHeight, lowPitch: arch === 'industrial' || arch === 'tube' || arch === 'shophouse' });
     }
@@ -145,12 +198,14 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
 
   const geom = mb.empty ? new THREE.BufferGeometry() : mb.build(true, true);
   const material = createBuildingMaterial();
+  // Same uniforms (night, selection, source view) for both; flat shading for the scaled prototypes.
+  const instanced = protos.build(createBuildingMaterial(material.userData.uniforms, true));
   const mesh = new THREE.Mesh(geom, material);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.name = 'buildings';
   opts.onProgress?.(1);
-  return { mesh, material, footprints, details: details.build(), count, ids };
+  return { mesh, instanced, material, footprints, details: details.build(), count, ids };
 }
 
 const V = (p: XZ, y: number) => new THREE.Vector3(p[0], y, p[1]);
@@ -159,15 +214,17 @@ const V = (p: XZ, y: number) => new THREE.Vector3(p[0], y, p[1]);
  * Lambert material with procedural windows: glazing by day, randomly lit
  * windows at night. Window grid is derived from world position so it needs no UVs.
  */
-export function createBuildingMaterial(): THREE.MeshLambertMaterial {
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  const uniforms = { uNight: { value: 0 }, uSourceView: { value: 0 }, uSelected: { value: -1 } };
+export function createBuildingMaterial(shared?: BuildingUniforms, flat = false): THREE.MeshLambertMaterial {
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: flat });
+  // uLit: share of windows lit at the current hour (#25).
+  const uniforms: BuildingUniforms = shared ?? { uNight: { value: 0 }, uSourceView: { value: 0 }, uSelected: { value: -1 }, uLit: { value: 0.35 } };
   mat.userData.uniforms = uniforms;
   mat.userData.isBuildingMaterial = true;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
     shader.uniforms.uSourceView = uniforms.uSourceView;
     shader.uniforms.uSelected = uniforms.uSelected;
+    shader.uniforms.uLit = uniforms.uLit;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -183,8 +240,16 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
       .replace(
         '#include <project_vertex>',
         `#include <project_vertex>
-        vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-        vWNormal = normalize(mat3(modelMatrix) * objectNormal);
+        {
+          vec4 bp = vec4(transformed, 1.0);
+          vec3 bn = objectNormal;
+          #ifdef USE_INSTANCING
+            bp = instanceMatrix * bp;
+            bn = mat3(instanceMatrix) * bn;
+          #endif
+          vWPos = (modelMatrix * bp).xyz;
+          vWNormal = normalize(mat3(modelMatrix) * bn);
+        }
         vSeed = aSeed;
         vSelected = abs(aBid - uSelected) < 0.5 ? 1.0 : 0.0;`,
       );
@@ -194,16 +259,19 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
         `#include <common>
         uniform float uNight;
         uniform float uSourceView;
+        uniform float uLit;
         varying float vSelected;
         varying vec3 vWPos;
         varying vec3 vWNormal;
         varying float vSeed;
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-        float winMask; float winLit; vec3 winColor;`,
+        float winMask; float winLit; vec3 winColor; float winBright;`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        // Geometric normal from derivatives: exact for flat faces, also for scaled prototypes.
+        vec3 bN = normalize(cross(dFdx(vWPos), dFdy(vWPos)));
         float code = floor(vSeed + 0.001);
         float src = mod(code, 4.0);
         float matCode = floor(code / 4.0 + 0.001);
@@ -214,9 +282,9 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
           diffuseColor.rgb = src < 0.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[0])}) : src < 1.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[1])})
             : src < 2.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[2])}) : vec3(${hexToVec(HEIGHT_SOURCE_COLORS[3])});
         }
-        winMask = 0.0; winLit = 0.0; winColor = vec3(0.0);
-        if (abs(vWNormal.y) < 0.3 && vWPos.y > 0.6) {
-          vec2 t = normalize(vec2(-vWNormal.z, vWNormal.x));
+        winMask = 0.0; winLit = 0.0; winColor = vec3(0.0); winBright = 0.0;
+        if (abs(bN.y) < 0.3 && vWPos.y > 0.6) {
+          vec2 t = normalize(vec2(-bN.z, bN.x));
           float u = dot(vWPos.xz, t);
           float cellW = 3.2;
           float cellH = 3.3;
@@ -231,13 +299,14 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
           winMask = mx * my;
           float r = h21(cell + fract(vSeed) * 97.0);
           float floorDark = step(0.82, h21(vec2(cell.y, fract(vSeed) * 31.0)));
-          winLit = step(r, 0.42) * (1.0 - floorDark);
-          winColor = mix(vec3(1.0, 0.78, 0.45), vec3(0.95, 0.95, 1.0), step(0.75, h21(cell.yx + fract(vSeed))));
+          winLit = step(r, uLit) * (1.0 - floorDark);
+          winBright = 0.3 + 0.7 * h21(cell * 1.7 + 3.1);
+          winColor = mix(vec3(1.0, 0.72, 0.42), vec3(0.9, 0.93, 1.0), step(0.8, h21(cell.yx + fract(vSeed))));
           vec3 glass = mix(vec3(0.42, 0.52, 0.62), vec3(0.08, 0.1, 0.16), uNight);
           if (glassWall) {
             // Curtain wall: bluish, a little brighter towards the top (sky reflection).
             glass = mix(vec3(0.30, 0.45, 0.62) + 0.12 * clamp(vWPos.y / 120.0, 0.0, 1.0), vec3(0.06, 0.08, 0.14), uNight);
-            winLit = step(r, 0.55) * (1.0 - floorDark);
+            winLit = step(r, uLit * 1.25) * (1.0 - floorDark);
           }
           diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 0.75));
         }
@@ -248,7 +317,7 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-        totalEmissiveRadiance += winColor * winMask * winLit * uNight * 1.6;
+        totalEmissiveRadiance += winColor * winMask * winLit * winBright * uNight * 0.75;
         // Selected building (#10): warm accent tint + glow.
         totalEmissiveRadiance += vec3(0.55, 0.14, 0.0) * vSelected;`,
       );

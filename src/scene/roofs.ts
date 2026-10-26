@@ -87,7 +87,7 @@ export function flatCap(mb: MeshBuilder, rings: XZ[][], y: number) {
 }
 
 /** Gabled / hipped roof on a rectangle (p0→p1 is a long side). Returns the ridge height. */
-function pitched(mb: MeshBuilder, rect: XZ[], y: number, rise: number, hipped: boolean, roof: THREE.Color, gable: THREE.Color) {
+export function pitched(mb: MeshBuilder, rect: XZ[], y: number, rise: number, hipped: boolean, roof: THREE.Color, gable: THREE.Color) {
   let [p0, p1, p2, p3] = rect;
   if (Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > Math.hypot(p1[0] - p0[0], p1[1] - p0[1])) [p0, p1, p2, p3] = [p1, p2, p3, p0];
   const long = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
