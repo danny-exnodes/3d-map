@@ -92,3 +92,16 @@ describe('clipping to the area', () => {
     expect(clipPolygon([[[2, 2], [3, 2], [3, 3]]], b)).toBeNull();
   });
 });
+
+describe('Overture segments with ranged rules (#25)', () => {
+  it('cuts a segment where a tunnel starts and ends', async () => {
+    const { roadsFromSegment } = await import('../src/data/overtureBase');
+    const line: [number, number][] = [[105.84, 21.0], [105.85, 21.0]];
+    const props = { class: 'primary', level_rules: JSON.stringify([{ value: -1, between: [0.3, 0.7] }]) };
+    const roads = roadsFromSegment(props, line, 's1');
+    expect(roads.map((r) => r.tunnel)).toEqual([false, true, false]);
+    expect(roads[1].line[0][0]).toBeCloseTo(105.843, 4);
+    expect(roads[1].line[roads[1].line.length - 1][0]).toBeCloseTo(105.847, 4);
+    expect(roadsFromSegment({ class: 'primary' }, line, 's2')).toHaveLength(1);
+  });
+});

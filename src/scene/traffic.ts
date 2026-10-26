@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { hashString, rng } from '../data/rand';
 import type { RoadClass } from '../data/types';
 import { MeshBuilder, ribbon } from './geometry';
-import { pointAt, type RailPath, type RoadPath } from './roads';
+import { pointAt, type RailPath, type RoadPath, TUNNEL_COVERED } from './roads';
 
 const BASE_SPEED: Record<RoadClass, number> = {
   motorway: 17, primary: 11, secondary: 10, tertiary: 8.5, residential: 6, service: 4, path: 0,
@@ -220,6 +220,17 @@ export class Traffic {
       const lateral = Math.min(offFromCentre, p.road.width / 2 - 0.6) * (lanes > 0 ? 1 : 0);
       pointAt(p, v.d, lateral * v.dir, this.pos, this.dir);
       if (v.dir < 0) this.dir.negate();
+      if (this.pos.y < TUNNEL_COVERED) {
+        // Inside a covered tunnel: not visible from above.
+        t.scale.setScalar(0);
+        t.updateMatrix();
+        this.bodies.setMatrixAt(i, t.matrix);
+        if (showLights) {
+          this.lights.setMatrixAt(i * 2, t.matrix);
+          this.lights.setMatrixAt(i * 2 + 1, t.matrix);
+        }
+        continue;
+      }
       const [w, h, l] = SIZE[v.kind];
       t.position.copy(this.pos).setY(this.pos.y + 0.05);
       t.rotation.set(0, Math.atan2(this.dir.x, this.dir.z), 0);

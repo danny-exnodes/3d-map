@@ -39,6 +39,11 @@ export const ROAD_COLORS: Record<RoadClass, string> = {
   path: '#cbbf9f',
 };
 const SIDEWALK = '#d9cfb8';
+const PARAPET = '#cfc9be';
+/** Depth of covered tunnels below the street (m). */
+export const TUNNEL_DEPTH = 6.5;
+/** Shallower than this, a tunnel ramp is an open cut; deeper, it is covered. */
+export const TUNNEL_COVERED = -4.8;
 const DECK = '#8f8a82';
 
 const key = (p: XZ) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
@@ -74,16 +79,20 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
   const paths: RoadPath[] = [];
 
   const sorted = roads
-    .filter((r) => !r.tunnel && r.line.length >= 2)
+    .filter((r) => r.line.length >= 2)
     .sort((a, b) => ORDER.indexOf(a.cls) - ORDER.indexOf(b.cls));
 
   // Endpoint index of elevated ways, so connected flyover segments stay up.
   const elevatedEnds = new Map<string, number>();
+  const tunnelEnds = new Map<string, number>();
   const pre = sorted.map((road) => {
-    const pts = road.line.map((p) => proj.project(p));
+    let pts = road.line.map((p) => proj.project(p));
+    // Tunnels change depth along their ramps, so they need vertices every few metres (#25).
+    if (road.tunnel) pts = densify(pts, 4);
     const dist = cumulative(pts);
     const h = elevationOf(road, dist[dist.length - 1]);
-    if (h > 3) for (const p of [pts[0], pts[pts.length - 1]]) elevatedEnds.set(key(p), (elevatedEnds.get(key(p)) ?? 0) + 1);
+    const ends = road.tunnel ? tunnelEnds : h > 3 ? elevatedEnds : null;
+    if (ends) for (const p of [pts[0], pts[pts.length - 1]]) ends.set(key(p), (ends.get(key(p)) ?? 0) + 1);
     return { road, pts, dist, h };
   });
 
@@ -93,9 +102,19 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
   const marks = new MeshBuilder().setColor('#f3f1e8');
   const elevMarks = new MeshBuilder().setColor('#f3f1e8');
   const pillars: [number, number, number, number][] = [];
+  /** Cross beams on top of flyover pillars: x, z, top y, length, heading. */
+  const caps: [number, number, number, number, number][] = [];
+  const tunnelCover = new MeshBuilder().setColor('#1d2027');
   const lampSpots: number[][] = [];
 
   for (const { road, pts, dist, h } of pre) {
+    if (road.tunnel) {
+      const joined = (p: XZ) => (tunnelEnds.get(key(p)) ?? 0) > 1;
+      const heights = profile(dist, TUNNEL_DEPTH, joined(pts[0]), joined(pts[pts.length - 1])).map((y) => -y);
+      paths.push({ road, pts, heights, dist, length: dist[dist.length - 1] });
+      buildTunnel(road, pts, heights, ground, elevated, tunnelCover);
+      continue;
+    }
     const elevatedWay = h > 3;
     const heights = elevatedWay
       ? profile(dist, h, (elevatedEnds.get(key(pts[0])) ?? 0) > 1, (elevatedEnds.get(key(pts[pts.length - 1])) ?? 0) > 1)
@@ -117,12 +136,25 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
     if (isElevated) {
       ribbon(elevated.setColor(DECK), pts, lift.map((y) => y - 0.01), road.width + 1.2, { skirt: 1.3 });
       ribbon(elevated.setColor(ROAD_COLORS[road.cls]), pts, lift, road.width);
-      sampleAlong(pts, 28, (x, z, _dx, _dz, i, d) => {
+      // Concrete parapets along both edges make the deck read clearly against the street below (#25).
+      for (const side of [-1, 1]) {
+        ribbon(elevated.setColor(PARAPET), pts, lift.map((y) => y + 1.05), 0.4, { offset: side * (road.width / 2 + 0.4), skirt: 1.1 });
+      }
+      sampleAlong(pts, 28, (x, z, dx, dz, i, d) => {
         const y = interp(dist, heights, i, d);
-        if (y > 3) pillars.push([x, z, y - 1.3, Math.max(1.4, road.width * 0.18)]);
+        if (y > 3) {
+          pillars.push([x, z, y - 2.3, Math.max(1.4, road.width * 0.18)]);
+          caps.push([x, z, y - 1.3, road.width + 1.2, Math.atan2(dx, dz)]);
+        }
       });
     } else {
       ribbon(ground.setColor(ROAD_COLORS[road.cls]), pts, lift, road.width);
+      if (road.bridge && h > 0) {
+        // Small bridges over canals: low railings.
+        for (const side of [-1, 1]) {
+          ribbon(elevated.setColor(PARAPET), pts, heights.map((y) => y + 0.9), 0.3, { offset: side * (road.width / 2 + 0.3), skirt: 0.9 });
+        }
+      }
     }
 
     if (road.lanes >= 2 && road.cls !== 'path' && road.cls !== 'service') {
@@ -196,6 +228,25 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
     );
     group.add(m);
   }
+  if (!tunnelCover.empty) {
+    // Covered tunnel sections: a dark band on the surface marks where the road runs underground.
+    const m = new THREE.Mesh(tunnelCover.build(), new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false }));
+    m.renderOrder = -4;
+    m.name = 'tunnelCover';
+    group.add(m);
+  }
+  if (caps.length) {
+    const geo = new THREE.BoxGeometry(1, 1, 1.6).translate(0, -0.5, 0);
+    const inst = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: '#9b958b' }), caps.length);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    caps.forEach(([x, z, y, len, a], i) => inst.setMatrixAt(i, m.compose(new THREE.Vector3(x, y, z), q.setFromAxisAngle(up, a + Math.PI / 2), new THREE.Vector3(len, 1, 1))));
+    inst.castShadow = true;
+    inst.receiveShadow = true;
+    inst.name = 'pillarCaps';
+    group.add(inst);
+  }
   if (pillars.length) {
     const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
     const inst = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: '#a39d93' }), pillars.length);
@@ -253,6 +304,63 @@ function buildRails(
   m.receiveShadow = true;
   m.name = 'rails';
   return { paths: out, ballast: m };
+}
+
+/** Inserts vertices so that no segment is longer than `step` metres. */
+export function densify(pts: XZ[], step: number): XZ[] {
+  const out: XZ[] = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, az] = pts[i - 1];
+    const [bx, bz] = pts[i];
+    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / step));
+    for (let k = 1; k <= n; k++) out.push([ax + ((bx - ax) * k) / n, az + ((bz - az) * k) / n]);
+  }
+  return out;
+}
+
+/**
+ * Underpass (hầm chui): open-cut ramps are drawn with their road surface going down between
+ * retaining walls; where the tunnel is covered, only a dark band on the surface shows its course,
+ * and a portal face closes each ramp.
+ */
+function buildTunnel(road: Road, pts: XZ[], heights: number[], ground: MeshBuilder, walls: MeshBuilder, cover: MeshBuilder) {
+  const runs: { open: boolean; from: number; to: number }[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const open = heights[i] > TUNNEL_COVERED;
+    const last = runs[runs.length - 1];
+    if (last && last.open === open) last.to = i;
+    else runs.push({ open, from: Math.max(0, i - 1), to: i });
+  }
+  for (const run of runs) {
+    const p = pts.slice(run.from, run.to + 1);
+    const h = heights.slice(run.from, run.to + 1);
+    if (p.length < 2) continue;
+    if (run.open) {
+      ribbon(ground.setColor(ROAD_COLORS[road.cls]), p, h, road.width);
+      for (const side of [-1, 1]) {
+        // Dark cut walls going down to the road, a light coping on top.
+        ribbon(walls.setColor('#6f6c66'), p, p.map(() => 0.65), 0.45, { offset: side * (road.width / 2 + 0.25), skirt: TUNNEL_DEPTH + 0.65 });
+        ribbon(walls.setColor(PARAPET), p, p.map(() => 0.72), 0.55, { offset: side * (road.width / 2 + 0.25) });
+      }
+    } else {
+      ribbon(cover, p, p.map(() => 0.06), road.width + 0.8);
+    }
+  }
+  // Portal faces where an open ramp meets the covered section.
+  for (let k = 1; k < runs.length; k++) {
+    const i = runs[k].from;
+    const j = Math.min(i + 1, pts.length - 1);
+    const [x, z] = pts[i];
+    const dx = pts[j][0] - x, dz = pts[j][1] - z;
+    const len = Math.hypot(dx, dz) || 1;
+    const nx = -dz / len * (road.width / 2 + 0.5), nz = dx / len * (road.width / 2 + 0.5);
+    const y0 = heights[i];
+    const face = (yb: number, yt: number) => walls.quad({ x: x - nx, y: yb, z: z - nz }, { x: x + nx, y: yb, z: z + nz }, { x: x + nx, y: yt, z: z + nz }, { x: x - nx, y: yt, z: z - nz });
+    walls.setColor('#16181d');
+    face(y0, -0.6);
+    walls.setColor(PARAPET);
+    face(-0.6, 0.8);
+  }
 }
 
 export function interp(dist: number[], values: number[], i: number, d: number): number {
