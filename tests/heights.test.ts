@@ -157,3 +157,34 @@ describe('Overture as the OSM source (#17)', () => {
     expect(byId['overture/p2']).toMatchObject({ isPart: true, minHeight: 12, height: 80 });
   });
 });
+
+describe('z14 height tiles (#18)', () => {
+  it('composes tiles into a grid for any bbox, keeping values at the same place', async () => {
+    const { composeGrid, HeightGrid, tileBBox } = await import('../src/data/heights');
+    const { bboxSizeMeters, LocalProjection } = await import('../src/geo/projection');
+    // Two neighbouring tiles; each cell stores a code of its tile and column band.
+    const mk = (x: number, y: number, code: number) => {
+      const bbox = tileBBox(x, y);
+      const { width: w, depth: d } = bboxSizeMeters(bbox);
+      const width = Math.ceil(w / 2), depth = Math.ceil(d / 2);
+      const data = new Uint16Array(width * depth);
+      for (let j = 0; j < depth; j++) for (let i = 0; i < width; i++) data[j * width + i] = code + Math.floor(i / 100);
+      return new HeightGrid({ bbox, cell: 2, width, depth, source: 't' }, data);
+    };
+    const a = mk(13046, 7700, 100), b = mk(13047, 7700, 200);
+    const seam = a.meta.bbox.east;
+    const lat = (a.meta.bbox.south + a.meta.bbox.north) / 2;
+    const bbox = { west: seam - 0.002, east: seam + 0.002, south: lat - 0.001, north: lat + 0.001 };
+    const g = composeGrid(bbox, [a, b], 2, 't');
+    const proj = new LocalProjection(bbox);
+    const valueAt = (lon: number) => {
+      const [x, z] = proj.project([lon, lat]);
+      const i = Math.floor((x + (g.meta.width * 2) / 2) / 2), j = Math.floor((z + (g.meta.depth * 2) / 2) / 2);
+      return g.data[j * g.meta.width + i];
+    };
+    // West of the seam: last column band of tile a; east: first band of tile b.
+    expect(valueAt(seam - 0.00001)).toBe(100 + Math.floor((a.meta.width - 1) / 100));
+    expect(valueAt(seam + 0.00001)).toBe(200);
+    expect(g.data.every((v) => v > 0)).toBe(true);
+  });
+});

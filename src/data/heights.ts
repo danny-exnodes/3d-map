@@ -1,4 +1,4 @@
-import { LocalProjection, pointInRing } from '../geo/projection';
+import { bboxSizeMeters, LocalProjection, pointInRing } from '../geo/projection';
 import { cacheGet, cacheSet } from './cache';
 import type { BBox, LngLat } from './types';
 
@@ -108,6 +108,10 @@ export async function loadHeightGrid(bbox: BBox, opts: HeightSourceOptions): Pro
       if (opts.signal?.aborted) throw e;
     }
   }
+  if (opts.staticBase) {
+    const grid = await loadTiledGrid(bbox, opts);
+    if (grid) return grid;
+  }
   if (opts.api) {
     const grid = await fetchFromApi(bbox, opts);
     if (grid) return grid;
@@ -146,4 +150,108 @@ async function fetchFromApi(bbox: BBox, opts: HeightSourceOptions): Promise<Heig
     if (opts.signal?.aborted) throw e;
     return null;
   }
+}
+
+// ---------- z14 height tiles (#18) ----------
+
+interface TileIndex {
+  z: number;
+  cell: number;
+  source: string;
+  /** "x-y" → [width, depth] of tiles that contain buildings. */
+  tiles: Record<string, [number, number]>;
+  empty: string[];
+}
+
+const tileIndexes = new Map<string, Promise<TileIndex | null>>();
+
+function tileIndex(base: string, signal?: AbortSignal): Promise<TileIndex | null> {
+  let p = tileIndexes.get(base);
+  if (!p) {
+    p = fetch(new URL('z14/index.json', base), { signal })
+      .then((r) => (r.ok ? (r.json() as Promise<TileIndex>) : null))
+      .catch(() => null);
+    // A failed lookup (offline, aborted) is retried next time.
+    p.then((v) => v ?? tileIndexes.delete(base));
+    tileIndexes.set(base, p);
+  }
+  return p;
+}
+
+const N14 = 2 ** 14;
+const lonOf = (x: number) => (x / N14) * 360 - 180;
+const latOf = (y: number) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / N14))) * 180) / Math.PI;
+export const tileBBox = (x: number, y: number): BBox => ({ west: lonOf(x), east: lonOf(x + 1), north: latOf(y), south: latOf(y + 1) });
+const tileX = (lon: number) => Math.floor(((lon + 180) / 360) * N14);
+const tileY = (lat: number) => {
+  const r = (lat * Math.PI) / 180;
+  return Math.floor(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * N14);
+};
+
+async function gunzip(buf: ArrayBuffer): Promise<ArrayBuffer> {
+  const b = new Uint8Array(buf);
+  // Some servers already decode .gz (Content-Encoding); only inflate real gzip data.
+  if (b[0] !== 0x1f || b[1] !== 0x8b) return buf;
+  return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+}
+
+/**
+ * Assembles a grid for the bbox from bundled z14 tiles. Null when the tile set does not cover
+ * the bbox (outside the wards of TP.HCM / Hà Nội, or tiles not generated in this build).
+ */
+async function loadTiledGrid(bbox: BBox, opts: HeightSourceOptions): Promise<HeightGrid | null> {
+  const index = await tileIndex(opts.staticBase!, opts.signal);
+  if (!index) return null;
+  const empty = new Set(index.empty);
+  const keys: string[] = [];
+  for (let x = tileX(bbox.west); x <= tileX(bbox.east); x++) {
+    for (let y = tileY(bbox.north); y <= tileY(bbox.south); y++) {
+      const k = `${x}-${y}`;
+      if (index.tiles[k]) keys.push(k);
+      else if (!empty.has(k)) return null; // a gap: let another source try
+    }
+  }
+  if (!keys.length) return null;
+  try {
+    const tiles = await Promise.all(
+      keys.map(async (k) => {
+        const res = await fetch(new URL(`z14/${k}.bin.gz`, opts.staticBase), { signal: opts.signal });
+        if (!res.ok) throw new Error(`${k}: HTTP ${res.status}`);
+        const [x, y] = k.split('-').map(Number);
+        const [width, depth] = index.tiles[k];
+        const meta: HeightGridMeta = { bbox: tileBBox(x, y), cell: index.cell, width, depth, source: index.source };
+        return new HeightGrid(meta, new Uint16Array(await gunzip(await res.arrayBuffer())));
+      }),
+    );
+    return composeGrid(bbox, tiles, index.cell, index.source);
+  } catch (e) {
+    if (opts.signal?.aborted) throw e;
+    return null;
+  }
+}
+
+/** Resamples tiles (each on its own local projection) onto one grid laid out like gob-heights for `bbox`. */
+export function composeGrid(bbox: BBox, tiles: HeightGrid[], cell: number, source: string): HeightGrid {
+  const proj = new LocalProjection(bbox);
+  const { width: wm, depth: dm } = bboxSizeMeters(bbox);
+  const width = Math.ceil(wm / cell);
+  const depth = Math.ceil(dm / cell);
+  const data = new Uint16Array(width * depth);
+  const tileProj = tiles.map((t) => new LocalProjection(t.meta.bbox));
+  for (let j = 0; j < depth; j++) {
+    const z = (j + 0.5) * cell - (depth * cell) / 2;
+    for (let i = 0; i < width; i++) {
+      const [lon, lat] = proj.unproject((i + 0.5) * cell - (width * cell) / 2, z);
+      for (let t = 0; t < tiles.length; t++) {
+        const m = tiles[t].meta;
+        if (lon < m.bbox.west || lon >= m.bbox.east || lat < m.bbox.south || lat >= m.bbox.north) continue;
+        const [tx, tz] = tileProj[t].project([lon, lat]);
+        const ti = Math.floor((tx + (m.width * m.cell) / 2) / m.cell);
+        const tj = Math.floor((tz + (m.depth * m.cell) / 2) / m.cell);
+        if (ti >= 0 && tj >= 0 && ti < m.width && tj < m.depth) data[j * width + i] = tiles[t].data[tj * m.width + ti];
+        break;
+      }
+    }
+  }
+  return new HeightGrid({ bbox, cell, width, depth, source }, data);
 }

@@ -51,6 +51,17 @@
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
 
+**Bản đồ offline theo phường** (#18)
+- Nút 📥 trên bản đồ mở danh sách phường/xã của **TP.HCM** (167 đơn vị, 113 phường) và **Hà Nội** (130 đơn vị, 51 phường), theo địa giới sau sắp xếp 2025. Tìm không dấu cũng được (vd: `chanh hung`).
+- Chọn phường để xem ranh giới, rồi bấm “Tải về máy”. Gói gồm:
+  - nhà và đường Overture;
+  - địa điểm OpenFreeMap;
+  - bản đồ nền (tile, font, sprite);
+  - lưới chiều cao.
+
+  Một phường khoảng 30–40 MB.
+- Khi mất mạng, app vẫn mở được (service worker): bản đồ nền hiện đầy đủ, dựng 3D được mọi khu trong phường đã tải. Dữ liệu offline được ghim, không bị xoá khi dọn bộ nhớ đệm. Phường dùng chung ô dữ liệu vẫn xoá riêng được.
+
 **Xuất**: ảnh PNG, mô hình `.glb` (theo chế độ màu đang chọn).
 
 **Demo offline**: thêm `?demo` vào URL để dựng thành phố sinh ngẫu nhiên.
@@ -87,9 +98,11 @@ Yêu cầu Node 22.18+ (CLI chiều cao chạy thẳng file `.ts`) và trình du
 
 | Nguồn | Dùng cho | Cách truy cập | Giấy phép |
 | --- | --- | --- | --- |
-| [OpenStreetMap](https://www.openstreetmap.org/) qua Overpass | nhà, đường, sông, cây… | trình duyệt, cache 7 ngày | ODbL |
+| [OpenStreetMap](https://www.openstreetmap.org/) qua Overture (mặc định) hoặc Overpass (tuỳ chọn) | nhà, đường, sông, cây… | PMTiles / Overpass, cache IndexedDB | ODbL |
 | [Overture Maps](https://docs.overturemaps.org/guides/buildings) `buildings.pmtiles` | bù footprint | PMTiles (range request, CORS) | ODbL |
 | [Google Open Buildings 2.5D Temporal](https://sites.research.google/gr/open-buildings/temporal/) | chiều cao nhà | GeoTIFF công khai, **không có CORS** → tiền xử lý | CC BY 4.0 |
+| [OpenFreeMap](https://openfreemap.org/) | bản đồ nền, địa điểm | vector tiles (CORS) | ODbL (dữ liệu OSM) |
+| [Overture divisions](https://docs.overturemaps.org/guides/divisions/) | ranh giới phường/xã | `tools/wards.mjs` → `public/wards/` | ODbL |
 | [Open‑Meteo](https://open-meteo.com/) | thời tiết | trình duyệt | CC BY 4.0 |
 
 ### Lưới chiều cao Google 2.5D
@@ -103,9 +116,17 @@ npm run heights -- --id hoankiem --name "Hồ Hoàn Kiếm" --bbox 21.024,105.84
 
 File được ghi vào `public/heights/` và tự thêm vào `index.json`. Repo kèm sẵn lưới cho **Ngã Tư Sở** và **Én Nam**.
 
+**Ô chiều cao z14 cho mọi phường TP.HCM và Hà Nội.** `npm run heights:tiles` sinh ~590 ô (lưới 2 m, theo lưới tile z14) vào `public/heights/z14/`. Dung lượng khoảng 100 MB nên không commit; CI sinh ô khi deploy và cache giữa các lần chạy. App tự ghép các ô cho vùng đã chọn, nên bản tĩnh trên GitHub Pages cũng có chiều cao thật và suy ra được nhà từ ảnh vệ tinh.
+
+```bash
+npm run heights:tiles -- --only 13046-7699,13046-7700   # vài ô để thử ở máy
+npm run wards                                            # dựng lại public/wards/{hcm,hn}.json từ Overture divisions
+```
+
 Cách app tìm lưới chiều cao cho một vùng:
 - `npm run dev`: endpoint `/api/heights` tính lưới cho vùng bất kỳ.
 - Bản tĩnh: đặt `VITE_HEIGHTS_API=https://…/api/heights` trỏ tới một proxy cùng API (#4).
+- Bản tĩnh: ghép từ ô z14 `heights/z14/` (khi vùng nằm trong các phường TP.HCM/Hà Nội).
 - Không có lưới: dùng heuristic theo hình dạng footprint.
 
 ## Kiến trúc
@@ -122,7 +143,8 @@ src/
   data/heights.ts         # lưới chiều cao Google 2.5D
   data/enrich.ts          # ghép footprint, gán chiều cao, thống kê nguồn
   data/buildings.ts       # tag → Building: kiến trúc mẫu, heuristic, kiểu mái
-  data/cache.ts           # IndexedDB (TTL + LRU)
+  data/cache.ts           # IndexedDB (TTL + LRU, ghim cho gói offline)
+  data/offline.ts         # gói offline theo phường (#18)
   worker/                 # Web Worker: tải dữ liệu + dựng hình, truyền buffer
   scene/CityScene.ts      # renderer, camera, ánh sáng, bloom, chọn nhà, xuất GLB
   scene/buildings.ts      # tường + mái gộp 1 mesh, shader cửa sổ/vật liệu/chọn
@@ -133,6 +155,9 @@ src/
   scene/roads.ts …        # đường, cầu, ray; landscape.ts; traffic.ts; sun.ts
 tools/
   gob-heights.mjs         # CLI trích lưới chiều cao
+  height-tiles.mjs        # ô chiều cao z14 cho các phường (CI)
+  wards.mjs               # ranh giới phường/xã từ Overture divisions
+public/sw.js              # service worker: chạy offline
   gob-index.mjs           # dựng lại chỉ mục tile Google 2.5D cho VN
   overture-spike.mjs      # đo độ phủ Overture tại một điểm
 bench/                    # benchmark + ngân sách hiệu năng cho CI

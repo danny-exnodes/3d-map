@@ -1,6 +1,7 @@
 import './style.css';
 import { generateDemoCity } from './data/demo';
-import { cacheClear, cacheUsage } from './data/cache';
+import { cacheClearUnpinned, cacheUsage } from './data/cache';
+import { type CityId, deletePackage, downloadPackage, listPackages, loadWards, packageSize, registerServiceWorker, searchWards, type Ward, wardAreaKm2 } from './data/offline';
 import { loadCity } from './data/loader';
 import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressStep } from './data/types';
 import { bboxAreaKm2 } from './geo/projection';
@@ -284,9 +285,146 @@ $('btn-cancel').addEventListener('click', () => loadAbort?.abort());
 mapView.map.on('mousedown', () => mapView.isDrawing && loadAbort?.abort());
 $('btn-cache').addEventListener('click', async () => {
   const u = await cacheUsage();
-  if (!confirm(`Xoá ${fmt(u.entries)} mục (${fmt(u.bytes / 1048576, 1)} MB) dữ liệu đã lưu trên máy?`)) return;
-  await cacheClear();
+  const free = u.bytes - u.pinnedBytes;
+  const keep = u.pinnedBytes ? ` Bản đồ offline đã tải (${fmt(u.pinnedBytes / 1048576, 1)} MB) được giữ lại.` : '';
+  if (!confirm(`Xoá ${fmt(free / 1048576, 1)} MB dữ liệu đệm trên máy?${keep}`)) return;
+  await cacheClearUnpinned();
 });
+
+// ---------- Offline packages per ward (#18) ----------
+
+const BASE_URL = new URL(import.meta.env.BASE_URL, location.href).href;
+let offCity: CityId = 'hcm';
+let offWard: Ward | null = null;
+let offAbort: AbortController | null = null;
+const offResults = $<HTMLUListElement>('off-results');
+const offSearch = $<HTMLInputElement>('off-search');
+const kindLabel = (w: Ward) => (w.kind === 'phuong' ? 'phường' : w.kind === 'xa' ? 'xã' : '');
+
+async function renderWardResults() {
+  offResults.innerHTML = '<li class="muted">Đang tải danh sách…</li>';
+  try {
+    const list = await loadWards(offCity, BASE_URL);
+    const found = searchWards(list.wards, offSearch.value, 40);
+    offResults.innerHTML = '';
+    for (const w of found) {
+      const li = document.createElement('li');
+      li.innerHTML = '<span></span><small></small>';
+      li.firstElementChild!.textContent = w.name;
+      li.lastElementChild!.textContent = `${fmt(wardAreaKm2(w), 1)} km²`;
+      li.classList.toggle('on', w.id === offWard?.id);
+      li.addEventListener('click', () => selectWard(w));
+      offResults.appendChild(li);
+    }
+    if (!found.length) offResults.innerHTML = '<li class="muted">Không tìm thấy phường/xã nào.</li>';
+  } catch {
+    offResults.innerHTML = '<li class="muted">Không tải được danh sách phường (cần mạng lần đầu).</li>';
+  }
+}
+
+function selectWard(w: Ward) {
+  offWard = w;
+  mapView.setWard(w.polygon);
+  mapView.fitBBox(w.bbox);
+  $('off-selected').hidden = false;
+  $('off-name').textContent = w.name;
+  const saved = listPackages().find((p) => p.id === w.id);
+  $('off-info').textContent = `${kindLabel(w) ? kindLabel(w) + ' · ' : ''}${fmt(wardAreaKm2(w), 1)} km² · ${packageSize(w.bbox)} ô dữ liệu` + (saved ? ` · đã tải ${fmt(saved.bytes / 1048576, 1)} MB` : '');
+  $('off-download').textContent = saved ? 'Tải lại' : 'Tải về máy';
+  $('off-status').textContent = '';
+  for (const li of offResults.children) li.classList.remove('on');
+}
+
+function renderSaved() {
+  const ul = $<HTMLUListElement>('off-saved');
+  ul.innerHTML = '';
+  const list = listPackages().sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+  for (const p of list) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span></span><span><small></small> <button class="ghost" title="Xoá gói offline">🗑</button></span>';
+    li.querySelector('span')!.textContent = p.name;
+    li.querySelector('small')!.textContent = `${fmt(p.bytes / 1048576, 1)} MB`;
+    li.addEventListener('click', async () => {
+      const w = (await loadWards(p.city, BASE_URL).catch(() => null))?.wards.find((x) => x.id === p.id);
+      if (w) selectWard(w);
+      else mapView.fitBBox(p.bbox);
+    });
+    li.querySelector('button')!.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Xoá bản đồ offline của ${p.name}?`)) return;
+      await deletePackage(p.id);
+      renderSaved();
+      if (offWard?.id === p.id) selectWard(offWard);
+    });
+    ul.appendChild(li);
+  }
+  if (!list.length) ul.innerHTML = '<li class="muted">Chưa có phường nào. Chọn một phường ở trên rồi bấm “Tải về máy”.</li>';
+  cacheUsage().then((u) => {
+    $('off-usage').textContent = u.pinnedBytes ? `Dữ liệu offline trong bộ nhớ đệm: ${fmt(u.pinnedBytes / 1048576, 1)} MB` : '';
+  });
+}
+
+$('btn-offline').addEventListener('click', () => {
+  const panel = $('offline');
+  panel.hidden = !panel.hidden;
+  $('btn-offline').classList.toggle('on', !panel.hidden);
+  if (!panel.hidden) {
+    renderWardResults();
+    renderSaved();
+    offSearch.focus();
+  } else mapView.setWard(null);
+});
+$('off-close').addEventListener('click', () => $('btn-offline').click());
+$<HTMLSelectElement>('off-city').addEventListener('change', (e) => {
+  offCity = (e.target as HTMLSelectElement).value as CityId;
+  renderWardResults();
+});
+let offTimer = 0;
+offSearch.addEventListener('input', () => {
+  clearTimeout(offTimer);
+  offTimer = window.setTimeout(renderWardResults, 120);
+});
+$('off-pick').addEventListener('click', () => {
+  if (!offWard) return;
+  const b = offWard.bbox;
+  // A buildable area: the whole ward when small enough, else 800 m around its centre.
+  const sel = bboxAreaKm2(b) <= MAX_KM2 ? b : bboxAround((b.west + b.east) / 2, (b.south + b.north) / 2, DEFAULT_AREA_HALF_M);
+  mapView.setBBox(sel);
+  mapView.fitBBox(sel);
+});
+$('off-download').addEventListener('click', async () => {
+  const w = offWard;
+  if (!w) return;
+  if (offAbort) {
+    offAbort.abort();
+    return;
+  }
+  const btn = $('off-download');
+  const status = $('off-status');
+  offAbort = new AbortController();
+  btn.textContent = 'Huỷ';
+  $('off-progress').hidden = false;
+  status.textContent = 'Đang tải…';
+  try {
+    const pkg = await downloadPackage(offCity, w, {
+      heightsBase: HEIGHTS_BASE,
+      signal: offAbort.signal,
+      onProgress: (done, total) => {
+        $('off-bar').style.width = `${(done / Math.max(1, total)) * 100}%`;
+        status.textContent = `Đang tải ${done}/${total}`;
+      },
+    });
+    status.textContent = `Xong: ${fmt(pkg.bytes / 1048576, 1)} MB. Có thể dựng 3D mọi khu trong ${w.name} khi không có mạng.`;
+  } catch (e) {
+    status.textContent = (e as Error).name === 'AbortError' ? 'Đã huỷ.' : `Lỗi khi tải: ${(e as Error).message}`;
+  } finally {
+    offAbort = null;
+    $('off-progress').hidden = true;
+    btn.textContent = listPackages().some((p) => p.id === w.id) ? 'Tải lại' : 'Tải về máy';
+    renderSaved();
+  }
+});
+if (import.meta.env.PROD && !PREVIEW) registerServiceWorker(BASE_URL);
 $('btn-demo').addEventListener('click', () => build('demo'));
 
 function showCity() {

@@ -33,7 +33,29 @@
           <button id="btn-locate" title="Vị trí của tôi">📍</button>
           <button id="btn-center" title="Chọn vùng 800 m quanh tâm bản đồ">◎</button>
           <button id="btn-clear" title="Xoá vùng">🗑</button>
+          <button id="btn-offline" title="Tải bản đồ offline theo phường (TP.HCM, Hà Nội)">📥</button>
           <button id="btn-cache" title="Xoá dữ liệu đã lưu trên máy (bộ nhớ đệm)">⟳</button>
+        </div>
+        <div id="offline" class="offline card" hidden>
+          <div class="off-head"><b>Bản đồ offline theo phường</b><button id="off-close" class="ghost small" title="Đóng">✕</button></div>
+          <div class="off-row">
+            <select id="off-city"><option value="hcm">TP. Hồ Chí Minh</option><option value="hn">Hà Nội</option></select>
+            <input id="off-search" type="search" placeholder="Tìm phường/xã (gõ không dấu cũng được)" autocomplete="off" />
+          </div>
+          <ul id="off-results" class="off-list"></ul>
+          <div id="off-selected" class="off-selected" hidden>
+            <div class="strong" id="off-name"></div>
+            <div class="muted small" id="off-info"></div>
+            <div class="off-row">
+              <button id="off-download" class="primary small">Tải về máy</button>
+              <button id="off-pick" class="ghost small" title="Chọn một khu 800 m ở giữa phường để dựng 3D">Chọn khu để dựng</button>
+            </div>
+            <div class="bar" id="off-progress" hidden><div id="off-bar"></div></div>
+            <div class="muted small" id="off-status"></div>
+          </div>
+          <div class="strong small off-saved-title">Đã tải về</div>
+          <ul id="off-saved" class="off-list"></ul>
+          <div class="muted small" id="off-usage"></div>
         </div>
         <div id="progress" class="progress card" hidden>
           <div class="muted small"><span class="accent">Đang dựng</span> · <span id="p-title">Vùng mới</span></div>

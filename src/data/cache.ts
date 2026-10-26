@@ -16,6 +16,8 @@ interface Entry {
   lastUsed: number;
   /** Part of an offline package (#18): never expires, never evicted. */
   pinned?: boolean;
+  /** Offline packages holding this entry; it stays pinned until the last one lets go. */
+  pins?: string[];
 }
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
@@ -88,22 +90,30 @@ export async function cacheSet(ns: string, key: string, value: unknown, ttlMs: n
   const now = Date.now();
   const id = `${ns}:${key}`;
   // Re-fetching a pinned entry keeps it pinned.
-  const keepPin = pinned ?? (await tx<Entry>('readonly', (s) => s.get(id)))?.pinned;
-  await tx('readwrite', (s) => s.put({ id, ns, value, size, expires: now + ttlMs, lastUsed: now, pinned: keepPin || undefined } satisfies Entry));
+  const prev = await tx<Entry>('readonly', (s) => s.get(id));
+  const keepPin = pinned ?? prev?.pinned;
+  await tx('readwrite', (s) => s.put({ id, ns, value, size, expires: now + ttlMs, lastUsed: now, pinned: keepPin || undefined, pins: prev?.pins } satisfies Entry));
   if (!keepPin) await evict();
 }
 
-/** Pins or unpins entries (offline packages). Returns how many entries changed. */
-export async function cachePin(ids: { ns: string; key: string }[], pinned: boolean): Promise<number> {
-  let n = 0;
+/**
+ * Adds or removes `owner` (an offline package id) on entries. An entry stays pinned while any
+ * owner holds it, so packages that share tiles can be deleted independently. Returns the bytes
+ * of the entries found.
+ */
+export async function cachePin(ids: { ns: string; key: string }[], owner: string, pinned: boolean): Promise<number> {
+  let bytes = 0;
   for (const { ns, key } of ids) {
     const id = `${ns}:${key}`;
     const e = await tx<Entry>('readonly', (s) => s.get(id));
     if (!e) continue;
-    await tx('readwrite', (s) => s.put({ ...e, pinned: pinned || undefined }));
-    n++;
+    const pins = new Set(e.pins ?? []);
+    if (pinned) pins.add(owner);
+    else pins.delete(owner);
+    await tx('readwrite', (s) => s.put({ ...e, pins: pins.size ? [...pins] : undefined, pinned: pins.size > 0 || undefined, lastUsed: Date.now() }));
+    bytes += e.size;
   }
-  return n;
+  return bytes;
 }
 
 export async function cacheHas(ns: string, key: string): Promise<boolean> {

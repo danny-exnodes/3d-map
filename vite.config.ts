@@ -38,8 +38,20 @@ function heightsApi(): Plugin {
   };
 }
 
+/** Lists the built app files for the service worker to cache on install (offline use, #18). */
+function precacheManifest(): Plugin {
+  return {
+    name: 'tinymap-precache',
+    apply: 'build',
+    generateBundle(_, bundle) {
+      const files = ['./', ...Object.keys(bundle).filter((f) => !f.endsWith('.map'))].concat(['wards/hcm.json', 'wards/hn.json']);
+      this.emitFile({ type: 'asset', fileName: 'precache.json', source: JSON.stringify(files) });
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
-  plugins: [heightsApi()],
+  plugins: [heightsApi(), precacheManifest()],
   build: { chunkSizeWarningLimit: 2000 },
 });
