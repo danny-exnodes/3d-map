@@ -21,6 +21,7 @@ interface Vehicle {
   slot: number;
   /** Shown when the current road's load ratio exceeds it. */
   threshold: number;
+  color: THREE.Color;
 }
 
 interface Walker {
@@ -30,33 +31,39 @@ interface Walker {
   lateral: number;
   speed: number;
   threshold: number;
+  color: THREE.Color;
 }
 
 /** Length (m) of each kind, for headlights and spacing. */
 const LENGTH: Record<VehicleKind, number> = { moto: 1.9, car: 4.3, bus: 11, truck: 7.5, bicycle: 1.7 };
 const PACE: Record<VehicleKind, number> = { moto: 1, car: 1.05, bus: 0.75, truck: 0.8, bicycle: 0.45 };
 
-/** Box with its base at y0, centred on x/z, with one vertex colour. */
+/** Box with its base at y0, centred on x/z, with one vertex colour; no bottom face (never seen). */
 function box(w: number, h: number, l: number, y0: number, z = 0, shade = 1): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(w, h, l).translate(0, y0 + h / 2, z);
-  const c = new Float32Array(g.getAttribute('position').count * 3).fill(shade);
-  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
-  g.deleteAttribute('uv');
-  return g;
+  const g = new THREE.BoxGeometry(w, h, l).translate(0, y0 + h / 2, z).toNonIndexed();
+  // BoxGeometry faces: +x, -x, +y, -y, +z, -z (6 vertices each once non-indexed); drop -y.
+  const pos = g.getAttribute('position').array as Float32Array;
+  const nor = g.getAttribute('normal').array as Float32Array;
+  const keep = (a: Float32Array) => new Float32Array([...a.slice(0, 18 * 3), ...a.slice(24 * 3)]);
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(keep(pos), 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(keep(nor), 3));
+  out.setAttribute('color', new THREE.BufferAttribute(new Float32Array((out.getAttribute('position').count) * 3).fill(shade), 3));
+  return out;
 }
 
 /** Low-poly models, one per kind; the instance colour tints the shade 1 parts. */
 function vehicleGeometry(kind: VehicleKind): THREE.BufferGeometry {
   switch (kind) {
     case 'moto':
-      // Bike, then rider (torso, helmet) leaning slightly forward.
-      return mergeGeometries([box(0.5, 0.55, 1.8, 0.25), box(0.12, 0.5, 0.12, 0, 0.75, 0.2), box(0.12, 0.5, 0.12, 0, -0.75, 0.2), box(0.45, 0.62, 0.32, 0.85, -0.1, 0.9), box(0.28, 0.28, 0.3, 1.47, -0.05, 0.35)])!;
+      // Bike, then rider with helmet; kept to two boxes, there are thousands of them.
+      return mergeGeometries([box(0.5, 0.75, 1.8, 0.05, 0, 0.55), box(0.44, 0.9, 0.34, 0.8, -0.1, 1)])!;
     case 'bicycle':
-      return mergeGeometries([box(0.12, 0.65, 1.65, 0.2, 0, 0.3), box(0.42, 0.6, 0.3, 0.9, -0.15, 1), box(0.24, 0.24, 0.26, 1.5, -0.1, 0.85)])!;
+      return mergeGeometries([box(0.12, 0.85, 1.65, 0.0, 0, 0.3), box(0.42, 0.85, 0.3, 0.85, -0.15, 1)])!;
     case 'car':
       return mergeGeometries([box(1.8, 0.75, 4.3, 0.25), box(1.62, 0.6, 2.3, 1.0, -0.2, 0.45)])!;
     case 'bus':
-      return mergeGeometries([box(2.5, 1.2, 11, 0.3), box(2.52, 1.0, 10.6, 1.5, 0, 0.35), box(2.5, 0.35, 11, 2.5)])!;
+      return mergeGeometries([box(2.5, 1.2, 11, 0.3), box(2.52, 1.35, 10.6, 1.5, 0, 0.4)])!;
     case 'truck':
       return mergeGeometries([box(2.3, 1.9, 2.2, 0.35, 2.6, 1), box(2.4, 2.5, 5.2, 0.45, -1.2, 0.85)])!;
   }
@@ -158,7 +165,7 @@ export class Traffic {
           roll -= mix[k];
         }
         const dir: 1 | -1 = p.road.oneway || r() < 0.5 ? 1 : -1;
-        this.vehicles.push({ path: i, d: r() * p.length, dir, lateral: 0, pace: 0.8 + r() * 0.4, kind, slot: perKind[kind]++, threshold: r() });
+        this.vehicles.push({ path: i, d: r() * p.length, dir, lateral: 0, pace: 0.8 + r() * 0.4, kind, slot: perKind[kind]++, threshold: r(), color: new THREE.Color() });
         this.placeInLane(this.vehicles[this.vehicles.length - 1]);
       }
     });
@@ -175,7 +182,8 @@ export class Traffic {
     }
     for (const v of this.vehicles) {
       const pal = v.kind === 'moto' || v.kind === 'bicycle' ? CLOTHES : PALETTE[v.kind];
-      this.bodies.get(v.kind)!.setColorAt(v.slot, new THREE.Color(pal[Math.floor(r() * pal.length)]));
+      v.color.set(pal[Math.floor(r() * pal.length)]);
+      this.bodies.get(v.kind)!.setColorAt(v.slot, v.color);
     }
 
     const lightGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -202,16 +210,16 @@ export class Traffic {
       for (let c = 0; c < count; c++) {
         const side = r() < 0.5 ? -1 : 1;
         const lateral = p.road.cls === 'path' ? (r() - 0.5) * 1.2 : side * (p.road.width / 2 + 0.7 + r() * 1.1);
-        this.people.push({ path: i, d: r() * p.length, dir: r() < 0.5 ? 1 : -1, lateral, speed: 1.1 + r() * 0.5, threshold: r() });
+        this.people.push({ path: i, d: r() * p.length, dir: r() < 0.5 ? 1 : -1, lateral, speed: 1.1 + r() * 0.5, threshold: r(), color: new THREE.Color(CLOTHES[Math.floor(r() * CLOTHES.length)]) });
       }
     });
     if (this.people.length) {
-      const body = mergeGeometries([box(0.42, 0.85, 0.26, 0.0, 0, 0.35), box(0.46, 0.65, 0.28, 0.85, 0, 1), box(0.24, 0.26, 0.24, 1.5, 0, 0.8)])!;
+      const body = mergeGeometries([box(0.4, 0.85, 0.26, 0.0, 0, 0.35), box(0.46, 0.85, 0.28, 0.85, 0, 1)])!;
       this.walkers = new THREE.InstancedMesh(body, new THREE.MeshLambertMaterial({ vertexColors: true }), this.people.length);
       this.walkers.name = 'pedestrians';
       this.walkers.castShadow = false;
       this.walkers.frustumCulled = false;
-      this.people.forEach((_, k) => this.walkers!.setColorAt(k, new THREE.Color(CLOTHES[Math.floor(r() * CLOTHES.length)])));
+      this.people.forEach((w, k) => this.walkers!.setColorAt(k, w.color));
       this.group.add(this.walkers);
     }
 
@@ -312,20 +320,13 @@ export class Traffic {
   update(dt: number) {
     const showLights = this.lights.visible;
     const t = this.tmp;
-    const hide = () => {
-      t.position.set(0, -1000, 0);
-      t.scale.setScalar(0);
-      t.updateMatrix();
-    };
+    // Visible instances are packed at the front of each mesh and `count` is set to them, so
+    // hidden vehicles cost nothing on the GPU (#22).
+    const written = new Map<VehicleKind, number>(VEHICLE_KINDS.map((k) => [k, 0]));
+    let lit = 0;
     for (let i = 0; i < this.vehicles.length; i++) {
       const v = this.vehicles[i];
-      const mesh = this.bodies.get(v.kind)!;
-      if (v.threshold >= this.ratio[v.path]) {
-        hide();
-        mesh.setMatrixAt(v.slot, t.matrix);
-        if (showLights) (this.lights.setMatrixAt(i * 2, t.matrix), this.lights.setMatrixAt(i * 2 + 1, t.matrix));
-        continue;
-      }
+      if (v.threshold >= this.ratio[v.path]) continue;
       let p = this.paths[v.path];
       v.d += speedOf(v.kind, p.road.cls) * v.pace * this.speedRatio[v.path] * dt * v.dir;
       if (v.d > p.length || v.d < 0) {
@@ -334,18 +335,17 @@ export class Traffic {
       }
       pointAt(p, v.d, v.lateral * v.dir, this.pos, this.dir);
       if (v.dir < 0) this.dir.negate();
-      if (this.pos.y < TUNNEL_COVERED) {
-        // Inside a covered tunnel: not visible from above.
-        hide();
-        mesh.setMatrixAt(v.slot, t.matrix);
-        if (showLights) (this.lights.setMatrixAt(i * 2, t.matrix), this.lights.setMatrixAt(i * 2 + 1, t.matrix));
-        continue;
-      }
+      // Inside a covered tunnel: not visible from above.
+      if (this.pos.y < TUNNEL_COVERED) continue;
+      const mesh = this.bodies.get(v.kind)!;
+      const k = written.get(v.kind)!;
+      written.set(v.kind, k + 1);
       t.position.copy(this.pos).setY(this.pos.y + 0.05);
       t.rotation.set(0, Math.atan2(this.dir.x, this.dir.z), 0);
       t.scale.setScalar(1);
       t.updateMatrix();
-      mesh.setMatrixAt(v.slot, t.matrix);
+      mesh.setMatrixAt(k, t.matrix);
+      mesh.setColorAt(k, v.color);
       if (showLights) {
         const l = LENGTH[v.kind];
         const fx = this.dir.x * (l / 2 + 0.05);
@@ -355,14 +355,22 @@ export class Traffic {
         t.scale.set(w, 0.22, 0.12);
         t.position.set(this.pos.x + fx, this.pos.y + hy, this.pos.z + fz);
         t.updateMatrix();
-        this.lights.setMatrixAt(i * 2, t.matrix);
+        this.lights.setMatrixAt(lit * 2, t.matrix);
         t.position.set(this.pos.x - fx, this.pos.y + hy, this.pos.z - fz);
         t.updateMatrix();
-        this.lights.setMatrixAt(i * 2 + 1, t.matrix);
+        this.lights.setMatrixAt(lit * 2 + 1, t.matrix);
+        lit++;
       }
     }
-    for (const m of this.bodies.values()) m.instanceMatrix.needsUpdate = true;
-    if (showLights) this.lights.instanceMatrix.needsUpdate = true;
+    for (const [kind, m] of this.bodies) {
+      m.count = written.get(kind)!;
+      m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    }
+    if (showLights) {
+      this.lights.count = lit * 2;
+      this.lights.instanceMatrix.needsUpdate = true;
+    }
     this.updateWalkers(dt);
     this.updateTrains(dt);
   }
@@ -371,14 +379,9 @@ export class Traffic {
     if (!this.walkers) return;
     const t = this.tmp;
     const active = this.walk * (1 - this.night * 0.6);
-    this.people.forEach((w, k) => {
-      if (w.threshold >= active) {
-        t.position.set(0, -1000, 0);
-        t.scale.setScalar(0);
-        t.updateMatrix();
-        this.walkers!.setMatrixAt(k, t.matrix);
-        return;
-      }
+    let k = 0;
+    for (const w of this.people) {
+      if (w.threshold >= active) continue;
       const p = this.paths[w.path];
       w.d += w.speed * dt * w.dir;
       if (w.d > p.length || w.d < 0) {
@@ -391,8 +394,11 @@ export class Traffic {
       t.rotation.set(0, Math.atan2(this.dir.x, this.dir.z), 0);
       t.scale.setScalar(1);
       t.updateMatrix();
-      this.walkers!.setMatrixAt(k, t.matrix);
-    });
+      this.walkers.setMatrixAt(k, t.matrix);
+      this.walkers.setColorAt(k++, w.color);
+    }
+    this.walkers.count = k;
+    if (this.walkers.instanceColor) this.walkers.instanceColor.needsUpdate = true;
     this.walkers.instanceMatrix.needsUpdate = true;
   }
 
