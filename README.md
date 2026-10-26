@@ -165,6 +165,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.2](docs/releases/v0.0.2.md) (2026-10-26): mật độ nhà thật, bỏ phụ thuộc Overpass, chế độ Siêu thực, bản đồ offline theo phường.
 - [v0.0.1](docs/releases/v0.0.1.md) (2026-10-26): release note kiêm checkpoint (kiến trúc, quy trình, giới hạn, việc tiếp theo).
 
 ## Lộ trình
