@@ -121,6 +121,10 @@ tools/
 bench/                    # benchmark + ngân sách hiệu năng cho CI
 ```
 
+## Phiên bản
+
+- [v0.0.1](docs/releases/v0.0.1.md) (2026-10-26): release note kiêm checkpoint (kiến trúc, quy trình, giới hạn, việc tiếp theo).
+
 ## Lộ trình
 
 Kế hoạch và thảo luận nằm trong [issue #1](https://github.com/danny-exnodes/3d-map/issues/1). Backlog hiện tại:
