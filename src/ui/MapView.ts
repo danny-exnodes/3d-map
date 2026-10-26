@@ -7,7 +7,10 @@ setWorkerUrl(workerUrl);
 import { DEFAULT_LOCATION } from '../config';
 import type { BBox } from '../data/types';
 
-const STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+import { OFM_STYLE } from '../data/openfreemap';
+
+/** OpenFreeMap dark style (OSM data, no key, no rate limit — #17). */
+const STYLE = OFM_STYLE;
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 /** 2D map where the user searches a place and drags a rectangle to choose the area. */
@@ -30,6 +33,14 @@ export class MapView {
     this.map = new MapLibreMap({ container, style, center, zoom, attributionControl: { compact: true } });
     this.map.addControl(new NavigationControl({ showCompass: true }), 'bottom-right');
     this.map.addControl(new ScaleControl({ unit: 'metric' }), 'bottom-left');
+    // Prefer Vietnamese names on the basemap.
+    this.map.on('style.load', () => {
+      for (const layer of this.map.getStyle().layers ?? []) {
+        if (layer.type === 'symbol' && this.map.getLayoutProperty(layer.id, 'text-field')) {
+          this.map.setLayoutProperty(layer.id, 'text-field', ['coalesce', ['get', 'name:vi'], ['get', 'name']]);
+        }
+      }
+    });
     this.map.on('load', () => {
       this.map.addSource('selection', { type: 'geojson', data: EMPTY });
       this.map.addLayer({ id: 'sel-fill', type: 'fill', source: 'selection', paint: { 'fill-color': '#ff7a45', 'fill-opacity': 0.18 } });

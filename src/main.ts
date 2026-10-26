@@ -184,10 +184,37 @@ let loadAbort: AbortController | null = null;
 const HEIGHTS_BASE = new URL(`${import.meta.env.BASE_URL}heights/`, location.href).href;
 const HEIGHTS_API = (import.meta.env.VITE_HEIGHTS_API as string | undefined) || (import.meta.env.DEV ? new URL('/api/heights', location.href).href : undefined);
 
+// OSM source (#17): Overture's OSM-derived data by default, Overpass on request.
+const OSM_KEY = 'tinymap:osmSource';
+function osmSource(): 'overture' | 'overpass' {
+  if (/[?&]osm=overpass\b/.test(location.search)) return 'overpass';
+  try {
+    return localStorage.getItem(OSM_KEY) === 'overpass' ? 'overpass' : 'overture';
+  } catch {
+    return 'overture';
+  }
+}
+{
+  const box = $<HTMLInputElement>('opt-overpass');
+  box.checked = osmSource() === 'overpass';
+  box.addEventListener('change', () => {
+    try {
+      localStorage.setItem(OSM_KEY, box.checked ? 'overpass' : 'overture');
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
 /** City data via the worker (OSM + Overture + heights), or inline when workers are unavailable. */
 async function loadData(b: BBox, signal: AbortSignal): Promise<CityData> {
   const onProgress = (f: number, detail: string, step?: string) => progress((step as ProgressStep) ?? 'osm', f, detail);
-  const opts = { heightsBase: HEIGHTS_BASE, heightsApi: HEIGHTS_API, overture: !/[?&]nooverture\b/.test(location.search) };
+  const opts = {
+    heightsBase: HEIGHTS_BASE,
+    heightsApi: HEIGHTS_API,
+    overture: !/[?&]nooverture\b/.test(location.search),
+    osmSource: osmSource(),
+  };
   if (cityWorker.available) return cityWorker.loadCity(b, opts, onProgress, signal);
   return loadCity(b, { ...opts, signal }, (p) => onProgress(p.f, p.detail, p.step));
 }

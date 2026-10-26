@@ -141,3 +141,19 @@ describe('restyle after a measured height', () => {
     expect(b.color).toBe('#f4f4f0');
   });
 });
+
+describe('Overture as the OSM source (#17)', () => {
+  it('credits OSM-derived Overture buildings to OSM and replaces outlines by their parts', () => {
+    const city = emptyCity();
+    const ov = (id: string, ring: LngLat[], extra: Record<string, unknown> = {}) => ({ id, polygon: [ring], dataset: 'OpenStreetMap', ...extra });
+    mergeOverture(city, {
+      buildings: [ov('a', square(0, 0, 12), { numFloors: 5 }), ov('tower', square(60, 60, 30)), { ...ov('g', square(-60, -60, 8)), dataset: 'Google Open Buildings' }],
+      parts: [ov('p1', square(60, 60, 30), { buildingId: 'tower', height: 12 }), ov('p2', square(60, 60, 10), { buildingId: 'tower', height: 80, minHeight: 12 })],
+    });
+    const byId = Object.fromEntries(city.buildings.map((b) => [b.id, b]));
+    expect(byId['overture/a']).toMatchObject({ footprintSource: 'osm', heightSource: 'osm' });
+    expect(byId['overture/g'].footprintSource).toBe('overture');
+    expect(byId['overture/tower']).toBeUndefined();
+    expect(byId['overture/p2']).toMatchObject({ isPart: true, minHeight: 12, height: 80 });
+  });
+});

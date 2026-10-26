@@ -259,14 +259,16 @@ export function buildingFromOsm(id: string, polygon: Polygon, t: Record<string, 
 
 export function buildingFromOverture(o: OvertureBuilding, isPart = false): Building {
   const known = o.height && o.height > 1;
+  // Overture carries OSM buildings with their OSM height/levels: credit them to OSM (#17).
+  const fromOsm = o.dataset === 'OpenStreetMap';
   return makeBuilding({
     id: `overture/${o.id}`,
     polygon: o.polygon,
     kind: o.cls ?? 'yes',
     tags: {},
-    footprintSource: 'overture',
+    footprintSource: fromOsm ? 'osm' : 'overture',
     height: known ? o.height : undefined,
-    heightSource: known || o.numFloors ? 'overture' : undefined,
+    heightSource: known || o.numFloors ? (fromOsm ? 'osm' : 'overture') : undefined,
     levels: o.numFloors && o.numFloors > 0 ? o.numFloors : undefined,
     minHeight: o.minHeight,
     roofShapeTag: o.roofShape,

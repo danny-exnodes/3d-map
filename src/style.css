@@ -132,3 +132,4 @@ body.preview .preview-only { display: inline; }
 body.preview #btn-example, body.preview #btn-back, body.preview #btn-shot, body.preview #btn-glb, body.preview #map-view { display: none !important; }
 .preview-label { color: var(--muted); font-size: 12px; align-self: center; }
 .preview-select { background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font: inherit; font-size: 13px; color-scheme: dark; max-width: 52vw; }
+.opt { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; white-space: nowrap; }
