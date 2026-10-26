@@ -3,12 +3,14 @@ import { applyHeightGrid, computeStats, mergeOverture } from './enrich';
 import { loadHeightGrid } from './heights';
 import { loadOvertureBuildings } from './overture';
 import { loadOvertureContext } from './overtureBase';
-import { fetchOverpassText, parseOverpass, slimOverpass, type OverpassResponse } from './osm';
+import { fetchOverpassText, linkedAbort, parseOverpass, slimOverpass, type OverpassResponse } from './osm';
 import type { BBox, CityData } from './types';
 
 /** Bump when the Overpass query or the slimmed format changes, to invalidate cached entries. */
 export const OSM_QUERY_VERSION = 2;
 const OSM_TTL = 7 * 24 * 3600 * 1000;
+/** Overall OSM budget; Overpass usually answers a ~1 km² query in 2–10 s when healthy. */
+export const OSM_BUDGET_MS = 20_000;
 
 export const bboxKey = (b: BBox, digits = 4) => [b.south, b.west, b.north, b.east].map((v) => v.toFixed(digits)).join(',');
 
@@ -52,6 +54,8 @@ export interface CityLoadOptions {
   heightsApi?: string;
   /** Set false to skip Overture footprints (e.g. offline tests). */
   overture?: boolean;
+  /** Time allowed for OSM (all Overpass mirrors) before falling back to Overture. */
+  osmTimeoutMs?: number;
 }
 
 /**
@@ -74,15 +78,28 @@ export async function loadCity(bbox: BBox, opts: CityLoadOptions, onProgress: (p
   });
   // Overpass is a shared public service and often rate limited: fall back to Overture's
   // street network (itself derived from OSM) so the model still has roads and water.
-  const osmP = loadOsm(bbox, signal, (p) => onProgress(p)).catch(async (e) => {
+  // Whatever the mirrors do, give OSM a bounded time before switching to Overture.
+  const budget = opts.osmTimeoutMs ?? OSM_BUDGET_MS;
+  const osmLimit = linkedAbort(signal, budget);
+  // Tick once a second while waiting so a slow server never looks like a frozen app.
+  const t0 = Date.now();
+  let lastOsm: { f: number; detail: string } = { f: 0.05, detail: 'Overpass…' };
+  const tick = setInterval(() => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    onProgress({ step: 'osm', f: lastOsm.f, detail: `${lastOsm.detail} · ${s}/${Math.round(budget / 1000)} s` });
+  }, 1000);
+  const osmP = loadOsm(bbox, osmLimit.ctrl.signal, (p) => {
+    if (p.step === 'osm') lastOsm = { f: p.f, detail: p.detail };
+    onProgress(p);
+  }).finally(() => clearInterval(tick)).catch(async (e) => {
     if (signal?.aborted || opts.overture === false) throw e;
-    onProgress({ step: 'osm', f: 0.5, detail: 'Overpass lỗi — dùng Overture' });
+    onProgress({ step: 'osm', f: 0.5, detail: osmLimit.ctrl.signal.aborted ? 'Overpass quá chậm — dùng Overture' : 'Overpass lỗi — dùng Overture' });
     const ctx = await loadOvertureContext(bbox, signal);
     onProgress({ step: 'osm', f: 1, detail: `Overture: ${ctx.roads.length.toLocaleString('vi-VN')} đoạn đường` });
     const fallback: CityData = { bbox, buildings: [], pois: [], source: 'Overture', ...ctx };
     return fallback;
   });
-  const [data, overture, grid] = await Promise.all([osmP, overtureP, gridP]);
+  const [data, overture, grid] = await Promise.all([osmP.finally(() => osmLimit.clear()), overtureP, gridP]);
 
   onProgress({ step: 'merge', f: 0.4, detail: 'ghép footprint' });
   if (overture) {
