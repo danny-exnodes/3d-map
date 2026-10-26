@@ -1,6 +1,7 @@
 import './style.css';
 import { generateDemoCity } from './data/demo';
-import { fetchOverpass, parseOverpass } from './data/osm';
+import { cacheClear, cacheUsage } from './data/cache';
+import { loadOsm } from './data/loader';
 import type { BBox, CityData, ProgressStep } from './data/types';
 import { bboxAreaKm2 } from './geo/projection';
 import { CityScene } from './scene/CityScene';
@@ -21,7 +22,6 @@ const EXAMPLE = EXAMPLE_BBOX;
 const mapView = new MapView($('map'));
 let city: CityScene | null = null;
 let busy = false;
-const osmCache = new Map<string, CityData>();
 
 // ---------- Map view ----------
 
@@ -170,26 +170,13 @@ function resetProgress(title: string) {
 
 // ---------- Build ----------
 
-async function loadData(b: BBox): Promise<CityData> {
-  const k = [b.south, b.west, b.north, b.east].map((v) => v.toFixed(5)).join(',');
-  const cached = osmCache.get(k);
-  if (cached) return cached;
-  progress('osm', 0.1, 'đang tải…');
-  // Overpass gives no progress events, so animate a pseudo progress while waiting.
-  let fake = 0.1;
-  const timer = setInterval(() => progress('osm', (fake = Math.min(0.9, fake + 0.04)), 'đang tải…'), 300);
-  try {
-    const raw = await fetchOverpass(b, undefined, (ep) => progress('osm', fake, new URL(ep).host));
-    clearInterval(timer);
-    progress('osm', 1, `${fmt(raw.elements.length)} đối tượng`);
-    progress('merge', 0.2);
-    const data = parseOverpass(b, raw);
-    progress('merge', 1, `${fmt(data.buildings.length)} nhà`);
-    osmCache.set(k, data);
-    return data;
-  } finally {
-    clearInterval(timer);
-  }
+let loadAbort: AbortController | null = null;
+
+/** OSM data via the worker (cache → Overpass), or inline when workers are unavailable. */
+async function loadData(b: BBox, signal: AbortSignal): Promise<CityData> {
+  const onProgress = (f: number, detail: string, step?: string) => progress((step as ProgressStep) ?? 'osm', f, detail);
+  if (cityWorker.available) return cityWorker.loadOsm(b, onProgress, signal);
+  return loadOsm(b, signal, (p) => onProgress(p.f, p.detail, p.step));
 }
 
 async function build(source: 'osm' | 'demo') {
@@ -206,7 +193,9 @@ async function build(source: 'osm' | 'demo') {
       data = cityWorker.available ? await cityWorker.demo(b).catch(() => generateDemoCity(b)) : generateDemoCity(b);
       progress('merge', 1, `${fmt(data.buildings.length)} nhà`);
     } else {
-      data = await loadData(b);
+      loadAbort = new AbortController();
+      data = await loadData(b, loadAbort.signal);
+      progress('merge', 1, `${fmt(data.buildings.length)} nhà`);
     }
     showCity();
     city ??= new CityScene($('canvas'), $('labels'));
@@ -222,11 +211,16 @@ async function build(source: 'osm' | 'demo') {
     $('progress').hidden = true;
     loadWeather(b);
   } catch (e) {
-    console.error(e);
     showMap();
+    if ((e as Error).name === 'AbortError') {
+      $('progress').hidden = true;
+      return;
+    }
+    console.error(e);
     $('p-error').hidden = false;
     $('p-error').textContent = `Không tải được dữ liệu: ${(e as Error).message}. Thử lại sau, chọn vùng nhỏ hơn, hoặc bấm “Demo offline”.`;
   } finally {
+    loadAbort = null;
     busy = false;
     $('btn-build').textContent = 'Dựng 3D';
     onBBox(mapView.bbox);
@@ -234,6 +228,14 @@ async function build(source: 'osm' | 'demo') {
 }
 
 $('btn-build').addEventListener('click', () => build('osm'));
+$('btn-cancel').addEventListener('click', () => loadAbort?.abort());
+// Drawing a new area cancels a download in flight.
+mapView.map.on('mousedown', () => mapView.isDrawing && loadAbort?.abort());
+$('btn-cache').addEventListener('click', async () => {
+  const u = await cacheUsage();
+  if (!confirm(`Xoá ${fmt(u.entries)} mục (${fmt(u.bytes / 1048576, 1)} MB) dữ liệu đã lưu trên máy?`)) return;
+  await cacheClear();
+});
 $('btn-demo').addEventListener('click', () => build('demo'));
 
 function showCity() {

@@ -22,8 +22,19 @@ export function describeWeather(code: number): { label: string; icon: string; ra
   return { label: 'Không rõ', icon: '🌡️', rain: false };
 }
 
-/** Current weather from Open-Meteo (free, no API key). */
+import { cacheGet, cacheSet } from '../data/cache';
+
+/** Current weather from Open-Meteo (free, no API key), cached for 15 minutes. */
 export async function fetchWeather(lat: number, lon: number, signal?: AbortSignal): Promise<Weather> {
+  const key = `${lat.toFixed(2)},${lon.toFixed(2)}`;
+  const hit = await cacheGet<Weather>('weather', key);
+  if (hit) return hit;
+  const w = await fetchWeatherUncached(lat, lon, signal);
+  void cacheSet('weather', key, w, 15 * 60_000);
+  return w;
+}
+
+async function fetchWeatherUncached(lat: number, lon: number, signal?: AbortSignal): Promise<Weather> {
   const url = new URL('https://api.open-meteo.com/v1/forecast');
   url.searchParams.set('latitude', lat.toFixed(4));
   url.searchParams.set('longitude', lon.toFixed(4));

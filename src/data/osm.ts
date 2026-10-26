@@ -38,7 +38,7 @@ export function buildOverpassQuery(b: BBox): string {
   node["amenity"~"^(place_of_worship|hospital|university|marketplace)$"]["name"](${bb});
   way["amenity"~"^(place_of_worship|hospital|university|marketplace)$"]["name"](${bb});
 );
-out geom;`;
+out geom qt;`;
 }
 
 interface OsmGeomPoint {
@@ -63,30 +63,110 @@ export interface OverpassResponse {
   elements: OsmElement[];
 }
 
-export async function fetchOverpass(
+export interface OverpassProgress {
+  endpoint: string;
+  bytes: number;
+  /** Seconds until a query slot frees up, when the server is rate limiting us. */
+  waitSeconds?: number;
+}
+
+/** Reads a fetch body while reporting received bytes (Overpass sends no Content-Length). */
+export async function readTextWithProgress(res: Response, onBytes: (n: number) => void): Promise<string> {
+  if (!res.body) return res.text();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    text += decoder.decode(value, { stream: true });
+    onBytes(n);
+  }
+  return text + decoder.decode();
+}
+
+/**
+ * Parses Overpass `/api/status`: returns 0 when a slot is free, the wait in seconds when
+ * rate limited, or null when the status cannot be read.
+ */
+export function parseOverpassStatus(text: string): number | null {
+  const free = /(\d+) slots? available now/.exec(text);
+  if (free && Number(free[1]) > 0) return 0;
+  const waits = [...text.matchAll(/in (\d+) seconds/g)].map((m) => Number(m[1]));
+  return waits.length ? Math.min(...waits) : null;
+}
+
+async function overpassWait(endpoint: string, signal?: AbortSignal): Promise<number | null> {
+  try {
+    const res = await fetch(endpoint.replace(/interpreter$/, 'status'), { signal });
+    return res.ok ? parseOverpassStatus(await res.text()) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetches raw Overpass JSON text, trying mirrors in order and respecting rate limits (#9). */
+export async function fetchOverpassText(
   bbox: BBox,
   signal?: AbortSignal,
-  onAttempt?: (endpoint: string) => void,
-): Promise<OverpassResponse> {
+  onProgress?: (p: OverpassProgress) => void,
+): Promise<string> {
   const body = 'data=' + encodeURIComponent(buildOverpassQuery(bbox));
   let lastErr: unknown;
-  for (const ep of OVERPASS_ENDPOINTS) {
-    onAttempt?.(ep);
+  for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
-      const res = await fetch(ep, {
+      const wait = await overpassWait(endpoint, signal);
+      if (wait && wait > 0) {
+        onProgress?.({ endpoint, bytes: 0, waitSeconds: wait });
+        if (wait > 20) throw new Error(`${new URL(endpoint).host}: hết lượt, cần chờ ${wait} s`);
+        await sleep(wait * 1000, signal);
+      }
+      onProgress?.({ endpoint, bytes: 0 });
+      const res = await fetch(endpoint, {
         method: 'POST',
         body,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         signal,
       });
-      if (!res.ok) throw new Error(`${ep}: HTTP ${res.status}`);
-      return (await res.json()) as OverpassResponse;
+      if (!res.ok) throw new Error(`${new URL(endpoint).host}: HTTP ${res.status}`);
+      return await readTextWithProgress(res, (bytes) => onProgress?.({ endpoint, bytes }));
     } catch (e) {
       if (signal?.aborted) throw e;
       lastErr = e;
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('Overpass request failed');
+}
+
+function sleep(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(new DOMException('Aborted', 'AbortError'));
+    });
+  });
+}
+
+/** Tags the parser reads; everything else is dropped before caching (~40–60% smaller). */
+const KEPT_TAGS = new Set([
+  'building', 'building:part', 'building:levels', 'building:min_level', 'building:height', 'height', 'min_height',
+  'roof:shape', 'roof:height', 'roof:levels', 'roof:colour', 'roof:material', 'roof:direction', 'roof:orientation',
+  'building:colour', 'building:material', 'name', 'amenity', 'religion', 'highway', 'lanes', 'width', 'oneway',
+  'junction', 'layer', 'bridge', 'tunnel', 'area', 'railway', 'waterway', 'natural', 'landuse', 'leisure', 'shop',
+  'addr:housenumber', 'addr:street', 'addr:district', 'addr:city',
+]);
+
+export function slimOverpass(data: OverpassResponse): OverpassResponse {
+  return {
+    elements: data.elements.map((el) => {
+      const tags: Record<string, string> = {};
+      for (const [k, v] of Object.entries(el.tags ?? {})) if (KEPT_TAGS.has(k)) tags[k] = v;
+      return { ...el, tags };
+    }),
+  };
 }
 
 const toLL = (g: OsmGeomPoint[]): LngLat[] => g.map((p) => [p.lon, p.lat]);

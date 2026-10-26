@@ -114,3 +114,5 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
   #t-date { display: none; }
   .progress { top: auto; bottom: 140px; }
 }
+
+#btn-cancel { margin-top: 10px; width: 100%; }

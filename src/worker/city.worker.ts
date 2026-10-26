@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { generateDemoCity } from '../data/demo';
+import { loadOsm } from '../data/loader';
 import { parseOverpass, type OverpassResponse } from '../data/osm';
 import { buildCity } from '../scene/buildCity';
 import { serializeObject } from '../scene/serialize';
@@ -7,9 +8,26 @@ import type { BuildResult, WorkerRequest, WorkerResponse } from './protocol';
 
 const post = (msg: WorkerResponse, transfer: Transferable[] = []) => (self as DedicatedWorkerGlobalScope).postMessage(msg, transfer);
 
-self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
+const controllers = new Map<number, AbortController>();
+
+self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const req = ev.data;
+  if (req.op === 'abort') {
+    controllers.get(req.target)?.abort();
+    return;
+  }
   try {
+    if (req.op === 'loadOsm') {
+      const ctrl = new AbortController();
+      controllers.set(req.id, ctrl);
+      try {
+        const data = await loadOsm(req.bbox, ctrl.signal, (p) => post({ id: req.id, type: 'progress', ...p }));
+        post({ id: req.id, type: 'result', result: data });
+      } finally {
+        controllers.delete(req.id);
+      }
+      return;
+    }
     if (req.op === 'build') {
       const built = buildCity(req.data, (f, detail) => post({ id: req.id, type: 'progress', f, detail }));
       const { objects, transfer } = serializeObject(built.group);

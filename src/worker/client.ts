@@ -1,7 +1,7 @@
 import type { BBox, CityData } from '../data/types';
 import type { BuildResult, WorkerRequest, WorkerResponse } from './protocol';
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; onProgress?: (f: number, d: string) => void };
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; onProgress?: (f: number, d: string, step?: string) => void };
 type Op = WorkerRequest extends infer R ? (R extends { op: infer O } ? O : never) : never;
 
 /** Promise wrapper around the city worker. `available` is false where module workers are unsupported. */
@@ -23,7 +23,7 @@ class CityWorkerClient {
         const msg = ev.data;
         const p = this.pending.get(msg.id);
         if (!p) return;
-        if (msg.type === 'progress') p.onProgress?.(msg.f, msg.detail);
+        if (msg.type === 'progress') p.onProgress?.(msg.f, msg.detail, msg.step);
         else {
           this.pending.delete(msg.id);
           if (msg.type === 'result') p.resolve(msg.result);
@@ -40,14 +40,23 @@ class CityWorkerClient {
     return this.worker;
   }
 
-  private call<T>(op: Op, payload: Record<string, unknown>, onProgress?: Pending['onProgress']): Promise<T> {
+  private call<T>(op: Op, payload: Record<string, unknown>, onProgress?: Pending['onProgress'], signal?: AbortSignal): Promise<T> {
     const w = this.ensure();
     if (!w) return Promise.reject(new Error('Web Worker unavailable'));
     const id = ++this.seq;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, onProgress });
       w.postMessage({ id, op, ...payload });
+      signal?.addEventListener('abort', () => {
+        w.postMessage({ id: ++this.seq, op: 'abort', target: id });
+        this.pending.delete(id);
+        reject(new DOMException('Đã huỷ', 'AbortError'));
+      });
     });
+  }
+
+  loadOsm(bbox: BBox, onProgress: NonNullable<Pending['onProgress']>, signal?: AbortSignal) {
+    return this.call<CityData>('loadOsm', { bbox }, onProgress, signal);
   }
 
   build(data: CityData, onProgress?: Pending['onProgress']) {
