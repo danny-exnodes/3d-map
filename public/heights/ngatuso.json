@@ -1,0 +1,15 @@
+{
+  "id": "ngatuso",
+  "name": "Ngã Tư Sở, Hà Nội",
+  "bbox": {
+    "south": 20.9992,
+    "west": 105.8152,
+    "north": 21.0068,
+    "east": 105.8238
+  },
+  "cell": 2,
+  "width": 447,
+  "depth": 421,
+  "encoding": "uint16le-decimetres",
+  "source": "Google Open Buildings 2.5D Temporal (2023), CC BY 4.0"
+}

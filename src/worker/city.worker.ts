@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { generateDemoCity } from '../data/demo';
-import { loadOsm } from '../data/loader';
+import { loadCity } from '../data/loader';
 import { parseOverpass, type OverpassResponse } from '../data/osm';
 import { buildCity } from '../scene/buildCity';
 import { serializeObject } from '../scene/serialize';
@@ -17,11 +17,11 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     return;
   }
   try {
-    if (req.op === 'loadOsm') {
+    if (req.op === 'loadCity') {
       const ctrl = new AbortController();
       controllers.set(req.id, ctrl);
       try {
-        const data = await loadOsm(req.bbox, ctrl.signal, (p) => post({ id: req.id, type: 'progress', ...p }));
+        const data = await loadCity(req.bbox, { ...req.opts, signal: ctrl.signal }, (p) => post({ id: req.id, type: 'progress', ...p }));
         post({ id: req.id, type: 'result', result: data });
       } finally {
         controllers.delete(req.id);

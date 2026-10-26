@@ -1,3 +1,4 @@
+import type { CityLoadOptions } from '../data/loader';
 import type { BBox, CityData } from '../data/types';
 import type { BuildResult, WorkerRequest, WorkerResponse } from './protocol';
 
@@ -55,8 +56,8 @@ class CityWorkerClient {
     });
   }
 
-  loadOsm(bbox: BBox, onProgress: NonNullable<Pending['onProgress']>, signal?: AbortSignal) {
-    return this.call<CityData>('loadOsm', { bbox }, onProgress, signal);
+  loadCity(bbox: BBox, opts: Omit<CityLoadOptions, 'signal'>, onProgress: NonNullable<Pending['onProgress']>, signal?: AbortSignal) {
+    return this.call<CityData>('loadCity', { bbox, opts }, onProgress, signal);
   }
 
   build(data: CityData, onProgress?: Pending['onProgress']) {

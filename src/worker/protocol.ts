@@ -1,3 +1,4 @@
+import type { CityLoadOptions } from '../data/loader';
 import type { BBox, CityData } from '../data/types';
 import type { RailPath, RoadPath } from '../scene/roads';
 import type { ObjectDesc } from '../scene/serialize';
@@ -6,7 +7,7 @@ export type WorkerRequest =
   | { id: number; op: 'build'; data: CityData }
   | { id: number; op: 'parseOverpass'; bbox: BBox; text: string }
   | { id: number; op: 'demo'; bbox: BBox }
-  | { id: number; op: 'loadOsm'; bbox: BBox }
+  | { id: number; op: 'loadCity'; bbox: BBox; opts: Omit<CityLoadOptions, 'signal'> }
   | { id: number; op: 'abort'; target: number };
 
 export interface BuildResult {

@@ -37,7 +37,8 @@ export class CityScene {
   private city = new THREE.Group();
   private traffic: Traffic | null = null;
   private lampBulbs: THREE.InstancedMesh | null = null;
-  private buildingUniforms: { uNight: { value: number } } | null = null;
+  private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number } } | null = null;
+  private sourceView = false;
   private rain: THREE.Points | null = null;
   private timer = new THREE.Timer();
   private size = { width: 1000, depth: 1000 };
@@ -145,6 +146,7 @@ export class CityScene {
     this.city.add(built.group);
     const buildingsMesh = built.group.getObjectByName('buildings') as THREE.Mesh | undefined;
     this.buildingUniforms = (buildingsMesh?.material as THREE.Material | undefined)?.userData.uniforms ?? null;
+    if (this.buildingUniforms) this.buildingUniforms.uSourceView.value = this.sourceView ? 1 : 0;
     this.lampBulbs = (built.group.getObjectByName('lampBulbs') as THREE.InstancedMesh | undefined) ?? null;
 
     onProgress('build', 0.92, 'Giao thông');
@@ -267,6 +269,12 @@ export class CityScene {
 
   get currentColorMode() {
     return this.colorMode;
+  }
+
+  /** Colour buildings by where their height comes from (#3). */
+  setSourceView(on: boolean) {
+    this.sourceView = on;
+    if (this.buildingUniforms) this.buildingUniforms.uSourceView.value = on ? 1 : 0;
   }
 
   setCloud(c: number) {

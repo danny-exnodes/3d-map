@@ -1,0 +1,15 @@
+{
+  "id": "ennam",
+  "name": "Én Nam – 101 Châu Thị Hoá, TP.HCM",
+  "bbox": {
+    "south": 10.7302,
+    "west": 106.6687,
+    "north": 10.7454,
+    "east": 106.6841
+  },
+  "cell": 2,
+  "width": 843,
+  "depth": 841,
+  "encoding": "uint16le-decimetres",
+  "source": "Google Open Buildings 2.5D Temporal (2023), CC BY 4.0"
+}

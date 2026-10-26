@@ -10,6 +10,14 @@ export type LngLat = [lon: number, lat: number];
 /** A polygon: outer ring first, then holes. Rings are not closed (first != last). */
 export type Polygon = LngLat[][];
 
+export type RoofShape = 'flat' | 'gabled' | 'hipped' | 'pyramidal' | 'dome' | 'pagoda';
+export type FacadeMaterial = 'glass' | 'brick' | 'metal' | 'concrete';
+/** Vietnamese building typologies used for heuristics and procedural detail (#5). */
+export type Archetype = 'tube' | 'shophouse' | 'villa' | 'apartment' | 'office' | 'civic' | 'industrial' | 'temple' | 'church' | 'generic';
+/** Where the height came from, best first (#3). */
+export type HeightSource = 'osm' | 'gob' | 'overture' | 'heuristic';
+export type FootprintSource = 'osm' | 'overture' | 'demo';
+
 export interface Building {
   id: string;
   polygon: Polygon;
@@ -17,10 +25,19 @@ export interface Building {
   height: number;
   minHeight: number;
   kind: string;
-  roof: 'flat' | 'gabled' | 'hipped';
+  roof: RoofShape;
+  roofHeight?: number;
   color?: string;
   roofColor?: string;
+  material?: FacadeMaterial;
+  archetype?: Archetype;
+  heightSource: HeightSource;
+  footprintSource: FootprintSource;
+  levels?: number;
   name?: string;
+  address?: string;
+  /** A building:part; its outline building is not drawn (Simple 3D Buildings). */
+  isPart?: boolean;
 }
 
 export type RoadClass = 'motorway' | 'primary' | 'secondary' | 'tertiary' | 'residential' | 'service' | 'path';
@@ -67,7 +84,15 @@ export interface PointOfInterest {
   kind: string;
 }
 
+export interface CityStats {
+  footprints: Record<FootprintSource, number>;
+  heights: Record<HeightSource, number>;
+  /** Attribution lines for the data actually used. */
+  attributions: string[];
+}
+
 export interface CityData {
+  stats?: CityStats;
   bbox: BBox;
   buildings: Building[];
   roads: Road[];
@@ -79,5 +104,5 @@ export interface CityData {
   source: string;
 }
 
-export type ProgressStep = 'osm' | 'merge' | 'build';
+export type ProgressStep = 'osm' | 'overture' | 'heights' | 'merge' | 'build';
 export type ProgressFn = (step: ProgressStep, fraction: number, detail?: string) => void;

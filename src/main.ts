@@ -1,7 +1,7 @@
 import './style.css';
 import { generateDemoCity } from './data/demo';
 import { cacheClear, cacheUsage } from './data/cache';
-import { loadOsm } from './data/loader';
+import { loadCity } from './data/loader';
 import type { BBox, CityData, ProgressStep } from './data/types';
 import { bboxAreaKm2 } from './geo/projection';
 import { CityScene } from './scene/CityScene';
@@ -138,22 +138,22 @@ document.addEventListener('keydown', (e) => {
 
 // ---------- Progress ----------
 
-const STEP_ORDER: ProgressStep[] = ['osm', 'merge', 'build'];
-const STEP_WEIGHT: Record<ProgressStep, [number, number]> = { osm: [0, 0.55], merge: [0.55, 0.65], build: [0.65, 1] };
+// Data steps run in parallel, so each keeps its own fraction; the total is a weighted sum.
+const STEP_WEIGHT: Record<ProgressStep, number> = { osm: 0.35, overture: 0.15, heights: 0.05, merge: 0.1, build: 0.35 };
+const stepF: Record<ProgressStep, number> = { osm: 0, overture: 0, heights: 0, merge: 0, build: 0 };
 let t0 = 0;
 function progress(step: ProgressStep, f: number, detail?: string) {
-  const [a, b] = STEP_WEIGHT[step];
-  const pct = Math.round((a + (b - a) * f) * 100);
+  stepF[step] = Math.max(stepF[step], Math.min(1, f));
+  const total = (Object.keys(STEP_WEIGHT) as ProgressStep[]).reduce((a, k) => a + STEP_WEIGHT[k] * stepF[k], 0);
+  const pct = Math.round(total * 100);
   $('p-pct').textContent = String(pct);
   $('p-bar').style.width = `${pct}%`;
   $('p-time').textContent = `${fmt((performance.now() - t0) / 1000, 1)} s`;
-  const idx = STEP_ORDER.indexOf(step);
-  document.querySelectorAll<HTMLLIElement>('.steps li').forEach((li) => {
-    const i = STEP_ORDER.indexOf(li.dataset.step as ProgressStep);
-    li.classList.toggle('done', i < idx || (i === idx && f >= 1));
-    li.classList.toggle('active', i === idx && f < 1);
-    if (i === idx && detail) li.querySelector('span')!.textContent = detail;
-  });
+  const li = document.querySelector<HTMLLIElement>(`.steps li[data-step="${step}"]`);
+  if (!li) return;
+  li.classList.toggle('done', stepF[step] >= 1);
+  li.classList.toggle('active', stepF[step] < 1);
+  if (detail) li.querySelector('span')!.textContent = detail;
 }
 
 function resetProgress(title: string) {
@@ -165,6 +165,7 @@ function resetProgress(title: string) {
     li.classList.remove('done', 'active');
     li.querySelector('span')!.textContent = '';
   });
+  for (const k of Object.keys(stepF) as ProgressStep[]) stepF[k] = 0;
   progress('osm', 0);
 }
 
@@ -172,11 +173,16 @@ function resetProgress(title: string) {
 
 let loadAbort: AbortController | null = null;
 
-/** OSM data via the worker (cache → Overpass), or inline when workers are unavailable. */
+/** Height grids: bundled under public/heights/, plus an on-demand endpoint in dev or when configured (#3, #4). */
+const HEIGHTS_BASE = new URL(`${import.meta.env.BASE_URL}heights/`, location.href).href;
+const HEIGHTS_API = (import.meta.env.VITE_HEIGHTS_API as string | undefined) || (import.meta.env.DEV ? new URL('/api/heights', location.href).href : undefined);
+
+/** City data via the worker (OSM + Overture + heights), or inline when workers are unavailable. */
 async function loadData(b: BBox, signal: AbortSignal): Promise<CityData> {
   const onProgress = (f: number, detail: string, step?: string) => progress((step as ProgressStep) ?? 'osm', f, detail);
-  if (cityWorker.available) return cityWorker.loadOsm(b, onProgress, signal);
-  return loadOsm(b, signal, (p) => onProgress(p.f, p.detail, p.step));
+  const opts = { heightsBase: HEIGHTS_BASE, heightsApi: HEIGHTS_API, overture: !/[?&]nooverture\b/.test(location.search) };
+  if (cityWorker.available) return cityWorker.loadCity(b, opts, onProgress, signal);
+  return loadCity(b, { ...opts, signal }, (p) => onProgress(p.f, p.detail, p.step));
 }
 
 async function build(source: 'osm' | 'demo') {
@@ -190,12 +196,13 @@ async function build(source: 'osm' | 'demo') {
     let data: CityData;
     if (source === 'demo') {
       progress('osm', 1, 'bỏ qua (offline)');
+      progress('overture', 1, 'bỏ qua');
+      progress('heights', 1, 'bỏ qua');
       data = cityWorker.available ? await cityWorker.demo(b).catch(() => generateDemoCity(b)) : generateDemoCity(b);
       progress('merge', 1, `${fmt(data.buildings.length)} nhà`);
     } else {
       loadAbort = new AbortController();
       data = await loadData(b, loadAbort.signal);
-      progress('merge', 1, `${fmt(data.buildings.length)} nhà`);
     }
     showCity();
     city ??= new CityScene($('canvas'), $('labels'));
@@ -208,6 +215,7 @@ async function build(source: 'osm' | 'demo') {
     const km2 = bboxAreaKm2(b);
     $('i-title').textContent = source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
     $('i-stats').textContent = `${fmt(km2, 2)} km² · dựng xong trong ${fmt(stats.seconds, 1)} s · ${fmt(stats.buildings)} nhà · ${fmt(stats.trees)} cây · ${data.source}`;
+    renderSourceStats(data);
     $('progress').hidden = true;
     loadWeather(b);
   } catch (e) {
@@ -249,6 +257,39 @@ function showMap() {
   mapView.resize();
 }
 $('btn-back').addEventListener('click', showMap);
+
+// ---------- Data sources (#3) ----------
+
+function renderSourceStats(data: CityData) {
+  const st = data.stats;
+  const el = $('i-sources');
+  if (!st) {
+    el.textContent = '';
+    return;
+  }
+  const n = data.buildings.length || 1;
+  const pct = (v: number) => `${fmt((v / n) * 100)}%`;
+  const fp = [`${fmt(st.footprints.osm)} OSM`, st.footprints.overture ? `${fmt(st.footprints.overture)} Overture` : ''].filter(Boolean).join(' + ');
+  const h = st.heights;
+  const measured = h.osm + h.gob + h.overture;
+  el.innerHTML = '';
+  const line1 = document.createElement('div');
+  line1.textContent = `Footprint: ${fp}`;
+  const line2 = document.createElement('div');
+  line2.textContent = `Chiều cao: ${pct(measured)} từ dữ liệu (Google 2.5D ${pct(h.gob)} · OSM ${pct(h.osm)}${h.overture ? ` · Overture ${pct(h.overture)}` : ''}), ${pct(h.heuristic)} ước lượng`;
+  const line3 = document.createElement('div');
+  line3.className = 'attrib';
+  line3.textContent = st.attributions.join(' · ');
+  el.append(line1, line2, line3);
+}
+
+let sourceView = false;
+$('btn-sources').addEventListener('click', () => {
+  sourceView = !sourceView;
+  city?.setSourceView(sourceView);
+  $('btn-sources').classList.toggle('on', sourceView);
+  $('legend-sources').hidden = !sourceView;
+});
 
 // ---------- Weather ----------
 

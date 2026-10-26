@@ -5,6 +5,10 @@ import type { LocalProjection } from '../geo/projection';
 import { flatPolygon, merge, MeshBuilder, type XZ } from './geometry';
 import { SpatialGrid } from './spatial';
 
+/** Integer codes of HeightSource stored in aSeed (see the "theo nguồn chiều cao" view, #3). */
+export const HEIGHT_SOURCE_CODE: Record<Building['heightSource'], number> = { osm: 0, gob: 1, overture: 2, heuristic: 3 };
+export const HEIGHT_SOURCE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#9ca3af'];
+
 export interface BuildingsResult {
   mesh: THREE.Mesh;
   material: THREE.MeshLambertMaterial;
@@ -48,7 +52,8 @@ export function buildBuildings(list: Building[], proj: LocalProjection, onProgre
     if (outerArea < 4) return;
     count++;
 
-    const seed = (hashString(b.id) % 10007) / 10007;
+    // aSeed packs the height-source code (integer part) with a per-building random seed (fraction).
+    const seed = HEIGHT_SOURCE_CODE[b.heightSource] + (hashString(b.id) % 10007) / 10008;
     const y0 = b.minHeight;
     const y1 = b.height;
     facade.set(b.color ?? '#f0e6d2');
@@ -66,7 +71,7 @@ export function buildBuildings(list: Building[], proj: LocalProjection, onProgre
     footprints.insert(rings[0], rings[0]);
 
     const roofColor = b.roofColor ?? '#d2cbbb';
-    if (b.roof !== 'flat' && rings.length === 1 && rings[0].length === 4) {
+    if ((b.roof === 'gabled' || b.roof === 'hipped') && rings.length === 1 && rings[0].length === 4) {
       pitchedRoof(walls, rings[0], y1, b.roof, facade, new THREE.Color(roofColor), seed);
     } else {
       const g = flatPolygon(rings, y1, roofColor);
@@ -144,11 +149,12 @@ function pitchedRoof(mb: MeshBuilder, ring: XZ[], y: number, kind: 'gabled' | 'h
  */
 export function createBuildingMaterial(): THREE.MeshLambertMaterial {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  const uniforms = { uNight: { value: 0 } };
+  const uniforms = { uNight: { value: 0 }, uSourceView: { value: 0 } };
   mat.userData.uniforms = uniforms;
   mat.userData.isBuildingMaterial = true;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
+    shader.uniforms.uSourceView = uniforms.uSourceView;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -170,6 +176,7 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
         '#include <common>',
         `#include <common>
         uniform float uNight;
+        uniform float uSourceView;
         varying vec3 vWPos;
         varying vec3 vWNormal;
         varying float vSeed;
@@ -179,6 +186,11 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        if (uSourceView > 0.5) {
+          float src = floor(vSeed + 0.001);
+          diffuseColor.rgb = src < 0.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[0])}) : src < 1.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[1])})
+            : src < 2.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[2])}) : vec3(${hexToVec(HEIGHT_SOURCE_COLORS[3])});
+        }
         winMask = 0.0; winLit = 0.0; winColor = vec3(0.0);
         if (abs(vWNormal.y) < 0.3 && vWPos.y > 0.6) {
           vec2 t = normalize(vec2(-vWNormal.z, vWNormal.x));
@@ -191,10 +203,10 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
           float mx = smoothstep(0.22 - aa, 0.22 + aa, f.x) * (1.0 - smoothstep(0.78 - aa, 0.78 + aa, f.x));
           float my = smoothstep(0.32, 0.36, f.y) * (1.0 - smoothstep(0.82, 0.86, f.y));
           winMask = mx * my;
-          float r = h21(cell + vSeed * 97.0);
-          float floorDark = step(0.82, h21(vec2(cell.y, vSeed * 31.0)));
+          float r = h21(cell + fract(vSeed) * 97.0);
+          float floorDark = step(0.82, h21(vec2(cell.y, fract(vSeed) * 31.0)));
           winLit = step(r, 0.42) * (1.0 - floorDark);
-          winColor = mix(vec3(1.0, 0.78, 0.45), vec3(0.95, 0.95, 1.0), step(0.75, h21(cell.yx + vSeed)));
+          winColor = mix(vec3(1.0, 0.78, 0.45), vec3(0.95, 0.95, 1.0), step(0.75, h21(cell.yx + fract(vSeed))));
           vec3 glass = mix(vec3(0.42, 0.52, 0.62), vec3(0.08, 0.1, 0.16), uNight);
           diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * 0.75);
         }
@@ -208,4 +220,10 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
       );
   };
   return mat;
+}
+
+/** Linear-space GLSL vec3 literal for a hex colour. */
+function hexToVec(hex: string): string {
+  const c = new THREE.Color(hex);
+  return `${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)}`;
 }

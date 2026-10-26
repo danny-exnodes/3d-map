@@ -116,3 +116,6 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 }
 
 #btn-cancel { margin-top: 10px; width: 100%; }
+.legend { position: absolute; right: 60px; top: 64px; padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.attrib { font-size: 10px; opacity: 0.8; margin-top: 2px; }
