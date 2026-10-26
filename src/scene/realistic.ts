@@ -280,7 +280,7 @@ function waterMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
  */
 function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
   const uniforms = orig.userData.uniforms as { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number }; uLit: { value: number } };
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, flatShading: (orig as THREE.MeshLambertMaterial).flatShading });
   mat.userData.uniforms = uniforms;
   mat.userData.isBuildingMaterial = true;
   mat.onBeforeCompile = (shader) => {
@@ -326,6 +326,8 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        // Geometric normal from derivatives (prototype instances are scaled non-uniformly, #22).
+        vec3 bN = normalize(cross(dFdx(vWPos), dFdy(vWPos)));
         float code = floor(vSeed + 0.001);
         float src = mod(code, 4.0);
         float matCode = floor(code / 4.0 + 0.001);
@@ -336,9 +338,9 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
         if (uSourceView > 0.5) {
           base = src < 0.5 ? vec3(0.016, 0.61, 0.21) : src < 1.5 ? vec3(0.046, 0.25, 0.92) : src < 2.5 ? vec3(0.91, 0.37, 0.004) : vec3(0.33, 0.35, 0.40);
         }
-        if (abs(vWNormal.y) < 0.3) {
+        if (abs(bN.y) < 0.3) {
           // ---- Walls ----
-          vec2 t = normalize(vec2(-vWNormal.z, vWNormal.x));
+          vec2 t = normalize(vec2(-bN.z, bN.x));
           float u = dot(vWPos.xz, t);
           float y = vWPos.y;
           float cellW = 3.2, cellH = 3.3;
@@ -434,7 +436,7 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
             base = mix(base, vec3(0.82, 0.82, 0.8), ac);
             rH += ac * 0.08;
           }
-        } else if (vWNormal.y > 0.97) {
+        } else if (bN.y > 0.97) {
           // ---- Flat roofs: weathered concrete, damp stains, waterproofing patches ----
           vec2 p = vWPos.xz;
           float n = rFbm(p * 0.25 + rnd * 40.0);
@@ -447,7 +449,7 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
           rH = rNoise(p * 6.0) * 0.03;
         } else {
           // ---- Pitched roofs ----
-          vec2 d = normalize(vWNormal.xz);
+          vec2 d = normalize(bN.xz);
           vec2 across = vec2(-d.y, d.x);
           float a = dot(vWPos.xz, across);
           float s = dot(vWPos.xz, d);
@@ -647,6 +649,10 @@ export class Realism {
       if ((m as THREE.MeshBasicMaterial).isMeshBasicMaterial) return m.clone();
       switch (mesh.name) {
         case 'buildings':
+        case 'buildings-walls':
+        case 'buildings-roof-flat':
+        case 'buildings-roof-gabled':
+        case 'buildings-roof-hipped':
           return buildingMaterial(m);
         case 'roads':
           return surfaceMaterial(m, 'asphalt');

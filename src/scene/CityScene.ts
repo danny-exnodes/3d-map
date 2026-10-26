@@ -58,6 +58,7 @@ export class CityScene {
   private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number }; uLit: { value: number } } | null = null;
   private lampPools: THREE.InstancedMesh | null = null;
   private buildingsMesh: THREE.Mesh | null = null;
+  private protoMeshes: THREE.InstancedMesh[] = [];
   private buildingIds: string[] = [];
   private buildingById = new Map<string, Building>();
   private raycaster = new THREE.Raycaster();
@@ -194,6 +195,8 @@ export class CityScene {
     const buildingsMesh = built.group.getObjectByName('buildings') as THREE.Mesh | undefined;
     this.buildingUniforms = (buildingsMesh?.material as THREE.Material | undefined)?.userData.uniforms ?? null;
     this.buildingsMesh = buildingsMesh ?? null;
+    this.protoMeshes = [];
+    built.group.traverse((o) => o.name.startsWith('buildings-') && this.protoMeshes.push(o as THREE.InstancedMesh));
     this.buildingIds = built.buildingIds;
     this.buildingById = new Map(data.buildings.map((b) => [b.id, b]));
     if (this.buildingUniforms) this.buildingUniforms.uSourceView.value = this.sourceView ? 1 : 0;
@@ -266,6 +269,7 @@ export class CityScene {
     dispose(this.city);
     this.city.clear();
     this.buildingsMesh = null;
+    this.protoMeshes = [];
     this.buildingIds = [];
     this.buildingById.clear();
     if (this.traffic) {
@@ -371,14 +375,14 @@ export class CityScene {
 
   /** Raycasts the buildings mesh at a screen point and selects the building under it. */
   pick(clientX: number, clientY: number): Building | null {
-    const mesh = this.buildingsMesh;
-    if (!mesh) return null;
+    if (!this.buildingsMesh) return null;
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
-    const hit = this.raycaster.intersectObject(mesh, false)[0];
-    const bidAttr = mesh.geometry.getAttribute('aBid');
-    const bid = hit?.face && bidAttr ? Math.round(bidAttr.getX(hit.face.a)) : -1;
+    // Exact buildings carry the id per vertex, prototype instances per instance (#22).
+    const hit = this.raycaster.intersectObjects([this.buildingsMesh, ...this.protoMeshes], false)[0];
+    const bidAttr = (hit?.object as THREE.Mesh | undefined)?.geometry.getAttribute('aBid');
+    const bid = !hit || !bidAttr ? -1 : hit.instanceId !== undefined ? Math.round(bidAttr.getX(hit.instanceId)) : hit.face ? Math.round(bidAttr.getX(hit.face.a)) : -1;
     const b = bid >= 0 ? (this.buildingById.get(this.buildingIds[bid]) ?? null) : null;
     this.select(b ? bid : -1);
     this.onPick?.(b);

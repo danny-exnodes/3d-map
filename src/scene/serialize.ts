@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createBuildingMaterial } from './buildings';
+import { type BuildingUniforms, createBuildingMaterial } from './buildings';
 
 /**
  * Plain-data description of the meshes built in the worker. Typed arrays are transferred,
@@ -16,7 +16,7 @@ export interface MaterialDesc {
 export interface ObjectDesc {
   type: 'mesh' | 'instanced';
   name: string;
-  attributes: Record<string, { array: Float32Array | Uint16Array | Uint32Array; itemSize: number }>;
+  attributes: Record<string, { array: Float32Array | Uint16Array | Uint32Array; itemSize: number; instanced?: boolean }>;
   index?: Uint16Array | Uint32Array;
   groups: { start: number; count: number; materialIndex: number }[];
   materials: MaterialDesc[];
@@ -66,7 +66,7 @@ export function serializeObject(root: THREE.Object3D): { objects: ObjectDesc[]; 
     const attributes: ObjectDesc['attributes'] = {};
     for (const [name, attr] of Object.entries(g.attributes)) {
       const a = attr as THREE.BufferAttribute;
-      attributes[name] = { array: a.array as Float32Array, itemSize: a.itemSize };
+      attributes[name] = { array: a.array as Float32Array, itemSize: a.itemSize, instanced: (a as THREE.InstancedBufferAttribute).isInstancedBufferAttribute || undefined };
       transfer.push(a.array.buffer as ArrayBuffer);
     }
     const desc: ObjectDesc = {
@@ -99,10 +99,10 @@ export function serializeObject(root: THREE.Object3D): { objects: ObjectDesc[]; 
   return { objects, transfer: [...new Set(transfer)] };
 }
 
-function createMaterial(d: MaterialDesc): THREE.Material {
+function createMaterial(d: MaterialDesc, shared: { buildings?: BuildingUniforms }): THREE.Material {
   const m =
     d.kind === 'buildings'
-      ? createBuildingMaterial()
+      ? createBuildingMaterial(shared.buildings, !!d.params.flatShading)
       : d.kind === 'standard'
         ? new THREE.MeshStandardMaterial()
         : d.kind === 'basic'
@@ -111,18 +111,21 @@ function createMaterial(d: MaterialDesc): THREE.Material {
   m.setValues(d.params as THREE.MaterialParameters);
   (m as THREE.MeshLambertMaterial).color?.setRGB(d.color[0], d.color[1], d.color[2]);
   Object.assign(m.userData, d.userData);
+  // Exact and prototype buildings share one set of uniforms (night, selection…).
+  if (d.kind === 'buildings') shared.buildings = m.userData.uniforms;
   return m;
 }
 
 export function deserializeObjects(objects: ObjectDesc[]): THREE.Group {
   const group = new THREE.Group();
+  const shared: { buildings?: BuildingUniforms } = {};
   for (const d of objects) {
     const g = new THREE.BufferGeometry();
-    for (const [name, a] of Object.entries(d.attributes)) g.setAttribute(name, new THREE.BufferAttribute(a.array, a.itemSize));
+    for (const [name, a] of Object.entries(d.attributes)) g.setAttribute(name, a.instanced ? new THREE.InstancedBufferAttribute(a.array, a.itemSize) : new THREE.BufferAttribute(a.array, a.itemSize));
     if (d.index) g.setIndex(new THREE.BufferAttribute(d.index, 1));
     for (const gr of d.groups) g.addGroup(gr.start, gr.count, gr.materialIndex);
     g.computeBoundingSphere();
-    const mats = d.materials.map(createMaterial);
+    const mats = d.materials.map((m) => createMaterial(m, shared));
     const material = mats.length === 1 ? mats[0] : mats;
     let obj: THREE.Mesh;
     if (d.type === 'instanced') {
