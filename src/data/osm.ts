@@ -23,7 +23,7 @@ export const OVERPASS_ENDPOINTS = [
 
 export function buildOverpassQuery(b: BBox): string {
   const bb = `${b.south},${b.west},${b.north},${b.east}`;
-  return `[out:json][timeout:90];
+  return `[out:json][timeout:25];
 (
   way["building"](${bb});
   way["building:part"](${bb});
@@ -111,6 +111,26 @@ async function overpassWait(endpoint: string, signal?: AbortSignal): Promise<num
 }
 
 /** Fetches raw Overpass JSON text, trying mirrors in order and respecting rate limits (#9). */
+/** Per-mirror limits: public Overpass servers under load often accept a request and then stall. */
+export const OVERPASS_LIMITS = { statusMs: 4000, firstByteMs: 10000, stallMs: 10000 };
+
+/** AbortController that also aborts when `parent` aborts or after `ms`. */
+export function linkedAbort(parent: AbortSignal | undefined, ms?: number): { ctrl: AbortController; clear: () => void } {
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort(parent?.reason);
+  if (parent?.aborted) ctrl.abort(parent.reason);
+  parent?.addEventListener('abort', onAbort);
+  const t = ms ? setTimeout(() => ctrl.abort(new DOMException('Timeout', 'TimeoutError')), ms) : undefined;
+  return {
+    ctrl,
+    clear: () => {
+      if (t) clearTimeout(t);
+      parent?.removeEventListener('abort', onAbort);
+    },
+  };
+}
+
+/** Fetches raw Overpass JSON text, trying mirrors in order and respecting rate limits (#9). */
 export async function fetchOverpassText(
   bbox: BBox,
   signal?: AbortSignal,
@@ -119,25 +139,46 @@ export async function fetchOverpassText(
   const body = 'data=' + encodeURIComponent(buildOverpassQuery(bbox));
   let lastErr: unknown;
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    const host = new URL(endpoint).host;
+    const req = linkedAbort(signal);
     try {
-      const wait = await overpassWait(endpoint, signal);
+      const status = linkedAbort(signal, OVERPASS_LIMITS.statusMs);
+      const wait = await overpassWait(endpoint, status.ctrl.signal);
+      status.clear();
+      if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
       if (wait && wait > 0) {
         onProgress?.({ endpoint, bytes: 0, waitSeconds: wait });
-        if (wait > 20) throw new Error(`${new URL(endpoint).host}: hết lượt, cần chờ ${wait} s`);
+        if (wait > 20) throw new Error(`${host}: hết lượt, cần chờ ${wait} s`);
         await sleep(wait * 1000, signal);
       }
       onProgress?.({ endpoint, bytes: 0 });
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        body,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        signal,
-      });
-      if (!res.ok) throw new Error(`${new URL(endpoint).host}: HTTP ${res.status}`);
-      return await readTextWithProgress(res, (bytes) => onProgress?.({ endpoint, bytes }));
+      // Abort when the server neither answers nor sends data for a while; then try the next mirror.
+      let timer = setTimeout(() => req.ctrl.abort(new DOMException('Timeout', 'TimeoutError')), OVERPASS_LIMITS.firstByteMs);
+      const bump = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => req.ctrl.abort(new DOMException('Timeout', 'TimeoutError')), OVERPASS_LIMITS.stallMs);
+      };
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          body,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          signal: req.ctrl.signal,
+        });
+        if (!res.ok) throw new Error(`${host}: HTTP ${res.status}`);
+        bump();
+        return await readTextWithProgress(res, (bytes) => {
+          bump();
+          onProgress?.({ endpoint, bytes });
+        });
+      } finally {
+        clearTimeout(timer);
+      }
     } catch (e) {
       if (signal?.aborted) throw e;
-      lastErr = e;
+      lastErr = req.ctrl.signal.aborted ? new Error(`${host}: không phản hồi`) : e;
+    } finally {
+      req.clear();
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('Overpass request failed');
