@@ -197,3 +197,11 @@ main[data-layout="split"] .map-bottom { flex-wrap: wrap; }
   .offline { top: 104px; right: 8px; left: 8px; width: auto; }
   .building-info { right: 8px; left: 8px; width: auto; bottom: 70px; }
 }
+
+/* Space view (#24) */
+.space-view { position: absolute; inset: 0; z-index: 4; opacity: 0; transition: opacity 0.45s ease; background: #02030a; }
+.space-view.on { opacity: 1; }
+.space-view .stars, .space-view .space-map { position: absolute; inset: 0; width: 100%; height: 100%; }
+.space-view .maplibregl-canvas-container, .space-view .maplibregl-map { background: transparent; }
+.space-hint { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%); color: #cfd6ea; font-size: 13px; opacity: 0.8; pointer-events: none; }
+#city-view .toolbar { z-index: 5; }

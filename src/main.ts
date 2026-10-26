@@ -14,6 +14,7 @@ import { cityWorker } from './worker/client';
 import { DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
 import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
 import { bboxAround, MapView } from './ui/MapView';
+import { SpaceView } from './ui/SpaceView';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt = (n: number, d = 0) => n.toLocaleString('vi-VN', { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -504,6 +505,31 @@ window.addEventListener('resize', () => {
 }
 // Info card: tap the title to expand it on phones.
 $('i-title').addEventListener('click', () => document.querySelector('#city-view .info')?.classList.toggle('open'));
+// ---------- Space view (#24) ----------
+let space: SpaceView | null = null;
+let spaceBusy = false;
+let savedView: { pos: import('three').Vector3; target: import('three').Vector3 } | null = null;
+$('btn-space').addEventListener('click', async () => {
+  if (!city?.data || spaceBusy) return;
+  spaceBusy = true;
+  space ??= new SpaceView($('city-view'));
+  const b = city.data.bbox;
+  const bearing = city.view.bearing;
+  try {
+    if (!space.open) {
+      $('btn-space').classList.add('on');
+      savedView = city.saveView();
+      const up = city.skyPose;
+      await Promise.all([city.animateCamera(up.pos, up.target, 1100), new Promise((r) => setTimeout(r, 600)).then(() => space!.show((b.west + b.east) / 2, (b.south + b.north) / 2, bearing))]);
+    } else {
+      await space.hide(bearing);
+      if (savedView) await city.animateCamera(savedView.pos, savedView.target, 1300);
+      $('btn-space').classList.remove('on');
+    }
+  } finally {
+    spaceBusy = false;
+  }
+});
 mapView.maxKm2 = MAX_KM2;
 mapView.observeResize();
 

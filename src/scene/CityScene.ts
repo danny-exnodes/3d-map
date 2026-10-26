@@ -319,7 +319,7 @@ export class CityScene {
     if (this.lampBulbs) this.lampBulbs.visible = s.night > 0.35;
     if (this.lampPools) {
       this.lampPools.visible = s.night > 0.3;
-      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * (this.colorMode === 'real' ? 0.9 : 0.6);
+      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * (this.colorMode === 'real' ? 0.75 : 0.45);
     }
     if (this.buildingUniforms) this.buildingUniforms.uLit.value = litShare(localHour);
     this.traffic?.setHour(localHour);
@@ -443,6 +443,35 @@ export class CityScene {
     this.pixelMode = on;
     this.renderer.domElement.classList.toggle('pixelated', on);
     this.resize();
+  }
+
+  /** Current camera pose, to come back to it later (space view, #24). */
+  saveView() {
+    return { pos: this.camera.position.clone(), target: this.controls.target.clone() };
+  }
+
+  /** Smoothly moves the camera (ease in-out). */
+  animateCamera(pos: THREE.Vector3, target: THREE.Vector3, ms: number): Promise<void> {
+    const p0 = this.camera.position.clone(), t0 = this.controls.target.clone();
+    const start = performance.now();
+    return new Promise((done) => {
+      const step = () => {
+        const k = Math.min(1, (performance.now() - start) / ms);
+        const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+        this.camera.position.lerpVectors(p0, pos, e);
+        this.controls.target.lerpVectors(t0, target, e);
+        this.controls.update();
+        if (k < 1) requestAnimationFrame(step);
+        else done();
+      };
+      step();
+    });
+  }
+
+  /** Straight up above the model, for the take-off into space. */
+  get skyPose() {
+    const ext = Math.max(this.size.width, this.size.depth);
+    return { pos: new THREE.Vector3(this.controls.target.x, ext * 4, this.controls.target.z + 0.01), target: this.controls.target.clone() };
   }
 
   resetView() {
