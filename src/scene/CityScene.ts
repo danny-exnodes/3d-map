@@ -5,7 +5,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import type { CityData, ProgressFn } from '../data/types';
+import type { Building, CityData, ProgressFn } from '../data/types';
 import { bboxSizeMeters, LocalProjection } from '../geo/projection';
 import { cityWorker } from '../worker/client';
 import { buildCity } from './buildCity';
@@ -39,7 +39,13 @@ export class CityScene {
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
   private details: THREE.Object3D[] = [];
-  private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number } } | null = null;
+  private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number }; uSelected: { value: number } } | null = null;
+  private buildingsMesh: THREE.Mesh | null = null;
+  private buildingIds: string[] = [];
+  private buildingById = new Map<string, Building>();
+  private raycaster = new THREE.Raycaster();
+  /** Called with the picked building (or null) when the user clicks the model (#10). */
+  onPick?: (b: Building | null) => void;
   private sourceView = false;
   private rain: THREE.Points | null = null;
   private timer = new THREE.Timer();
@@ -99,6 +105,14 @@ export class CityScene {
     this.composer.addPass(new OutputPass());
 
     new ResizeObserver(() => this.resize()).observe(container);
+    // Click (not drag) on the model picks a building.
+    let down: { x: number; y: number } | null = null;
+    const el = this.renderer.domElement;
+    el.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }));
+    el.addEventListener('pointerup', (e) => {
+      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) this.pick(e.clientX, e.clientY);
+      down = null;
+    });
     this.resize();
     this.loop();
   }
@@ -124,7 +138,7 @@ export class CityScene {
     this.size = bboxSizeMeters(data.bbox);
 
     // Geometry is generated off the main thread when module workers are available (#8).
-    let built: { group: THREE.Group; paths: RoadPath[]; railPaths: RailPath[]; buildings: number; trees: number };
+    let built: { group: THREE.Group; paths: RoadPath[]; railPaths: RailPath[]; buildings: number; trees: number; buildingIds: string[] };
     const report = (f: number, d: string) => onProgress('build', Math.min(0.9, f), d);
     if (cityWorker.available) {
       try {
@@ -148,6 +162,9 @@ export class CityScene {
     this.city.add(built.group);
     const buildingsMesh = built.group.getObjectByName('buildings') as THREE.Mesh | undefined;
     this.buildingUniforms = (buildingsMesh?.material as THREE.Material | undefined)?.userData.uniforms ?? null;
+    this.buildingsMesh = buildingsMesh ?? null;
+    this.buildingIds = built.buildingIds;
+    this.buildingById = new Map(data.buildings.map((b) => [b.id, b]));
     if (this.buildingUniforms) this.buildingUniforms.uSourceView.value = this.sourceView ? 1 : 0;
     this.lampBulbs = (built.group.getObjectByName('lampBulbs') as THREE.InstancedMesh | undefined) ?? null;
     this.details = [];
@@ -212,6 +229,9 @@ export class CityScene {
       });
     dispose(this.city);
     this.city.clear();
+    this.buildingsMesh = null;
+    this.buildingIds = [];
+    this.buildingById.clear();
     if (this.traffic) {
       dispose(this.traffic.group);
       this.scene.remove(this.traffic.group);
@@ -273,6 +293,26 @@ export class CityScene {
 
   get currentColorMode() {
     return this.colorMode;
+  }
+
+  /** Raycasts the buildings mesh at a screen point and selects the building under it. */
+  pick(clientX: number, clientY: number): Building | null {
+    const mesh = this.buildingsMesh;
+    if (!mesh) return null;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.intersectObject(mesh, false)[0];
+    const bidAttr = mesh.geometry.getAttribute('aBid');
+    const bid = hit?.face && bidAttr ? Math.round(bidAttr.getX(hit.face.a)) : -1;
+    const b = bid >= 0 ? (this.buildingById.get(this.buildingIds[bid]) ?? null) : null;
+    this.select(b ? bid : -1);
+    this.onPick?.(b);
+    return b;
+  }
+
+  select(bid: number) {
+    if (this.buildingUniforms) this.buildingUniforms.uSelected.value = bid;
   }
 
   /** Colour buildings by where their height comes from (#3). */

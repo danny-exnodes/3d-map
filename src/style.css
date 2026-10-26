@@ -119,3 +119,9 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 .legend { position: absolute; right: 60px; top: 64px; padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .attrib { font-size: 10px; opacity: 0.8; margin-top: 2px; }
+.building-info { position: absolute; right: 60px; bottom: 76px; width: min(300px, calc(100% - 24px)); padding: 12px 14px; font-size: 13px; }
+.building-info dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 8px 0; font-size: 12px; }
+.building-info dt { color: var(--muted); }
+.building-info dd { margin: 0; }
+.building-info a { color: var(--accent); font-size: 12px; }
+.bi-close { position: absolute; top: 6px; right: 6px; background: none; border: none; color: var(--muted); }

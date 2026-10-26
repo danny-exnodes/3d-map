@@ -2,7 +2,7 @@ import './style.css';
 import { generateDemoCity } from './data/demo';
 import { cacheClear, cacheUsage } from './data/cache';
 import { loadCity } from './data/loader';
-import type { BBox, CityData, ProgressStep } from './data/types';
+import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressStep } from './data/types';
 import { bboxAreaKm2 } from './geo/projection';
 import { CityScene } from './scene/CityScene';
 import type { ColorMode } from './scene/colorMode';
@@ -207,6 +207,7 @@ async function build(source: 'osm' | 'demo') {
     showCity();
     city ??= new CityScene($('canvas'), $('labels'));
     city.onFrame = updateHud;
+    city.onPick = showBuildingInfo;
     city.setColorMode(colorMode);
     const bench = /[?&]bench\b/.test(location.search) ? startBench(city) : null;
     const stats = await city.build(data, progress);
@@ -251,6 +252,7 @@ function showCity() {
   $('city-view').hidden = false;
 }
 function showMap() {
+  closeBuildingInfo();
   $('city-view').hidden = true;
   $('map-view').hidden = false;
   playing = false;
@@ -290,6 +292,65 @@ $('btn-sources').addEventListener('click', () => {
   $('btn-sources').classList.toggle('on', sourceView);
   $('legend-sources').hidden = !sourceView;
 });
+
+// ---------- Building info (#10) ----------
+
+const ARCHETYPE_VI: Record<string, string> = {
+  tube: 'Nhà ống', shophouse: 'Nhà phố (shophouse)', villa: 'Biệt thự', apartment: 'Chung cư', office: 'Văn phòng / cao ốc',
+  civic: 'Công trình công cộng', industrial: 'Nhà xưởng', temple: 'Chùa / đền', church: 'Nhà thờ', generic: 'Nhà',
+};
+const HEIGHT_SOURCE_VI: Record<HeightSource, string> = {
+  osm: 'OpenStreetMap (tag)', gob: 'Google Open Buildings 2.5D', overture: 'Overture (số tầng)', heuristic: 'Ước lượng',
+};
+const FOOTPRINT_VI: Record<FootprintSource, string> = { osm: 'OpenStreetMap', overture: 'Overture Maps', demo: 'Thành phố mẫu' };
+
+function showBuildingInfo(b: Building | null) {
+  const panel = $('building-info');
+  if (!b) {
+    panel.hidden = true;
+    return;
+  }
+  $('bi-title').textContent = b.name || ARCHETYPE_VI[b.archetype ?? 'generic'];
+  $('bi-kind').textContent = [b.name ? ARCHETYPE_VI[b.archetype ?? 'generic'] : '', b.kind !== 'yes' ? `building=${b.kind}` : ''].filter(Boolean).join(' · ');
+  const facts: [string, string][] = [
+    ['Chiều cao', `${fmt(b.height, 1)} m${b.minHeight ? ` (từ ${fmt(b.minHeight, 1)} m)` : ''}`],
+    ['Số tầng', b.levels ? fmt(b.levels) : `~${fmt(Math.max(1, Math.round(b.height / 3.3)))}`],
+    ['Nguồn chiều cao', HEIGHT_SOURCE_VI[b.heightSource]],
+    ['Footprint', FOOTPRINT_VI[b.footprintSource]],
+  ];
+  if (b.address) facts.push(['Địa chỉ', b.address]);
+  if (b.roof !== 'flat') facts.push(['Mái', b.roof]);
+  const dl = $('bi-facts');
+  dl.innerHTML = '';
+  for (const [k, v] of facts) {
+    const dt = document.createElement('dt');
+    dt.textContent = k;
+    const dd = document.createElement('dd');
+    dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  const link = $<HTMLAnchorElement>('bi-edit');
+  const osm = /^(way|relation)\/(\d+)$/.exec(b.id);
+  if (osm) {
+    link.href = `https://www.openstreetmap.org/edit?${osm[1]}=${osm[2]}`;
+    link.textContent = b.heightSource === 'osm' ? 'Sửa trên OpenStreetMap ↗' : 'Bổ sung chiều cao / số tầng trên OpenStreetMap ↗';
+    link.hidden = false;
+  } else if (b.footprintSource === 'overture') {
+    const ring = b.polygon[0];
+    const lon = ring.reduce((a, p) => a + p[0], 0) / ring.length;
+    const lat = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+    link.href = `https://www.openstreetmap.org/edit#map=20/${lat.toFixed(6)}/${lon.toFixed(6)}`;
+    link.textContent = 'Nhà này chưa có trên OpenStreetMap — vẽ thêm ↗';
+    link.hidden = false;
+  } else link.hidden = true;
+  panel.hidden = false;
+}
+function closeBuildingInfo() {
+  $('building-info').hidden = true;
+  city?.select(-1);
+}
+$('bi-close').addEventListener('click', closeBuildingInfo);
+document.addEventListener('keydown', (e) => e.key === 'Escape' && closeBuildingInfo());
 
 // ---------- Weather ----------
 

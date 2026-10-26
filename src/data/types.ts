@@ -38,6 +38,10 @@ export interface Building {
   address?: string;
   /** A building:part; its outline building is not drawn (Simple 3D Buildings). */
   isPart?: boolean;
+  /** Style values that came from tags (kept when restyling after a height change). */
+  tagged?: { roof?: RoofShape; color?: string; roofColor?: string; material?: FacadeMaterial };
+  /** OSM tags kept for archetype detection (OSM buildings only). */
+  tags?: Record<string, string>;
 }
 
 export type RoadClass = 'motorway' | 'primary' | 'secondary' | 'tertiary' | 'residential' | 'service' | 'path';

@@ -1,5 +1,5 @@
 import { LocalProjection, pointInRing } from '../geo/projection';
-import { buildingFromOverture } from './buildings';
+import { buildingFromOverture, restyle } from './buildings';
 import type { HeightGrid } from './heights';
 import type { OvertureBuilding } from './overture';
 import type { Building, CityData, CityStats, FootprintSource, HeightSource, LngLat } from './types';
@@ -79,6 +79,7 @@ export function applyHeightGrid(buildings: Building[], grid: HeightGrid): number
     if (h == null || h < 2) continue;
     b.height = Math.max(h, b.minHeight + 2);
     b.heightSource = 'gob';
+    restyle(b);
     n++;
   }
   return n;

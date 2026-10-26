@@ -119,3 +119,25 @@ describe('Overture tiles', () => {
     expect((r.x1 - r.x0 + 1) * (r.y1 - r.y0 + 1)).toBeLessThanOrEqual(4);
   });
 });
+
+describe('restyle after a measured height', () => {
+  it('turns a large low footprint into a workshop with a metal roof', async () => {
+    const { restyle } = await import('../src/data/buildings');
+    const big = buildingFromOsm('way/77', [square(0, 0, 45)], { building: 'yes' });
+    expect(big.archetype).toBe('apartment'); // unknown height: large footprint ⇒ guessed as a block
+    big.height = 7.5;
+    big.heightSource = 'gob';
+    restyle(big);
+    expect(big.archetype).toBe('industrial');
+    expect(['gabled', 'flat']).toContain(big.roof);
+  });
+
+  it('keeps tagged roof and colours', async () => {
+    const { restyle } = await import('../src/data/buildings');
+    const b = buildingFromOsm('way/78', [square(0, 0, 45)], { building: 'yes', 'roof:shape': 'dome', 'building:colour': 'white' });
+    b.height = 7;
+    restyle(b);
+    expect(b.roof).toBe('dome');
+    expect(b.color).toBe('#f4f4f0');
+  });
+});

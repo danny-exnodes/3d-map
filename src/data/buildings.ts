@@ -70,6 +70,8 @@ export function archetypeOf(kind: string, tags: Record<string, string>, m: { are
   }
   if (['industrial', 'warehouse', 'factory', 'manufacture', 'hangar', 'shed', 'storage_tank'].includes(k)) return 'industrial';
   if (['office', 'commercial', 'hotel'].includes(k) && (levels ?? 0) >= 8) return 'office';
+  // Large but low (≤ 3 storeys): markets, workshops, warehouses — typically metal roofs.
+  if (k === 'yes' && m.area > 1200 && levels != null && levels <= 3.2) return 'industrial';
   if (['apartments', 'dormitory'].includes(k) || (levels ?? 0) >= 9 || m.area > 1500) return 'apartment';
   if (['detached', 'villa', 'bungalow'].includes(k) || (m.area > 120 && m.area < 400 && m.elongation < 1.6 && (levels ?? 3) <= 4)) return 'villa';
   if (m.area < 160 && m.elongation >= 1.8) return tags['shop'] || k === 'retail' ? 'shophouse' : 'tube';
@@ -156,6 +158,35 @@ interface Input {
   isPart?: boolean;
 }
 
+/** Style choices that were set explicitly by tags, so restyling must keep them. */
+interface Tagged {
+  roof?: RoofShape;
+  color?: string;
+  roofColor?: string;
+  material?: FacadeMaterial;
+}
+
+/** Default roof, colours and material for an archetype and height (deterministic per id). */
+function styleFor(id: string, arch: Archetype, height: number, polygon: Polygon, t: Tagged) {
+  const r = rng(hashString(id) ^ 0x9e3779b9);
+  let roof = t.roof;
+  if (!roof) {
+    const quad = polygon.length === 1 && polygon[0].length <= 6;
+    if (arch === 'temple') roof = 'pagoda';
+    else if (arch === 'industrial') roof = quad ? 'gabled' : 'flat';
+    else if (arch === 'villa' && quad) roof = r() < 0.6 ? 'hipped' : 'gabled';
+    else if (height <= LEVEL_H * 3.2 && quad && r() < 0.5) roof = r() < 0.5 ? 'gabled' : 'hipped';
+    else roof = 'flat';
+  }
+  const tall = height > 30;
+  const color = t.color ?? (tall && arch !== 'apartment' ? pick(r, TOWER_COLORS) : pick(r, FACADE_COLORS));
+  const roofColor =
+    t.roofColor ??
+    (arch === 'industrial' ? pick(r, TON_COLORS) : arch === 'temple' ? pick(r, ['#c4462f', '#b8562f', '#d9a441']) : roof === 'flat' ? pick(r, FLAT_ROOF_COLORS) : pick(r, ROOF_COLORS));
+  const material = t.material ?? (tall && (arch === 'office' || r() < 0.3) ? 'glass' : undefined);
+  return { roof, color, roofColor, material };
+}
+
 /** Normalises any footprint (OSM, Overture, part) into a Building with a height and a style. */
 export function makeBuilding(i: Input): Building {
   const m = footprintMetrics(i.polygon[0]);
@@ -170,21 +201,7 @@ export function makeBuilding(i: Input): Building {
     height = heuristicLevels(i.id, arch, m) * LEVEL_H + (arch === 'industrial' ? 3 + (hashString(i.id) % 4) : 0);
     heightSource = 'heuristic';
   }
-  const r = rng(hashString(i.id) ^ 0x9e3779b9);
-  let roof = roofShapeOf(i.roofShapeTag);
-  if (!roof) {
-    const quad = i.polygon.length === 1 && i.polygon[0].length <= 6;
-    if (arch === 'temple') roof = 'pagoda';
-    else if (arch === 'industrial') roof = quad ? 'gabled' : 'flat';
-    else if (arch === 'villa' && quad) roof = r() < 0.6 ? 'hipped' : 'gabled';
-    else if (height <= LEVEL_H * 3.2 && quad && r() < 0.5) roof = r() < 0.5 ? 'gabled' : 'hipped';
-    else roof = 'flat';
-  }
-  const tall = height > 30;
-  const color = i.color ?? (tall && arch !== 'apartment' ? pick(r, TOWER_COLORS) : pick(r, FACADE_COLORS));
-  const roofColor =
-    i.roofColor ??
-    (arch === 'industrial' ? pick(r, TON_COLORS) : arch === 'temple' ? pick(r, ['#c4462f', '#b8562f', '#d9a441']) : roof === 'flat' ? pick(r, FLAT_ROOF_COLORS) : pick(r, ROOF_COLORS));
+  const tagged: Tagged = { roof: roofShapeOf(i.roofShapeTag), color: i.color, roofColor: i.roofColor, material: i.material };
   const minHeight = i.minHeight ?? 0;
   return {
     id: i.id,
@@ -192,11 +209,8 @@ export function makeBuilding(i: Input): Building {
     height: Math.max(height, minHeight + 2),
     minHeight,
     kind: i.kind,
-    roof,
     roofHeight: i.roofHeight,
-    color,
-    roofColor,
-    material: i.material ?? (tall && (arch === 'office' || r() < 0.3) ? 'glass' : undefined),
+    ...styleFor(i.id, arch, height, i.polygon, tagged),
     archetype: arch,
     heightSource: heightSource ?? 'heuristic',
     footprintSource: i.footprintSource,
@@ -204,7 +218,17 @@ export function makeBuilding(i: Input): Building {
     name: i.tags['name'],
     address: [i.tags['addr:housenumber'], i.tags['addr:street'], i.tags['addr:district']].filter(Boolean).join(' ') || undefined,
     isPart: i.isPart,
+    tagged,
+    tags: i.tags,
   };
+}
+
+/** Re-derives archetype and default style after the height changed (e.g. from the Google 2.5D grid). */
+export function restyle(b: Building) {
+  const m = footprintMetrics(b.polygon[0]);
+  const arch = archetypeOf(b.kind, b.tags ?? {}, m, b.levels ?? b.height / LEVEL_H);
+  b.archetype = arch;
+  Object.assign(b, styleFor(b.id, arch, b.height, b.polygon, b.tagged ?? {}));
 }
 
 /** Building from OSM tags (building=* or building:part=*). */

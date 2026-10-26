@@ -161,17 +161,21 @@ const V = (p: XZ, y: number) => new THREE.Vector3(p[0], y, p[1]);
  */
 export function createBuildingMaterial(): THREE.MeshLambertMaterial {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  const uniforms = { uNight: { value: 0 }, uSourceView: { value: 0 } };
+  const uniforms = { uNight: { value: 0 }, uSourceView: { value: 0 }, uSelected: { value: -1 } };
   mat.userData.uniforms = uniforms;
   mat.userData.isBuildingMaterial = true;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
     shader.uniforms.uSourceView = uniforms.uSourceView;
+    shader.uniforms.uSelected = uniforms.uSelected;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
         attribute float aSeed;
+        attribute float aBid;
+        uniform float uSelected;
+        varying float vSelected;
         varying vec3 vWPos;
         varying vec3 vWNormal;
         varying float vSeed;`,
@@ -181,7 +185,8 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
         `#include <project_vertex>
         vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vWNormal = normalize(mat3(modelMatrix) * objectNormal);
-        vSeed = aSeed;`,
+        vSeed = aSeed;
+        vSelected = abs(aBid - uSelected) < 0.5 ? 1.0 : 0.0;`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -189,6 +194,7 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
         `#include <common>
         uniform float uNight;
         uniform float uSourceView;
+        varying float vSelected;
         varying vec3 vWPos;
         varying vec3 vWNormal;
         varying float vSeed;
@@ -236,12 +242,15 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
           diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 0.75));
         }
         // Slight darkening towards the ground for depth.
-        diffuseColor.rgb *= mix(0.82, 1.0, clamp(vWPos.y / 10.0, 0.0, 1.0));`,
+        diffuseColor.rgb *= mix(0.82, 1.0, clamp(vWPos.y / 10.0, 0.0, 1.0));
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.32, 0.08), vSelected * 0.85);`,
       )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-        totalEmissiveRadiance += winColor * winMask * winLit * uNight * 1.6;`,
+        totalEmissiveRadiance += winColor * winMask * winLit * uNight * 1.6;
+        // Selected building (#10): warm accent tint + glow.
+        totalEmissiveRadiance += vec3(0.55, 0.14, 0.0) * vSelected;`,
       );
   };
   return mat;
