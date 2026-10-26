@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 
 setWorkerUrl(workerUrl);
+import { DEFAULT_LOCATION } from '../config';
 import type { BBox } from '../data/types';
 
 const STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
@@ -18,7 +19,7 @@ export class MapView {
   bbox: BBox | null = null;
   onChange?: (b: BBox | null) => void;
 
-  constructor(container: HTMLElement, center: [number, number] = [105.8196, 21.0032], zoom = 15) {
+  constructor(container: HTMLElement, center: [number, number] = [DEFAULT_LOCATION.lon, DEFAULT_LOCATION.lat], zoom = 15) {
     this.map = new MapLibreMap({ container, style: STYLE, center, zoom, attributionControl: { compact: true } });
     this.map.addControl(new NavigationControl({ showCompass: true }), 'bottom-right');
     this.map.addControl(new ScaleControl({ unit: 'metric' }), 'bottom-left');
@@ -114,12 +115,17 @@ export class MapView {
   /** A default ~800×800 m rectangle around the current map centre. */
   bboxAroundCenter(halfMeters = 400): BBox {
     const c = this.map.getCenter();
-    const dLat = halfMeters / 110_574;
-    const dLon = halfMeters / (111_320 * Math.cos((c.lat * Math.PI) / 180));
-    return { south: c.lat - dLat, north: c.lat + dLat, west: c.lng - dLon, east: c.lng + dLon };
+    return bboxAround(c.lng, c.lat, halfMeters);
   }
 
   resize() {
     this.map.resize();
   }
+}
+
+/** Square bbox of ±halfMeters around a point. */
+export function bboxAround(lon: number, lat: number, halfMeters = 400): BBox {
+  const dLat = halfMeters / 110_574;
+  const dLon = halfMeters / (111_320 * Math.cos((lat * Math.PI) / 180));
+  return { south: lat - dLat, north: lat + dLat, west: lon - dLon, east: lon + dLon };
 }

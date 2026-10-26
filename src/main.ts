@@ -7,13 +7,14 @@ import { CityScene } from './scene/CityScene';
 import { compassLabel } from './scene/sun';
 import { searchPlaces, type Place } from './services/geocode';
 import { fetchWeather } from './services/weather';
-import { MapView } from './ui/MapView';
+import { DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
+import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
+import { bboxAround, MapView } from './ui/MapView';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt = (n: number, d = 0) => n.toLocaleString('vi-VN', { maximumFractionDigits: d, minimumFractionDigits: d });
 const MAX_KM2 = 4;
-/** Ngã Tư Sở / Khương Thượng, Hà Nội. */
-const EXAMPLE: BBox = { south: 20.9992, west: 105.8152, north: 21.0068, east: 105.8238 };
+const EXAMPLE = EXAMPLE_BBOX;
 
 const mapView = new MapView($('map'));
 let city: CityScene | null = null;
@@ -32,19 +33,45 @@ function onBBox(b: BBox | null) {
   }
   const km2 = bboxAreaKm2(b);
   $('area-label').textContent = `Vùng đã vẽ · ${fmt(km2, 2)} km²`;
-  $('area-hint').textContent = km2 > MAX_KM2 ? `Vùng quá lớn — hãy chọn ≤ ${MAX_KM2} km² để trình duyệt dựng mượt.` : 'Sẵn sàng. Dữ liệu tải song song rồi dựng ngay bên phải.';
+  $('area-hint').textContent =
+    km2 > MAX_KM2
+      ? `Vùng quá lớn — hãy chọn ≤ ${MAX_KM2} km² để trình duyệt dựng mượt.`
+      : locationNotice || 'Sẵn sàng. Bấm “Dựng 3D” để tải dữ liệu và dựng mô hình.';
   btn.disabled = km2 > MAX_KM2 || busy;
   history.replaceState(null, '', `#bbox=${[b.south, b.west, b.north, b.east].map((v) => v.toFixed(5)).join(',')}`);
 }
 mapView.onChange = onBBox;
 
 $('btn-draw').addEventListener('click', () => {
+  locationNotice = '';
   mapView.setDrawing(!mapView.isDrawing);
   $('btn-draw').classList.toggle('on', mapView.isDrawing);
 });
 mapView.map.on('mouseup', () => $('btn-draw').classList.toggle('on', mapView.isDrawing));
 $('btn-center').addEventListener('click', () => mapView.setBBox(mapView.bboxAroundCenter()));
 $('btn-clear').addEventListener('click', () => mapView.setBBox(null));
+$('btn-locate').addEventListener('click', async () => {
+  $('btn-locate').classList.add('on');
+  const p = (await permissionDenied()) ? null : await getBrowserPosition();
+  $('btn-locate').classList.remove('on');
+  if (p) goTo(p.lat, p.lon, 'Vị trí của bạn');
+  else {
+    goTo(DEFAULT_LOCATION.lat, DEFAULT_LOCATION.lon, DEFAULT_LOCATION.label);
+    setLocationNotice(`Không lấy được vị trí — đang hiển thị ${DEFAULT_LOCATION.label}.`);
+  }
+});
+
+/** Centre the map on a point with a marker and a pre-selected area (no automatic build). */
+function goTo(lat: number, lon: number, label: string) {
+  mapView.flyTo(lon, lat, label, 15.5);
+  mapView.setBBox(bboxAround(lon, lat, DEFAULT_AREA_HALF_M));
+}
+
+let locationNotice = '';
+function setLocationNotice(text: string) {
+  locationNotice = text;
+  onBBox(mapView.bbox);
+}
 $('btn-example').addEventListener('click', () => {
   showMap();
   mapView.setBBox(EXAMPLE);
@@ -349,13 +376,25 @@ $('btn-glb').addEventListener('click', async () => {
 
 // ---------- Boot ----------
 
-const m = /bbox=([-\d.,]+)/.exec(location.hash);
-if (m) {
+function bboxFromHash(): BBox | null {
+  const m = /bbox=([-\d.,]+)/.exec(location.hash);
+  if (!m) return null;
   const [south, west, north, east] = m[1].split(',').map(Number);
-  if ([south, west, north, east].every(Number.isFinite)) {
-    const b = { south, west, north, east };
-    mapView.setBBox(b);
-    mapView.map.once('load', () => mapView.fitBBox(b));
-  }
+  return [south, west, north, east].every(Number.isFinite) ? { south, west, north, east } : null;
 }
-if (/[?&]demo\b/.test(location.search)) build('demo');
+
+async function boot() {
+  const fromUrl = bboxFromHash();
+  if (fromUrl) {
+    mapView.setBBox(fromUrl);
+    mapView.map.once('load', () => mapView.fitBBox(fromUrl));
+  } else if (!/[?&]demo\b/.test(location.search)) {
+    const loc = await resolveStartLocation(DEFAULT_LOCATION);
+    if (mapView.bbox) return; // the user already picked something while we waited
+    const label = loc.source === 'default' ? DEFAULT_LOCATION.label : 'Vị trí của bạn';
+    goTo(loc.lat, loc.lon, label);
+    if (loc.source === 'default') setLocationNotice(`Không lấy được vị trí — đang hiển thị ${DEFAULT_LOCATION.label}.`);
+  }
+  if (/[?&]demo\b/.test(location.search)) build('demo');
+}
+boot();
