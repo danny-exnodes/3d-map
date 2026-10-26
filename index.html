@@ -74,7 +74,7 @@
         <footer class="map-bottom card">
           <div>
             <div><span class="dot accent"></span> <span id="area-label">Chưa chọn vùng</span></div>
-            <div class="muted small" id="area-hint">Bấm ▭ rồi kéo chuột để vẽ một khu (tối đa ~4 km²).</div>
+            <div class="muted small" id="area-hint">Bấm ▭ rồi kéo (hoặc Shift + kéo) để vẽ một khu, tối đa ~4 km². Kéo góc hoặc tâm để chỉnh.</div>
           </div>
           <div class="row">
             <label class="opt small" title="Lấy dữ liệu OSM đầy đủ từ Overpass. Máy chủ công cộng hay quá tải; quá 20 s sẽ tự dùng Overture."><input id="opt-overpass" type="checkbox" /> OSM chi tiết (Overpass)</label>
@@ -104,7 +104,7 @@
           <button id="btn-rain" class="toggle" title="Bật/tắt mưa">🌧</button>
           <button id="btn-shot" title="Chụp ảnh PNG">📷</button>
           <button id="btn-glb" title="Tải mô hình .glb (theo chế độ màu đang chọn)">⭳</button>
-          <button id="btn-back" title="Quay lại bản đồ">✕</button>
+          <button id="btn-back" title="Hiện / ẩn bản đồ">⇆</button>
         </div>
         <div id="building-info" class="building-info card" hidden>
           <button id="bi-close" class="bi-close" title="Đóng (Esc)">✕</button>
@@ -138,7 +138,12 @@
           <input id="t-date" type="date" />
         </footer>
       </section>
+      <div id="splitter" hidden title="Kéo để đổi kích thước · bấm đúp để chia đôi"></div>
     </main>
+    <nav id="tabs" class="tabs">
+      <button data-tab="map" class="on">🗺 Bản đồ</button>
+      <button data-tab="city" disabled>🏙 Mô hình 3D</button>
+    </nav>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

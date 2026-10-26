@@ -54,22 +54,34 @@ export class MapView {
     });
 
     const canvas = this.map.getCanvasContainer();
-    this.map.on('mousedown', (e) => {
-      if (!this.drawing) return;
+    // Shift+drag draws a rectangle directly (instead of MapLibre's box zoom), and the ▭ mode
+    // draws with mouse or finger (#23).
+    this.map.boxZoom.disable();
+    const begin = (e: { lngLat: LngLat; preventDefault(): void; originalEvent: Event }) => {
+      const shift = (e.originalEvent as MouseEvent).shiftKey;
+      if (!this.drawing && !shift) return;
+      if (shift && !this.drawing) this.setDrawing(true);
       e.preventDefault();
       this.start = e.lngLat;
-    });
-    this.map.on('mousemove', (e) => {
+    };
+    const move = (e: { lngLat: LngLat }) => {
       if (!this.drawing || !this.start) return;
       this.setBBox(this.fromCorners(this.start, e.lngLat), false);
-    });
-    this.map.on('mouseup', (e) => {
+    };
+    const end = (e: { lngLat: LngLat }) => {
       if (!this.drawing || !this.start) return;
       const b = this.fromCorners(this.start, e.lngLat);
       this.start = null;
       this.setDrawing(false);
       if (Math.abs(b.east - b.west) > 1e-5 && Math.abs(b.north - b.south) > 1e-5) this.setBBox(b);
-    });
+      else this.render();
+    };
+    this.map.on('mousedown', begin);
+    this.map.on('mousemove', move);
+    this.map.on('mouseup', end);
+    this.map.on('touchstart', (e) => e.points.length === 1 && begin(e));
+    this.map.on('touchmove', (e) => this.drawing && this.start && (e.preventDefault(), move(e)));
+    this.map.on('touchend', (e) => end(e));
     canvas.addEventListener('keydown', (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') this.setDrawing(false);
     });
@@ -86,10 +98,75 @@ export class MapView {
 
   setDrawing(on: boolean) {
     this.drawing = on;
-    if (on) this.map.dragPan.disable();
-    else this.map.dragPan.enable();
+    if (on) (this.map.dragPan.disable(), this.map.touchZoomRotate.disable());
+    else (this.map.dragPan.enable(), this.map.touchZoomRotate.enable());
     this.map.getCanvas().style.cursor = on ? 'crosshair' : '';
+    this.updateHandles();
   }
+
+  /** Area limit (km²): bigger selections are drawn in red. */
+  maxKm2 = Infinity;
+
+  private handles: Marker[] = [];
+
+  /**
+   * Draggable corner handles resize the selection, the centre handle moves it. Markers work
+   * with mouse and touch alike.
+   */
+  private updateHandles() {
+    const b = this.bbox;
+    if (!b || this.drawing) {
+      for (const h of this.handles) h.remove();
+      this.handles = [];
+      return;
+    }
+    if (!this.handles.length) {
+      const make = (cls: string, title: string) => {
+        const el = document.createElement('div');
+        el.className = `sel-handle ${cls}`;
+        el.title = title;
+        return new Marker({ element: el, draggable: true }).setLngLat([0, 0]).addTo(this.map);
+      };
+      // 0 SW, 1 SE, 2 NE, 3 NW, 4 centre.
+      for (let i = 0; i < 4; i++) this.handles.push(make('corner', 'Kéo để đổi kích thước vùng'));
+      this.handles.push(make('centre', 'Kéo để di chuyển vùng'));
+      this.handles.forEach((h, i) => {
+        h.on('drag', () => this.dragHandle(i, h.getLngLat(), false));
+        h.on('dragend', () => this.dragHandle(i, h.getLngLat(), true));
+      });
+    }
+    this.placeHandles();
+  }
+
+  private placeHandles() {
+    const b = this.bbox;
+    if (!b || this.handles.length < 5) return;
+    const pts: [number, number][] = [[b.west, b.south], [b.east, b.south], [b.east, b.north], [b.west, b.north], [(b.west + b.east) / 2, (b.south + b.north) / 2]];
+    this.handles.forEach((h, i) => h.setLngLat(pts[i]));
+  }
+
+  private dragHandle(i: number, p: LngLat, done: boolean) {
+    const b = this.bbox;
+    if (!b) return;
+    let n: BBox;
+    if (i === 4) {
+      const dx = p.lng - (b.west + b.east) / 2, dy = p.lat - (b.south + b.north) / 2;
+      n = { west: b.west + dx, east: b.east + dx, south: b.south + dy, north: b.north + dy };
+    } else {
+      // The opposite corner stays put.
+      const opp = [[b.east, b.north], [b.west, b.north], [b.west, b.south], [b.east, b.south]][i];
+      n = { west: Math.min(p.lng, opp[0]), east: Math.max(p.lng, opp[0]), south: Math.min(p.lat, opp[1]), north: Math.max(p.lat, opp[1]) };
+    }
+    this.bbox = n;
+    this.render(false);
+    if (done) {
+      this.placeHandles();
+      this.onChange?.(n);
+    } else this.onPreview?.(n);
+  }
+
+  /** Called while a handle is being dragged (no rebuild yet). */
+  onPreview?: (b: BBox) => void;
 
   get isDrawing() {
     return this.drawing;
@@ -101,10 +178,14 @@ export class MapView {
     if (notify) this.onChange?.(b);
   }
 
-  private render() {
+  private render(handles = true) {
+    if (handles) this.updateHandles();
     const src = this.map.getSource('selection') as GeoJSONSource | undefined;
     if (!src) return;
     const b = this.bbox;
+    const tooBig = !!b && areaKm2(b) > this.maxKm2;
+    this.map.setPaintProperty('sel-fill', 'fill-color', tooBig ? '#ef4444' : '#ff7a45');
+    this.map.setPaintProperty('sel-line', 'line-color', tooBig ? '#ef4444' : '#ff7a45');
     src.setData(
       b
         ? {
@@ -150,6 +231,11 @@ export class MapView {
   resize() {
     this.map.resize();
   }
+
+  /** Keeps the map sized to its pane (split view resizes it, #23). */
+  observeResize() {
+    new ResizeObserver(() => this.map.resize()).observe(this.map.getContainer());
+  }
 }
 
 /** Square bbox of ±halfMeters around a point. */
@@ -157,4 +243,9 @@ export function bboxAround(lon: number, lat: number, halfMeters = 400): BBox {
   const dLat = halfMeters / 110_574;
   const dLon = halfMeters / (111_320 * Math.cos((lat * Math.PI) / 180));
   return { south: lat - dLat, north: lat + dLat, west: lon - dLon, east: lon + dLon };
+}
+
+function areaKm2(b: BBox): number {
+  const lat = ((b.south + b.north) / 2) * (Math.PI / 180);
+  return (b.east - b.west) * 111.32 * Math.cos(lat) * (b.north - b.south) * 110.574;
 }

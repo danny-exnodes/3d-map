@@ -72,7 +72,8 @@ export class CityScene {
   private labels: { el: HTMLElement; pos: THREE.Vector3 }[] = [];
   private raf = 0;
   private pixelMode = false;
-  private maxPixelRatio = Math.min(window.devicePixelRatio, 2);
+  // Phones: lower resolution cap; their screens are dense enough (#23).
+  private maxPixelRatio = Math.min(window.devicePixelRatio, MOBILE ? 1.5 : 2);
   private pixelRatio = this.maxPixelRatio;
   private fpsWindow = { start: performance.now(), frames: 0 };
   /** Skip rendering (used by the benchmark to measure pure build cost). */
@@ -92,7 +93,7 @@ export class CityScene {
 
   constructor(private readonly container: HTMLElement, private readonly labelLayer: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.maxPixelRatio);
     this.renderer.shadowMap.enabled = true;
     // Shadows only change with the sun or the model, so render them on demand (#8).
     this.renderer.shadowMap.autoUpdate = false;
@@ -224,7 +225,7 @@ export class CityScene {
     }
 
     const ext = Math.max(this.size.width, this.size.depth);
-    const mapSize = ext > 1200 ? 2048 : 4096;
+    const mapSize = ext > 1200 || MOBILE ? 2048 : 4096;
     if (this.sun.shadow.mapSize.x !== mapSize) {
       this.sun.shadow.mapSize.set(mapSize, mapSize);
       this.sun.shadow.map?.dispose();

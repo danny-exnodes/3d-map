@@ -245,6 +245,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     }
     showCity();
     city ??= new CityScene($('canvas'), $('labels'));
+    setLayout(layout);
     city.onFrame = updateHud;
     city.onPick = showBuildingInfo;
     city.setColorMode(colorMode);
@@ -427,18 +428,84 @@ $('off-download').addEventListener('click', async () => {
 if (import.meta.env.PROD && !PREVIEW) registerServiceWorker(BASE_URL);
 $('btn-demo').addEventListener('click', () => build('demo'));
 
+// ---------- Layout (#23): map | 3D side by side on wide screens, tabs on phones ----------
+
+type Layout = 'map' | 'city' | 'split';
+let layout: Layout = 'map';
+const wide = () => window.innerWidth >= 900;
+const SPLIT_KEY = 'tinymap:split';
+
+function setLayout(l: Layout) {
+  layout = l;
+  const main = document.querySelector('main')!;
+  main.dataset.layout = l;
+  $('map-view').hidden = l === 'city';
+  $('city-view').hidden = l === 'map';
+  $('splitter').hidden = l !== 'split';
+  document.body.classList.toggle('has-city', !!city);
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#tabs button')) {
+    b.classList.toggle('on', b.dataset.tab === (l === 'city' ? 'city' : 'map'));
+    if (b.dataset.tab === 'city') b.disabled = !city;
+  }
+  if (l === 'map') playing = false;
+}
 function showCity() {
-  $('map-view').hidden = true;
-  $('city-view').hidden = false;
+  // The preview build has no map pane.
+  setLayout(wide() && !PREVIEW ? 'split' : 'city');
 }
 function showMap() {
   closeBuildingInfo();
-  $('city-view').hidden = true;
-  $('map-view').hidden = false;
-  playing = false;
-  mapView.resize();
+  setLayout(wide() && city ? 'split' : 'map');
 }
-$('btn-back').addEventListener('click', showMap);
+$('btn-back').addEventListener('click', () => {
+  if (!wide()) return showMap();
+  setLayout(layout === 'split' ? 'city' : 'split');
+});
+for (const b of document.querySelectorAll<HTMLButtonElement>('#tabs button')) {
+  b.addEventListener('click', () => setLayout(b.dataset.tab === 'city' ? 'city' : 'map'));
+}
+window.addEventListener('resize', () => {
+  if (!city || PREVIEW) return;
+  if (!wide() && layout === 'split') setLayout('city');
+  else if (wide() && layout !== 'split') setLayout('split');
+});
+{
+  // Draggable divider; the share is remembered.
+  const main = document.querySelector('main')!;
+  const apply = (f: number) => main.style.setProperty('--split', `${(Math.min(0.8, Math.max(0.2, f)) * 100).toFixed(2)}%`);
+  try {
+    const saved = Number(localStorage.getItem(SPLIT_KEY));
+    if (saved) apply(saved);
+  } catch {
+    /* ignore */
+  }
+  const sp = $('splitter');
+  let f = 0.42;
+  sp.addEventListener('pointerdown', (e) => {
+    sp.setPointerCapture(e.pointerId);
+    sp.classList.add('drag');
+  });
+  sp.addEventListener('pointermove', (e) => {
+    if (!sp.hasPointerCapture(e.pointerId)) return;
+    const r = main.getBoundingClientRect();
+    f = (e.clientX - r.left) / r.width;
+    apply(f);
+  });
+  sp.addEventListener('pointerup', (e) => {
+    sp.releasePointerCapture(e.pointerId);
+    sp.classList.remove('drag');
+    try {
+      localStorage.setItem(SPLIT_KEY, String(f));
+    } catch {
+      /* ignore */
+    }
+  });
+  sp.addEventListener('dblclick', () => (apply((f = 0.5)), localStorage.setItem(SPLIT_KEY, '0.5')));
+}
+// Info card: tap the title to expand it on phones.
+$('i-title').addEventListener('click', () => document.querySelector('#city-view .info')?.classList.toggle('open'));
+mapView.maxKm2 = MAX_KM2;
+mapView.observeResize();
 
 // ---------- Data sources (#3) ----------
 

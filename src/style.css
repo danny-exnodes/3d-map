@@ -150,3 +150,50 @@ body.preview #btn-example, body.preview #btn-back, body.preview #btn-shot, body.
 .off-selected .bar { height: 4px; background: rgba(255, 255, 255, 0.08); border-radius: 2px; overflow: hidden; }
 .off-selected .bar div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
 .off-saved-title { border-top: 1px solid var(--line); padding-top: 8px; }
+
+/* Split view (#23): map | 3D, resizable on wide screens */
+main { --split: 42%; }
+main[data-layout="split"] #map-view { right: auto; width: var(--split); }
+main[data-layout="split"] #city-view { left: calc(var(--split) + 6px); }
+#splitter {
+  position: absolute; top: 0; bottom: 0; left: var(--split); width: 6px; z-index: 6; cursor: col-resize;
+  background: var(--line); touch-action: none;
+}
+#splitter:hover, #splitter.drag { background: var(--accent); }
+main[data-layout="split"] .toolbar { flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 24px); }
+main[data-layout="split"] .map-bottom { flex-wrap: wrap; }
+#canvas { touch-action: none; }
+
+/* Selection handles (#23) */
+.sel-handle { width: 16px; height: 16px; border-radius: 4px; background: #fff; border: 2px solid var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); cursor: nwse-resize; }
+.sel-handle.centre { width: 22px; height: 22px; border-radius: 50%; cursor: move; background: var(--accent); }
+@media (pointer: coarse) { .sel-handle { width: 26px; height: 26px; } .sel-handle.centre { width: 32px; height: 32px; } }
+
+/* Phones (#23): tabs, larger touch targets, compact panels */
+.tabs { display: none; }
+@media (max-width: 899px) {
+  body.has-city .tabs {
+    display: flex; flex: none; height: calc(52px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid var(--line); background: var(--panel-solid);
+  }
+  .tabs button { flex: 1; background: none; border: none; font-size: 14px; color: var(--muted); }
+  .tabs button.on { color: var(--accent); font-weight: 600; }
+  .tabs button:disabled { opacity: 0.4; }
+}
+@media (max-width: 720px) {
+  .topbar { height: 40px; padding: 0 10px; }
+  .toolbar { top: 8px; bottom: auto; left: 8px; right: 8px; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; -webkit-overflow-scrolling: touch; }
+  .toolbar button, .draw-tools button { min-width: 40px; min-height: 40px; flex: none; }
+  .info { top: 64px; left: 8px; max-width: calc(100% - 70px); padding: 8px 10px; }
+  .info:not(.open) .small, .info:not(.open) .weather { display: none; }
+  .info .strong::after { content: ' ▾'; color: var(--muted); }
+  .info.open .strong::after { content: ' ▴'; }
+  .cam-tools { top: auto; bottom: 92px; transform: none; right: 8px; }
+  .cam-tools button { width: 40px; height: 40px; }
+  .timebar { left: 8px; right: 8px; bottom: 8px; gap: 8px; padding: 6px 8px; }
+  .search { top: 8px; left: 8px; width: calc(100% - 16px); }
+  .draw-tools { top: 56px; right: 8px; }
+  .map-bottom { left: 8px; right: 8px; bottom: 20px; }
+  .offline { top: 104px; right: 8px; left: 8px; width: auto; }
+  .building-info { right: 8px; left: 8px; width: auto; bottom: 70px; }
+}
