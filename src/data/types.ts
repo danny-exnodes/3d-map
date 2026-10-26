@@ -16,7 +16,8 @@ export type FacadeMaterial = 'glass' | 'brick' | 'metal' | 'concrete';
 export type Archetype = 'tube' | 'shophouse' | 'villa' | 'apartment' | 'office' | 'civic' | 'industrial' | 'temple' | 'church' | 'generic';
 /** Where the height came from, best first (#3). */
 export type HeightSource = 'osm' | 'gob' | 'overture' | 'heuristic';
-export type FootprintSource = 'osm' | 'overture' | 'demo';
+/** 'gob' = inferred from the Google 2.5D raster where no footprint exists (#16). */
+export type FootprintSource = 'osm' | 'overture' | 'gob' | 'demo';
 
 export interface Building {
   id: string;
@@ -38,6 +39,8 @@ export interface Building {
   address?: string;
   /** A building:part; its outline building is not drawn (Simple 3D Buildings). */
   isPart?: boolean;
+  /** One lot of a row block split into tube houses (#16). */
+  lot?: boolean;
   /** Style values that came from tags (kept when restyling after a height change). */
   tagged?: { roof?: RoofShape; color?: string; roofColor?: string; material?: FacadeMaterial };
   /** OSM tags kept for archetype detection (OSM buildings only). */

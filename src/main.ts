@@ -313,7 +313,11 @@ function renderSourceStats(data: CityData) {
   }
   const n = data.buildings.length || 1;
   const pct = (v: number) => `${fmt((v / n) * 100)}%`;
-  const fp = [`${fmt(st.footprints.osm)} OSM`, st.footprints.overture ? `${fmt(st.footprints.overture)} Overture` : ''].filter(Boolean).join(' + ');
+  const fp = [
+    `${fmt(st.footprints.osm)} OSM`,
+    st.footprints.overture ? `${fmt(st.footprints.overture)} Overture` : '',
+    st.footprints.gob ? `${fmt(st.footprints.gob)} suy ra từ ảnh vệ tinh` : '',
+  ].filter(Boolean).join(' + ');
   const h = st.heights;
   const measured = h.osm + h.gob + h.overture;
   el.innerHTML = '';
@@ -344,7 +348,12 @@ const ARCHETYPE_VI: Record<string, string> = {
 const HEIGHT_SOURCE_VI: Record<HeightSource, string> = {
   osm: 'OpenStreetMap (tag)', gob: 'Google Open Buildings 2.5D', overture: 'Overture (số tầng)', heuristic: 'Ước lượng',
 };
-const FOOTPRINT_VI: Record<FootprintSource, string> = { osm: 'OpenStreetMap', overture: 'Overture Maps', demo: 'Thành phố mẫu' };
+const FOOTPRINT_VI: Record<FootprintSource, string> = {
+  osm: 'OpenStreetMap',
+  overture: 'Overture Maps',
+  gob: 'Suy ra từ ảnh vệ tinh (Google 2.5D)',
+  demo: 'Thành phố mẫu',
+};
 
 function showBuildingInfo(b: Building | null) {
   const panel = $('building-info');

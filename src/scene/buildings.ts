@@ -114,7 +114,7 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
       buildRoof(mb, { shape: b.roof, rings: [tower], y: y1, roof: roofCol, facade, height: b.roofHeight });
     } else {
       walls(mb, rings, y0, y1);
-      buildRoof(mb, { shape: b.roof, rings, y: y1, roof: roofCol, facade, height: b.roofHeight, lowPitch: arch === 'industrial' });
+      buildRoof(mb, { shape: b.roof, rings, y: y1, roof: roofCol, facade, height: b.roofHeight, lowPitch: arch === 'industrial' || arch === 'tube' || arch === 'shophouse' });
     }
     if (y0 > 0.5) {
       mb.setColor('#8d877c');

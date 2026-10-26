@@ -3,6 +3,7 @@ import { applyHeightGrid, computeStats, mergeOverture } from './enrich';
 import { loadHeightGrid } from './heights';
 import { loadOvertureBuildings } from './overture';
 import { loadOfmPois } from './openfreemap';
+import { synthesizeFromGrid } from './synth';
 import { loadOvertureContext } from './overtureBase';
 import { fetchOverpassText, linkedAbort, parseOverpass, slimOverpass, type OverpassResponse } from './osm';
 import type { BBox, CityData } from './types';
@@ -62,6 +63,8 @@ export interface CityLoadOptions {
    * themes, fast and not rate limited. 'overpass': full OSM tags, slow when servers are busy.
    */
   osmSource?: 'overture' | 'overpass';
+  /** Infer missing buildings and split row blocks from the height raster (#16). Default on. */
+  synthesize?: boolean;
 }
 
 /**
@@ -129,8 +132,10 @@ export async function loadCity(bbox: BBox, opts: CityLoadOptions, onProgress: (p
     onProgress({ step: 'overture', f: 1, detail: `+${added.toLocaleString('vi-VN')} nhà` });
   }
   if (grid) {
-    onProgress({ step: 'merge', f: 0.7, detail: 'gán chiều cao' });
+    onProgress({ step: 'merge', f: 0.6, detail: 'gán chiều cao' });
     applyHeightGrid(data.buildings, grid);
+    onProgress({ step: 'merge', f: 0.8, detail: 'bổ sung nhà từ ảnh vệ tinh' });
+    if (opts.synthesize !== false) synthesizeFromGrid(data, grid);
   }
   data.source = data.source === 'Overture' ? 'OSM + Overture' : 'Overpass + Overture';
   data.stats = computeStats(data);

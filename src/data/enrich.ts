@@ -96,7 +96,7 @@ export function applyHeightGrid(buildings: Building[], grid: HeightGrid): number
 }
 
 export function computeStats(data: CityData, extraAttributions: string[] = []): CityStats {
-  const footprints: Record<FootprintSource, number> = { osm: 0, overture: 0, demo: 0 };
+  const footprints: Record<FootprintSource, number> = { osm: 0, overture: 0, gob: 0, demo: 0 };
   const heights: Record<HeightSource, number> = { osm: 0, gob: 0, overture: 0, heuristic: 0 };
   for (const b of data.buildings) {
     footprints[b.footprintSource]++;
@@ -104,6 +104,6 @@ export function computeStats(data: CityData, extraAttributions: string[] = []): 
   }
   const attributions = ['© OpenStreetMap contributors (ODbL)'];
   if (footprints.overture || data.source.includes('Overture')) attributions.push('Overture Maps Foundation (ODbL)');
-  if (heights.gob) attributions.push('Google Open Buildings 2.5D Temporal (CC BY 4.0)');
+  if (heights.gob || footprints.gob) attributions.push('Google Open Buildings 2.5D Temporal (CC BY 4.0)');
   return { footprints, heights, attributions: [...attributions, ...extraAttributions] };
 }
