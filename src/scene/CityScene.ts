@@ -9,6 +9,7 @@ import type { CityData, ProgressFn } from '../data/types';
 import { bboxSizeMeters, LocalProjection } from '../geo/projection';
 import { buildBuildings } from './buildings';
 import { buildLandscape, type LandscapeResult } from './landscape';
+import { bakeMono, type ColorMode, colorModeUniforms, monoSky, patchObject } from './colorMode';
 import { buildRoads } from './roads';
 import { lighting, sunState, type SunState } from './sun';
 import { Traffic } from './traffic';
@@ -44,6 +45,10 @@ export class CityScene {
   private raf = 0;
   private pixelMode = false;
   private cloud = 0;
+  private colorMode: ColorMode = 'color';
+  private modeFrom = 0;
+  private modeChangedAt = 0;
+  private lastSky = new THREE.Color('#9fd3f2');
   data: CityData | null = null;
   sunInfo: SunState | null = null;
   onFrame?: () => void;
@@ -143,6 +148,9 @@ export class CityScene {
     this.controls.minDistance = 20;
     this.resetView();
 
+    patchObject(this.city);
+    patchObject(this.traffic.group);
+
     onProgress('build', 1, 'Xong');
     return {
       buildings: b.count,
@@ -194,8 +202,8 @@ export class CityScene {
     this.hemi.intensity = L.hemiIntensity;
     this.hemi.color.copy(L.hemiSky);
     this.hemi.groundColor.copy(L.hemiGround);
-    this.scene.background = L.sky;
-    (this.scene.fog as THREE.Fog).color.copy(L.sky);
+    this.lastSky.copy(L.sky);
+    this.applySky();
     this.bloom.strength = 0.06 + s.night * 0.4;
     this.bloom.threshold = s.night > 0.5 ? 0.8 : 0.95;
     // Warm sodium glow on streets after dark.
@@ -207,6 +215,23 @@ export class CityScene {
     if (this.landscape?.lampBulbs) this.landscape.lampBulbs.visible = s.night > 0.35;
     this.traffic?.setHour(localHour);
     this.traffic?.setNight(s.night);
+  }
+
+  private applySky() {
+    const sky = monoSky(this.lastSky, colorModeUniforms.uMono.value);
+    this.scene.background = sky;
+    (this.scene.fog as THREE.Fog).color.copy(sky);
+  }
+
+  setColorMode(mode: ColorMode) {
+    if (mode === this.colorMode) return;
+    this.colorMode = mode;
+    this.modeFrom = colorModeUniforms.uMono.value;
+    this.modeChangedAt = performance.now();
+  }
+
+  get currentColorMode() {
+    return this.colorMode;
   }
 
   setCloud(c: number) {
@@ -291,7 +316,12 @@ export class CityScene {
 
   async exportGLB(): Promise<Blob> {
     const exporter = new GLTFExporter();
-    const result = await exporter.parseAsync(this.city, { binary: true });
+    let root: THREE.Object3D = this.city;
+    if (this.colorMode === 'mono') {
+      root = this.city.clone(true);
+      bakeMono(root);
+    }
+    const result = await exporter.parseAsync(root, { binary: true });
     return new Blob([result as ArrayBuffer], { type: 'model/gltf-binary' });
   }
 
@@ -304,6 +334,14 @@ export class CityScene {
     this.timer.update();
     const dt = Math.min(this.timer.getDelta(), 0.1);
     this.controls.update();
+    // Ease towards the target colour mode over ~300 ms of wall-clock time (frame-rate independent).
+    const u = colorModeUniforms.uMono;
+    const target = this.colorMode === 'mono' ? 1 : 0;
+    if (u.value !== target) {
+      const t = Math.min(1, (performance.now() - this.modeChangedAt) / 300);
+      u.value = this.modeFrom + (target - this.modeFrom) * t;
+      this.applySky();
+    }
     this.traffic?.update(dt);
     if (this.rain) {
       const p = this.rain.geometry.attributes.position as THREE.BufferAttribute;

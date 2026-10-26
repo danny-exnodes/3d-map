@@ -4,6 +4,7 @@ import { fetchOverpass, parseOverpass } from './data/osm';
 import type { BBox, CityData, ProgressStep } from './data/types';
 import { bboxAreaKm2 } from './geo/projection';
 import { CityScene } from './scene/CityScene';
+import type { ColorMode } from './scene/colorMode';
 import { compassLabel } from './scene/sun';
 import { searchPlaces, type Place } from './services/geocode';
 import { fetchWeather } from './services/weather';
@@ -209,6 +210,7 @@ async function build(source: 'osm' | 'demo') {
     showCity();
     city ??= new CityScene($('canvas'), $('labels'));
     city.onFrame = updateHud;
+    city.setColorMode(colorMode);
     const stats = await city.build(data, progress);
     applyTime();
     const km2 = bboxAreaKm2(b);
@@ -353,6 +355,35 @@ $('btn-traffic').addEventListener('click', () => {
   city?.setTrafficOverlay(trafficOn);
   $('btn-traffic').classList.toggle('on', trafficOn);
 });
+// Colour / monochrome (#7): remembered per browser, overridable with ?style=mono|color.
+const COLOR_KEY = 'tinymap:colorMode';
+function initialColorMode(): ColorMode {
+  const q = /[?&]style=(mono|color)\b/.exec(location.search)?.[1];
+  if (q) return q as ColorMode;
+  try {
+    return localStorage.getItem(COLOR_KEY) === 'mono' ? 'mono' : 'color';
+  } catch {
+    return 'color';
+  }
+}
+let colorMode = initialColorMode();
+function applyColorMode() {
+  city?.setColorMode(colorMode);
+  const btn = $('btn-mono');
+  btn.classList.toggle('on', colorMode === 'mono');
+  btn.textContent = colorMode === 'mono' ? '◐ Đơn sắc' : '◑ Có màu';
+}
+$('btn-mono').addEventListener('click', () => {
+  colorMode = colorMode === 'mono' ? 'color' : 'mono';
+  try {
+    localStorage.setItem(COLOR_KEY, colorMode);
+  } catch {
+    /* ignore */
+  }
+  applyColorMode();
+});
+applyColorMode();
+
 let pixelOn = false;
 $('btn-pixel').addEventListener('click', () => {
   pixelOn = !pixelOn;

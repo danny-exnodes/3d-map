@@ -62,3 +62,19 @@ describe('demo city', () => {
     expect(a.roads.some((r) => r.bridge)).toBe(true);
   });
 });
+
+describe('mono colour mode', () => {
+  it('maps colours to the tint while keeping relative brightness', async () => {
+    const THREE = await import('three');
+    const { monoColor, MONO_TINT } = await import('../src/scene/colorMode');
+    const water = monoColor(new THREE.Color('#5fa8d8'));
+    const road = monoColor(new THREE.Color('#40444d'));
+    const white = monoColor(new THREE.Color('#ffffff'));
+    expect(white.r).toBeCloseTo(MONO_TINT.r, 5);
+    expect(road.r).toBeLessThan(water.r);
+    // Near-neutral: channels follow the tint ratios.
+    expect(water.r / water.b).toBeCloseTo(MONO_TINT.r / MONO_TINT.b, 5);
+    // amount = 0 is identity.
+    expect(monoColor(new THREE.Color('#ff0000'), 0).getHexString()).toBe('ff0000');
+  });
+});
