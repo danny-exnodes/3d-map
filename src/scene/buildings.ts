@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import { hashString } from '../data/rand';
 import type { Building } from '../data/types';
 import type { LocalProjection } from '../geo/projection';
-import { flatPolygon, merge, MeshBuilder, type XZ } from './geometry';
+import { LEVEL_H } from '../data/buildings';
+import { DetailCollector } from './details';
+import { MeshBuilder, type XZ } from './geometry';
+import { buildRoof, flatCap, minAreaRect } from './roofs';
 import { SpatialGrid } from './spatial';
 
 /** Integer codes of HeightSource stored in aSeed (see the "theo nguồn chiều cao" view, #3). */
@@ -13,8 +16,14 @@ export interface BuildingsResult {
   mesh: THREE.Mesh;
   material: THREE.MeshLambertMaterial;
   footprints: SpatialGrid<XZ[]>;
+  details: THREE.Group;
   count: number;
+  /** Index i of aBid → building (for picking, #10). */
+  ids: string[];
 }
+
+/** Facade material codes packed into aSeed (see the shader). */
+const MATERIAL_CODE: Record<NonNullable<Building['material']> | 'none', number> = { none: 0, glass: 1, brick: 2, metal: 3, concrete: 0 };
 
 const signedArea = (r: XZ[]) => {
   let a = 0;
@@ -37,111 +46,114 @@ function clean(r: XZ[]): XZ[] {
   return out;
 }
 
-export function buildBuildings(list: Building[], proj: LocalProjection, onProgress?: (f: number) => void): BuildingsResult {
-  const walls = new MeshBuilder();
-  const roofs: THREE.BufferGeometry[] = [];
+/** Orients rings for wall emission: outer ring negative signed area (outward = right of travel), holes positive. */
+const orient = (ring: XZ[], outer: boolean) => ((outer === signedArea(ring) > 0) ? ring.slice().reverse() : ring);
+
+function walls(mb: MeshBuilder, rings: XZ[][], y0: number, y1: number) {
+  rings.forEach((ring, ri) => {
+    const r = orient(ring, ri === 0);
+    for (let i = 0; i < r.length; i++) {
+      const [ax, az] = r[i];
+      const [bx, bz] = r[(i + 1) % r.length];
+      mb.quad({ x: ax, y: y0, z: az }, { x: bx, y: y0, z: bz }, { x: bx, y: y1, z: bz }, { x: ax, y: y1, z: az });
+    }
+  });
+}
+
+const scaleRing = (r: XZ[], c: XZ, k: number): XZ[] => r.map(([x, z]) => [c[0] + (x - c[0]) * k, c[1] + (z - c[1]) * k]);
+
+export interface BuildOptions {
+  onProgress?: (f: number) => void;
+  /** Distance (m) from a point to the nearest road, used to find a house's street front. */
+  roadDistance?: (x: number, z: number) => number;
+}
+
+export function buildBuildings(list: Building[], proj: LocalProjection, opts: BuildOptions = {}): BuildingsResult {
+  const mb = new MeshBuilder();
   const footprints = new SpatialGrid<XZ[]>(25);
+  const details = new DetailCollector();
   const facade = new THREE.Color();
+  const roofCol = new THREE.Color();
+  const ids: string[] = [];
   let count = 0;
 
   list.forEach((b, idx) => {
-    if (idx % 200 === 0) onProgress?.(idx / list.length);
+    if (idx % 200 === 0) opts.onProgress?.(idx / list.length);
     const rings = b.polygon.map((r) => clean(r.map((p) => proj.project(p)))).filter((r) => r.length >= 3);
     if (!rings.length) return;
-    const outerArea = Math.abs(signedArea(rings[0]));
-    if (outerArea < 4) return;
+    const area = Math.abs(signedArea(rings[0]));
+    if (area < 4) return;
     count++;
+    const bid = ids.length;
+    ids.push(b.id);
 
-    // aSeed packs the height-source code (integer part) with a per-building random seed (fraction).
-    const seed = HEIGHT_SOURCE_CODE[b.heightSource] + (hashString(b.id) % 10007) / 10008;
+    // aSeed = heightSource code + 4 × material code + per-building random fraction.
+    const h = hashString(b.id);
+    const seed = HEIGHT_SOURCE_CODE[b.heightSource] + 4 * MATERIAL_CODE[b.material ?? 'none'] + (h % 10007) / 10008;
     const y0 = b.minHeight;
     const y1 = b.height;
     facade.set(b.color ?? '#f0e6d2');
-    walls.setColor(facade).setSeed(seed);
-
-    rings.forEach((ring, ri) => {
-      // Outer rings must have negative signed area (outward = right of travel), holes positive.
-      const r = (ri === 0) === signedArea(ring) > 0 ? ring.slice().reverse() : ring;
-      for (let i = 0; i < r.length; i++) {
-        const [ax, az] = r[i];
-        const [bx, bz] = r[(i + 1) % r.length];
-        walls.quad({ x: ax, y: y0, z: az }, { x: bx, y: y0, z: bz }, { x: bx, y: y1, z: bz }, { x: ax, y: y1, z: az });
-      }
-    });
+    roofCol.set(b.roofColor ?? '#d2cbbb');
+    mb.setColor(facade).setSeed(seed).setBid(bid);
     footprints.insert(rings[0], rings[0]);
 
-    const roofColor = b.roofColor ?? '#d2cbbb';
-    if ((b.roof === 'gabled' || b.roof === 'hipped') && rings.length === 1 && rings[0].length === 4) {
-      pitchedRoof(walls, rings[0], y1, b.roof, facade, new THREE.Color(roofColor), seed);
+    const arch = b.archetype ?? 'generic';
+    const rect = minAreaRect(rings[0]);
+    const fill = area / Math.max(rect.area, 1e-6);
+
+    // Tall blocks get a wider podium and a set-back tower (khối đế), when the shape allows it.
+    const podium = !b.isPart && rings.length === 1 && y0 === 0 && y1 > 30 && area > 600 && fill > 0.75 && (arch === 'apartment' || arch === 'office');
+    if (podium) {
+      const ph = LEVEL_H * (3 + (h % 2));
+      const tower = scaleRing(rings[0], rect.centre, 0.72);
+      walls(mb, rings, 0, ph);
+      mb.setColor(roofCol);
+      flatCap(mb, rings, ph);
+      mb.setColor(facade);
+      walls(mb, [tower], ph, y1);
+      buildRoof(mb, { shape: b.roof, rings: [tower], y: y1, roof: roofCol, facade, height: b.roofHeight });
     } else {
-      const g = flatPolygon(rings, y1, roofColor);
-      if (g) {
-        g.setAttribute('aSeed', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count).fill(seed), 1));
-        roofs.push(g);
-      }
-      if (y0 > 0.5) {
-        const under = flatPolygon(rings, y0, '#8d877c');
-        if (under) {
-          under.scale(1, -1, 1); // flip to face down …
-          under.translate(0, 2 * y0, 0); // … and move back into place
-          under.setAttribute('aSeed', new THREE.Float32BufferAttribute(new Float32Array(under.attributes.position.count), 1));
-          roofs.push(under);
-        }
-      }
+      walls(mb, rings, y0, y1);
+      buildRoof(mb, { shape: b.roof, rings, y: y1, roof: roofCol, facade, height: b.roofHeight, lowPitch: arch === 'industrial' });
+    }
+    if (y0 > 0.5) {
+      mb.setColor('#8d877c');
+      const contour = rings[0];
+      const tris = THREE.ShapeUtils.triangulateShape(contour.map(([x, z]) => new THREE.Vector2(x, z)), []);
+      for (const [a, c, d] of tris) mb.triDown(V(contour[a], y0), V(contour[c], y0), V(contour[d], y0));
+    }
+
+    // Street-level detail for houses (#5).
+    if ((arch === 'tube' || arch === 'shophouse') && !b.isPart && y1 < 30 && rect.short > 2.5) {
+      const levels = Math.max(1, Math.round(y1 / LEVEL_H));
+      const [c0, c1, c2, c3] = rect.corners;
+      // The two short sides of the rectangle; the one nearer a road is the street front.
+      const d01 = Math.hypot(c1[0] - c0[0], c1[1] - c0[1]);
+      const sides: [XZ, XZ][] = d01 < rect.long - 1e-6 ? [[c0, c1], [c2, c3]] : [[c1, c2], [c3, c0]];
+      const mid = (s: [XZ, XZ]): XZ => [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
+      const dist = (s: [XZ, XZ]) => opts.roadDistance?.(...mid(s)) ?? 0;
+      const [front, rear] = dist(sides[0]) <= dist(sides[1]) ? sides : [sides[1], sides[0]];
+      // Orient the front edge so that its right-hand side points away from the rectangle centre.
+      const m = mid(front);
+      const [a, c] = (front[1][0] - front[0][0]) * (rect.centre[1] - m[1]) - (front[1][1] - front[0][1]) * (rect.centre[0] - m[0]) > 0 ? [front[1], front[0]] : front;
+      details.balconies(a, c, levels, LEVEL_H, h);
+      if (b.roof === 'flat') details.rooftop(rect.centre, mid(rear), Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h);
+    } else if (arch === 'generic' && b.roof === 'flat' && y1 < 25 && area < 400 && rect.short > 3) {
+      details.rooftop(rect.centre, rect.corners[2], Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h);
     }
   });
 
-  const geom = merge([walls.build(true), ...roofs]) ?? new THREE.BufferGeometry();
+  const geom = mb.empty ? new THREE.BufferGeometry() : mb.build(true, true);
   const material = createBuildingMaterial();
   const mesh = new THREE.Mesh(geom, material);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.name = 'buildings';
-  onProgress?.(1);
-  return { mesh, material, footprints, count };
+  opts.onProgress?.(1);
+  return { mesh, material, footprints, details: details.build(), count, ids };
 }
 
-function pitchedRoof(mb: MeshBuilder, ring: XZ[], y: number, kind: 'gabled' | 'hipped', facade: THREE.Color, roof: THREE.Color, seed: number) {
-  let [p0, p1, p2, p3] = ring;
-  const d01 = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
-  const d12 = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
-  // Make p0→p1 a long edge.
-  if (d12 > d01) [p0, p1, p2, p3] = [p1, p2, p3, p0];
-  const long = Math.max(d01, d12);
-  const short = Math.min(d01, d12);
-  const rise = Math.min(short * 0.42, 5);
-  const mid = (a: XZ, b: XZ): XZ => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-  let r1 = mid(p1, p2);
-  let r3 = mid(p3, p0);
-  if (kind === 'hipped') {
-    const k = Math.min(0.45, short / 2 / long);
-    const a = r1;
-    const b = r3;
-    r1 = [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
-    r3 = [b[0] + (a[0] - b[0]) * k, b[1] + (a[1] - b[1]) * k];
-  }
-  const P = (p: XZ, h = y) => new THREE.Vector3(p[0], h, p[1]);
-  const R1 = P(r1, y + rise);
-  const R3 = P(r3, y + rise);
-  const cx = (p0[0] + p1[0] + p2[0] + p3[0]) / 4;
-  const cz = (p0[1] + p1[1] + p2[1] + p3[1]) / 4;
-  const centre = new THREE.Vector3(cx, y, cz);
-  const tmp = new THREE.Vector3();
-  const out = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => {
-    const n = tmp.subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a));
-    const m = new THREE.Vector3().add(a).add(b).add(c).divideScalar(3).sub(centre);
-    if (n.dot(m) < 0) mb.tri(a, c, b);
-    else mb.tri(a, b, c);
-  };
-  mb.setSeed(seed).setColor(roof);
-  out(P(p0), P(p1), R1);
-  out(P(p0), R1, R3);
-  out(P(p2), P(p3), R3);
-  out(P(p2), R3, R1);
-  mb.setColor(kind === 'gabled' ? facade : roof);
-  out(P(p1), P(p2), R1);
-  out(P(p3), P(p0), R3);
-}
+const V = (p: XZ, y: number) => new THREE.Vector3(p[0], y, p[1]);
 
 /**
  * Lambert material with procedural windows: glazing by day, randomly lit
@@ -186,8 +198,13 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+        float code = floor(vSeed + 0.001);
+        float src = mod(code, 4.0);
+        float matCode = floor(code / 4.0 + 0.001);
+        // Facade materials (#5): 1 glass curtain wall, 2 brick, 3 metal cladding.
+        if (matCode > 1.5 && matCode < 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.13, 0.07), 0.55);
+        if (matCode > 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.38, 0.41, 0.45), 0.6);
         if (uSourceView > 0.5) {
-          float src = floor(vSeed + 0.001);
           diffuseColor.rgb = src < 0.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[0])}) : src < 1.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[1])})
             : src < 2.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[2])}) : vec3(${hexToVec(HEIGHT_SOURCE_COLORS[3])});
         }
@@ -200,15 +217,23 @@ export function createBuildingMaterial(): THREE.MeshLambertMaterial {
           vec2 cell = vec2(floor(u / cellW), floor(vWPos.y / cellH));
           vec2 f = vec2(fract(u / cellW), fract(vWPos.y / cellH));
           float aa = fwidth(u / cellW) * 1.5;
-          float mx = smoothstep(0.22 - aa, 0.22 + aa, f.x) * (1.0 - smoothstep(0.78 - aa, 0.78 + aa, f.x));
-          float my = smoothstep(0.32, 0.36, f.y) * (1.0 - smoothstep(0.82, 0.86, f.y));
+          bool glassWall = matCode > 0.5 && matCode < 1.5;
+          float wx0 = glassWall ? 0.05 : 0.22, wx1 = glassWall ? 0.95 : 0.78;
+          float wy0 = glassWall ? 0.08 : 0.32, wy1 = glassWall ? 0.92 : 0.82;
+          float mx = smoothstep(wx0 - aa, wx0 + aa, f.x) * (1.0 - smoothstep(wx1 - aa, wx1 + aa, f.x));
+          float my = smoothstep(wy0, wy0 + 0.04, f.y) * (1.0 - smoothstep(wy1, wy1 + 0.04, f.y));
           winMask = mx * my;
           float r = h21(cell + fract(vSeed) * 97.0);
           float floorDark = step(0.82, h21(vec2(cell.y, fract(vSeed) * 31.0)));
           winLit = step(r, 0.42) * (1.0 - floorDark);
           winColor = mix(vec3(1.0, 0.78, 0.45), vec3(0.95, 0.95, 1.0), step(0.75, h21(cell.yx + fract(vSeed))));
           vec3 glass = mix(vec3(0.42, 0.52, 0.62), vec3(0.08, 0.1, 0.16), uNight);
-          diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * 0.75);
+          if (glassWall) {
+            // Curtain wall: bluish, a little brighter towards the top (sky reflection).
+            glass = mix(vec3(0.30, 0.45, 0.62) + 0.12 * clamp(vWPos.y / 120.0, 0.0, 1.0), vec3(0.06, 0.08, 0.14), uNight);
+            winLit = step(r, 0.55) * (1.0 - floorDark);
+          }
+          diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 0.75));
         }
         // Slight darkening towards the ground for depth.
         diffuseColor.rgb *= mix(0.82, 1.0, clamp(vWPos.y / 10.0, 0.0, 1.0));`,

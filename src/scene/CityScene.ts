@@ -37,6 +37,8 @@ export class CityScene {
   private city = new THREE.Group();
   private traffic: Traffic | null = null;
   private lampBulbs: THREE.InstancedMesh | null = null;
+  /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
+  private details: THREE.Object3D[] = [];
   private buildingUniforms: { uNight: { value: number }; uSourceView: { value: number } } | null = null;
   private sourceView = false;
   private rain: THREE.Points | null = null;
@@ -148,6 +150,8 @@ export class CityScene {
     this.buildingUniforms = (buildingsMesh?.material as THREE.Material | undefined)?.userData.uniforms ?? null;
     if (this.buildingUniforms) this.buildingUniforms.uSourceView.value = this.sourceView ? 1 : 0;
     this.lampBulbs = (built.group.getObjectByName('lampBulbs') as THREE.InstancedMesh | undefined) ?? null;
+    this.details = [];
+    built.group.traverse((o) => o.name.startsWith('detail-') && this.details.push(o));
 
     onProgress('build', 0.92, 'Giao thông');
     await nextFrame();
@@ -386,6 +390,13 @@ export class CityScene {
       this.applySky();
     }
     this.traffic?.update(dt);
+    if (this.details.length) {
+      const near = this.camera.position.distanceTo(this.controls.target) < 700;
+      if (this.details[0].visible !== near) {
+        for (const d of this.details) d.visible = near;
+        this.renderer.shadowMap.needsUpdate = true;
+      }
+    }
     if (this.rain) {
       const p = this.rain.geometry.attributes.position as THREE.BufferAttribute;
       for (let i = 0; i < p.count; i++) {

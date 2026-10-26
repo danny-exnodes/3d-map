@@ -467,6 +467,8 @@ function startBench(scene: CityScene) {
   scene.paused = true;
   return async (buildSeconds: number, data: CityData) => {
     obs?.disconnect();
+    // Let one frame run so view-dependent state (detail LOD) matches what the user sees.
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
     const render = scene.measureRender();
     scene.paused = false;
     await new Promise((r) => setTimeout(r, 4500));

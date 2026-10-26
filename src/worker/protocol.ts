@@ -16,6 +16,7 @@ export interface BuildResult {
   railPaths: RailPath[];
   buildings: number;
   trees: number;
+  buildingIds: string[];
 }
 
 export type WorkerResponse =
