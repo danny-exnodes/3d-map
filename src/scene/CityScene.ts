@@ -26,6 +26,9 @@ export interface BuildStats {
   areaKm2: number;
 }
 
+/** Phones and small tablets get lighter defaults (#23). */
+export const MOBILE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
 export class CityScene {
@@ -203,7 +206,8 @@ export class CityScene {
     onProgress('build', 0.92, 'Giao thông');
     await nextFrame();
     const tTraffic = performance.now();
-    this.traffic = new Traffic(built.paths, built.railPaths);
+    const attractors = data.pois.filter((p) => /market|school|college|university|hospital|place_of_worship|stadium/.test(p.kind)).map((p) => proj.project(p.pos));
+    this.traffic = new Traffic(built.paths, built.railPaths, attractors, MOBILE ? 1100 : 2400, MOBILE ? 300 : 700);
     this.mainThreadSlices.traffic = performance.now() - tTraffic;
     this.scene.add(this.traffic.group);
 
@@ -427,7 +431,7 @@ export class CityScene {
   }
 
   get trafficStats() {
-    return this.traffic?.stats ?? { vehicles: 0, segments: 0, flow: 1 };
+    return this.traffic?.stats ?? { vehicles: 0, segments: 0, flow: 1, people: 0, byKind: {} as Record<string, number> };
   }
 
   setPixelMode(on: boolean) {

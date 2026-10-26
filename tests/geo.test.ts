@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { generateDemoCity } from '../src/data/demo';
 import { bboxAreaKm2, LocalProjection } from '../src/geo/projection';
 import { compassLabel, sunPosition } from '../src/scene/sun';
-import { densityAt, flowFactor } from '../src/scene/traffic';
+import { densityAt } from '../src/scene/traffic';
+import { kindMix, roadLoad } from '../src/scene/trafficModel';
 
 const bbox = { south: 20.9992, west: 105.8152, north: 21.0068, east: 105.8238 };
 
@@ -49,7 +50,19 @@ describe('sun', () => {
 describe('traffic model', () => {
   it('is busier at rush hour than at night', () => {
     expect(densityAt(8)).toBeGreaterThan(densityAt(3));
-    expect(flowFactor('way/1', 8)).toBeLessThanOrEqual(flowFactor('way/1', 3));
+    // Slower at rush hour, and more so near attractors.
+    expect(roadLoad('primary', 8).speedRatio).toBeLessThan(roadLoad('primary', 3).speedRatio);
+    expect(roadLoad('primary', 8, 1.4).speedRatio).toBeLessThan(roadLoad('primary', 8).speedRatio);
+    // Arterials carry far more than alleys.
+    expect(roadLoad('primary', 8).flow).toBeGreaterThan(2 * roadLoad('residential', 8).flow);
+  });
+
+  it('is mostly motorbikes on city streets (#26)', () => {
+    const mix = kindMix('secondary');
+    expect(mix.moto).toBeGreaterThan(0.7);
+    expect(Object.values(mix).reduce((a, b) => a + b, 0)).toBeCloseTo(1, 5);
+    expect(Object.values(kindMix('motorway')).reduce((a, b) => a + b, 0)).toBeCloseTo(1, 5);
+    expect(Object.values(kindMix('residential')).reduce((a, b) => a + b, 0)).toBeCloseTo(1, 5);
   });
 });
 

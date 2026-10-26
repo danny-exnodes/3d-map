@@ -601,7 +601,8 @@ function applyTime() {
   $('t-clock').textContent = clockLabel(mins);
   $('t-sun').textContent = s.altitudeDeg > 0 ? `Mặt trời ${fmt(s.altitudeDeg)}°, hướng ${s.compass}` : s.night > 0.9 ? 'Ban đêm · đèn đã bật' : 'Hoàng hôn / bình minh';
   const ts = city.trafficStats;
-  $('i-traffic').textContent = `🚗 ${fmt(ts.vehicles)} xe · ${fmt(ts.segments)} đoạn đường chính · ~${fmt(ts.flow * 100)}% tốc độ thông thường (mô phỏng)`;
+  const bk = ts.byKind as Record<string, number>;
+  $('i-traffic').textContent = `🛵 ${fmt(bk.moto ?? 0)} xe máy · 🚗 ${fmt((bk.car ?? 0) + (bk.bus ?? 0) + (bk.truck ?? 0))} ô tô/buýt/tải · 🚲 ${fmt(bk.bicycle ?? 0)} · 🚶 ${fmt(ts.people)} người · ~${fmt(ts.flow * 100)}% tốc độ thông thường (mô phỏng)`;
   document.querySelector('#city-view .info')?.classList.toggle('night', s.night > 0.5);
 }
 slider.addEventListener('input', applyTime);
