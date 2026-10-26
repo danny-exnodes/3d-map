@@ -7,7 +7,10 @@ setWorkerUrl(workerUrl);
 import { DEFAULT_LOCATION } from '../config';
 import type { BBox } from '../data/types';
 
-const STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+import { OFM_STYLE } from '../data/openfreemap';
+
+/** OpenFreeMap dark style (OSM data, no key, no rate limit — #17). */
+const STYLE = OFM_STYLE;
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 /** 2D map where the user searches a place and drags a rectangle to choose the area. */
@@ -17,6 +20,7 @@ export class MapView {
   private start: LngLat | null = null;
   private marker: Marker | null = null;
   bbox: BBox | null = null;
+  private ward: GeoJSON.Feature | null = null;
   onChange?: (b: BBox | null) => void;
 
   constructor(
@@ -30,10 +34,22 @@ export class MapView {
     this.map = new MapLibreMap({ container, style, center, zoom, attributionControl: { compact: true } });
     this.map.addControl(new NavigationControl({ showCompass: true }), 'bottom-right');
     this.map.addControl(new ScaleControl({ unit: 'metric' }), 'bottom-left');
+    // Prefer Vietnamese names on the basemap.
+    this.map.on('style.load', () => {
+      for (const layer of this.map.getStyle().layers ?? []) {
+        if (layer.type === 'symbol' && this.map.getLayoutProperty(layer.id, 'text-field')) {
+          this.map.setLayoutProperty(layer.id, 'text-field', ['coalesce', ['get', 'name:vi'], ['get', 'name']]);
+        }
+      }
+    });
     this.map.on('load', () => {
       this.map.addSource('selection', { type: 'geojson', data: EMPTY });
       this.map.addLayer({ id: 'sel-fill', type: 'fill', source: 'selection', paint: { 'fill-color': '#ff7a45', 'fill-opacity': 0.18 } });
       this.map.addLayer({ id: 'sel-line', type: 'line', source: 'selection', paint: { 'line-color': '#ff7a45', 'line-width': 2 } });
+      // Ward outline for the offline download picker (#18).
+      this.map.addSource('ward', { type: 'geojson', data: this.ward ?? EMPTY });
+      this.map.addLayer({ id: 'ward-fill', type: 'fill', source: 'ward', paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.08 } }, 'sel-fill');
+      this.map.addLayer({ id: 'ward-line', type: 'line', source: 'ward', paint: { 'line-color': '#60a5fa', 'line-width': 2, 'line-dasharray': [2, 1] } }, 'sel-fill');
       if (this.bbox) this.render();
     });
 
@@ -101,6 +117,12 @@ export class MapView {
           }
         : EMPTY,
     );
+  }
+
+  /** Outlines a ward (MultiPolygon coordinates) or clears it. */
+  setWard(polygon: number[][][][] | null) {
+    this.ward = polygon ? { type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: polygon } } : null;
+    (this.map.getSource('ward') as GeoJSONSource | undefined)?.setData(this.ward ?? EMPTY);
   }
 
   flyTo(lon: number, lat: number, label?: string, zoom = 16) {

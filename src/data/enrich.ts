@@ -60,11 +60,21 @@ export function mergeOverture(data: CityData, overture: { buildings: OvertureBui
   const index = new FootprintIndex();
   for (const b of data.buildings) index.add(toXZ(b.polygon[0]));
   let added = 0;
+  // Building parts replace their outline (Simple 3D Buildings), so outlines with parts are skipped.
+  const withParts = new Set(overture.parts.map((p) => p.buildingId).filter(Boolean));
   for (const o of overture.buildings) {
+    if (withParts.has(o.id)) continue;
     const ring = toXZ(o.polygon[0]);
     if (index.overlaps(ring)) continue;
     index.add(ring);
     data.buildings.push(buildingFromOverture(o));
+    added++;
+  }
+  // Parts are added only where nothing else (e.g. an Overpass building) already stands.
+  const partRings = overture.parts.map((p) => ({ p, ring: toXZ(p.polygon[0]) }));
+  const free = partRings.filter(({ p, ring }) => p.buildingId && withParts.has(p.buildingId) && !index.overlaps(ring));
+  for (const { p } of free) {
+    data.buildings.push(buildingFromOverture(p, true));
     added++;
   }
   return added;
@@ -86,14 +96,14 @@ export function applyHeightGrid(buildings: Building[], grid: HeightGrid): number
 }
 
 export function computeStats(data: CityData, extraAttributions: string[] = []): CityStats {
-  const footprints: Record<FootprintSource, number> = { osm: 0, overture: 0, demo: 0 };
+  const footprints: Record<FootprintSource, number> = { osm: 0, overture: 0, gob: 0, demo: 0 };
   const heights: Record<HeightSource, number> = { osm: 0, gob: 0, overture: 0, heuristic: 0 };
   for (const b of data.buildings) {
     footprints[b.footprintSource]++;
     heights[b.heightSource]++;
   }
   const attributions = ['© OpenStreetMap contributors (ODbL)'];
-  if (footprints.overture) attributions.push('Overture Maps Foundation (ODbL)');
-  if (heights.gob) attributions.push('Google Open Buildings 2.5D Temporal (CC BY 4.0)');
+  if (footprints.overture || data.source.includes('Overture')) attributions.push('Overture Maps Foundation (ODbL)');
+  if (heights.gob || footprints.gob) attributions.push('Google Open Buildings 2.5D Temporal (CC BY 4.0)');
   return { footprints, heights, attributions: [...attributions, ...extraAttributions] };
 }

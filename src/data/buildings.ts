@@ -174,6 +174,8 @@ function styleFor(id: string, arch: Archetype, height: number, polygon: Polygon,
     const quad = polygon.length === 1 && polygon[0].length <= 6;
     if (arch === 'temple') roof = 'pagoda';
     else if (arch === 'industrial') roof = quad ? 'gabled' : 'flat';
+    // Vietnamese tube houses: mostly flat concrete roofs with a stair hut, some low metal sheets.
+    else if (arch === 'tube' || arch === 'shophouse') roof = quad && r() < 0.25 ? 'gabled' : 'flat';
     else if (arch === 'villa' && quad) roof = r() < 0.6 ? 'hipped' : 'gabled';
     else if (height <= LEVEL_H * 3.2 && quad && r() < 0.5) roof = r() < 0.5 ? 'gabled' : 'hipped';
     else roof = 'flat';
@@ -182,7 +184,7 @@ function styleFor(id: string, arch: Archetype, height: number, polygon: Polygon,
   const color = t.color ?? (tall && arch !== 'apartment' ? pick(r, TOWER_COLORS) : pick(r, FACADE_COLORS));
   const roofColor =
     t.roofColor ??
-    (arch === 'industrial' ? pick(r, TON_COLORS) : arch === 'temple' ? pick(r, ['#c4462f', '#b8562f', '#d9a441']) : roof === 'flat' ? pick(r, FLAT_ROOF_COLORS) : pick(r, ROOF_COLORS));
+    (arch === 'industrial' || ((arch === 'tube' || arch === 'shophouse') && roof !== 'flat') ? pick(r, TON_COLORS) : arch === 'temple' ? pick(r, ['#c4462f', '#b8562f', '#d9a441']) : roof === 'flat' ? pick(r, FLAT_ROOF_COLORS) : pick(r, ROOF_COLORS));
   const material = t.material ?? (tall && (arch === 'office' || r() < 0.3) ? 'glass' : undefined);
   return { roof, color, roofColor, material };
 }
@@ -259,14 +261,16 @@ export function buildingFromOsm(id: string, polygon: Polygon, t: Record<string, 
 
 export function buildingFromOverture(o: OvertureBuilding, isPart = false): Building {
   const known = o.height && o.height > 1;
+  // Overture carries OSM buildings with their OSM height/levels: credit them to OSM (#17).
+  const fromOsm = o.dataset === 'OpenStreetMap';
   return makeBuilding({
     id: `overture/${o.id}`,
     polygon: o.polygon,
     kind: o.cls ?? 'yes',
     tags: {},
-    footprintSource: 'overture',
+    footprintSource: fromOsm ? 'osm' : 'overture',
     height: known ? o.height : undefined,
-    heightSource: known || o.numFloors ? 'overture' : undefined,
+    heightSource: known || o.numFloors ? (fromOsm ? 'osm' : 'overture') : undefined,
     levels: o.numFloors && o.numFloors > 0 ? o.numFloors : undefined,
     minHeight: o.minHeight,
     roofShapeTag: o.roofShape,

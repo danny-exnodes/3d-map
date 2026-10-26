@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
-/** Display styles. Only 'color' and 'mono' exist today; the type leaves room for more (issue #7). */
-export type ColorMode = 'color' | 'mono';
+/** Display styles: stylised colour, architectural-model mono (#7) and physically based "siêu thực" (#19). */
+export type ColorMode = 'color' | 'mono' | 'real';
 
 export const MONO_TINT = new THREE.Color('#ece6da');
 

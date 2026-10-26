@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,6 +36,27 @@ jobs:
           timeout 300 node bench/run.cjs || status=$?
           kill $PREVIEW_PID || true
           exit $status
+      # Height tiles for every phường of TP.HCM / Hà Nội (#18). Too big for git (~100 MB), so they
+      # are generated here and cached between runs; each run continues where the last one stopped.
+      - name: Restore height tiles
+        if: github.event_name == 'push'
+        uses: actions/cache/restore@v4
+        with:
+          path: heights-z14
+          key: heights-z14-v1-${{ github.run_id }}
+          restore-keys: heights-z14-v1-
+      - name: Generate height tiles
+        if: github.event_name == 'push'
+        run: node tools/height-tiles.mjs --out heights-z14 --budget-min 35 --concurrency 8
+      - name: Save height tiles
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: heights-z14
+          key: heights-z14-v1-${{ github.run_id }}
+      - name: Add height tiles to the site
+        if: github.event_name == 'push'
+        run: mkdir -p dist/heights && cp -r heights-z14 dist/heights/z14
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name == 'push'
         with:

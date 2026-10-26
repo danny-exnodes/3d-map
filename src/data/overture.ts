@@ -20,10 +20,17 @@ export async function fetchTileBytes(url: string, z: number, x: number, y: numbe
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   let pm = archives.get(url);
   if (!pm) archives.set(url, (pm = new PMTiles(url)));
-  const t = await pm.getZxy(z, x, y, signal);
-  const bytes = t?.data ?? new ArrayBuffer(0);
-  void cacheSet('overture', key, bytes, 30 * 24 * 3600 * 1000, bytes.byteLength);
-  return bytes;
+  try {
+    const t = await pm.getZxy(z, x, y, signal);
+    const bytes = t?.data ?? new ArrayBuffer(0);
+    void cacheSet('overture', key, bytes, 30 * 24 * 3600 * 1000, bytes.byteLength);
+    return bytes;
+  } catch (e) {
+    // Offline or server error: an expired copy is better than nothing.
+    const stale = await cacheGet<ArrayBuffer>('overture', key, true);
+    if (stale && !signal?.aborted) return stale;
+    throw e;
+  }
 }
 
 export interface OvertureBuilding {
