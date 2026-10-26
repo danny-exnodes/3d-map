@@ -41,6 +41,8 @@ export class CityScene {
   private sunDir = new THREE.Vector3(0, 1, 0);
   private night = 0;
   private wet = 0;
+  private lightDirty = false;
+  private lastLightUpdate = 0;
   private light = lighting(sunState(new Date(), 10.8, 106.7), 0);
   private sun = new THREE.DirectionalLight('#ffffff', 2.5);
   private hemi = new THREE.HemisphereLight('#bcd8ff', '#d8c9a8', 1.2);
@@ -276,14 +278,15 @@ export class CityScene {
     const ext = Math.max(this.size.width, this.size.depth);
     this.sun.position.copy(s.direction).multiplyScalar(ext * 1.5);
     this.sun.target.position.set(0, 0, 0);
-    if (s.direction.y > 0.02) {
+    if (s.direction.y > 0) {
       this.sun.color.copy(L.sunColor);
       this.sun.intensity = L.sunIntensity;
     } else {
       // Moonlight: a dim, cool key light from a fixed high angle so night scenes keep their shape.
+      // It fades in from zero as the sun sinks, so the switch of light direction is invisible (#22).
       this.sun.position.set(-0.4, 0.8, -0.45).normalize().multiplyScalar(ext * 1.5);
       this.sun.color.set('#8fa2ff');
-      this.sun.intensity = 0.55 * s.night;
+      this.sun.intensity = (this.colorMode === 'real' ? 0.3 : 0.55) * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25);
     }
     this.hemiBase = L.hemiIntensity;
     this.hemi.intensity = this.colorMode === 'real' ? L.hemiIntensity * 0.15 : L.hemiIntensity;
@@ -291,10 +294,11 @@ export class CityScene {
     this.night = s.night;
     this.hemi.color.copy(L.hemiSky);
     this.hemi.groundColor.copy(L.hemiGround);
-    this.renderer.shadowMap.needsUpdate = true;
+    // Shadows and image-based lighting are expensive; they are refreshed from the render loop at a
+    // limited rate instead of on every slider event (#22).
+    this.lightDirty = true;
     this.lastSky.copy(L.sky);
     this.applySky();
-    if (this.colorMode === 'real') this.realism.update(this.scene, this.sunDir, this.night, this.cloud, this.light);
     this.bloom.strength = 0.06 + s.night * 0.4;
     this.bloom.threshold = s.night > 0.5 ? 0.8 : 0.95;
     this.applyStreetGlow();
@@ -487,6 +491,13 @@ export class CityScene {
       this.applySky();
     }
     this.traffic?.update(dt);
+    const now = performance.now();
+    if (this.lightDirty && now - this.lastLightUpdate > 120) {
+      this.lightDirty = false;
+      this.lastLightUpdate = now;
+      this.renderer.shadowMap.needsUpdate = true;
+      if (this.colorMode === 'real') this.realism.update(this.scene, this.sunDir, this.night, this.cloud, this.light);
+    }
     realUniforms.uTime.value = this.timer.getElapsed();
     realUniforms.uWet.value += (this.wet - realUniforms.uWet.value) * Math.min(1, dt * 0.5);
     if (this.realism.sky.visible) this.realism.sky.position.copy(this.camera.position);

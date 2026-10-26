@@ -563,7 +563,12 @@ export class Realism {
       u.cloudDensity.value = 0.5;
       // The sky model is HDR and calibrated for a darker exposure; scale it down and keep it under
       // the bloom threshold, otherwise the whole sky bleeds over the city as a milky haze.
-      s.material.fragmentShader = s.material.fragmentShader.replace('#include <tonemapping_fragment>', 'gl_FragColor.rgb = min(gl_FragColor.rgb * 0.2, vec3(1.1));\n#include <tonemapping_fragment>');
+      // Fades out at night instead of popping off (#22).
+      // Kept opaque (ground layers do not write depth, so it must stay in the opaque pass).
+      u.uFade = { value: 1 };
+      u.uBg = { value: new THREE.Color() };
+      s.material.fragmentShader = 'uniform float uFade;\nuniform vec3 uBg;\n' + s.material.fragmentShader;
+      s.material.fragmentShader = s.material.fragmentShader.replace('#include <tonemapping_fragment>', 'gl_FragColor = vec4(mix(uBg, min(gl_FragColor.rgb * 0.2, vec3(1.1)), uFade), 1.0);\n#include <tonemapping_fragment>');
     }
     this.sky.scale.setScalar(9000);
     this.sky.name = 'sky';
@@ -705,7 +710,11 @@ export class Realism {
     scene.environment = this.envRT.texture;
     // IBL irradiance is π × radiance; keep it below the sun so shadows stay readable.
     scene.environmentIntensity = THREE.MathUtils.lerp(0.38, 0.2, night);
-    this.sky.visible = night < 0.95;
+    // The scattering sky is only convincing with the sun well above the horizon; blend into the
+    // app's own sky colour before it turns dark at sunset.
+    u.uFade.value = THREE.MathUtils.smoothstep(sunDir.y, 0.02, 0.2);
+    u.uBg.value.copy(light.sky);
+    this.sky.visible = u.uFade.value > 0.001;
   }
 
   dispose() {
