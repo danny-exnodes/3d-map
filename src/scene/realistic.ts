@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { applyTint } from './traffic';
 
 /**
  * "Siêu thực" view (#19): swaps every material of the built city for a physically based one
@@ -675,6 +676,9 @@ export class Realism {
         case 'trunks':
           return surfaceMaterial(m, 'bark');
         case 'vehicles':
+        case 'pedestrians':
+          // Keep painted / fixed parts apart (tint attribute, #28).
+          return applyTint(surfaceMaterial(m, mesh.name === 'vehicles' ? 'paint' : 'plain'));
         case 'trains':
           return surfaceMaterial(m, 'paint');
         case 'lamps':

@@ -49,23 +49,68 @@ function box(w: number, h: number, l: number, y0: number, z = 0, shade = 1): THR
   out.setAttribute('position', new THREE.BufferAttribute(keep(pos), 3));
   out.setAttribute('normal', new THREE.BufferAttribute(keep(nor), 3));
   out.setAttribute('color', new THREE.BufferAttribute(new Float32Array((out.getAttribute('position').count) * 3).fill(shade), 3));
+  out.setAttribute('tint', new THREE.BufferAttribute(new Float32Array(out.getAttribute('position').count).fill(1), 1));
   return out;
 }
+
+/** Like box(), but keeps its own colour (glass, tyres, skin, helmets) instead of the instance colour. */
+function fixed(w: number, h: number, l: number, y0: number, z: number, hex: string): THREE.BufferGeometry {
+  const g = box(w, h, l, y0, z);
+  const c = new THREE.Color(hex);
+  const col = g.getAttribute('color') as THREE.BufferAttribute;
+  for (let i = 0; i < col.count; i++) col.setXYZ(i, c.r, c.g, c.b);
+  (g.getAttribute('tint').array as Float32Array).fill(0);
+  return g;
+}
+
+/**
+ * Per-vertex `tint`: 1 takes the instance colour (paint, clothes), 0 keeps the vertex colour,
+ * so one instanced mesh per kind can mix painted and fixed-colour parts (#28).
+ */
+export function applyTint(mat: THREE.Material) {
+  const prev = mat.onBeforeCompile.bind(mat);
+  mat.onBeforeCompile = (shader, r) => {
+    prev(shader, r);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float tint;')
+      .replace(
+        '#include <color_vertex>',
+        `vColor = vec4(1.0);
+        #ifdef USE_COLOR
+          vColor.rgb *= color.rgb;
+        #endif
+        #ifdef USE_INSTANCING_COLOR
+          vColor.rgb *= mix(vec3(1.0), instanceColor.rgb, tint);
+        #endif`,
+      );
+  };
+  mat.customProgramCacheKey = () => 'tinted-' + mat.type;
+  return mat;
+}
+
+const GLASS = '#1a2029', TYRE = '#1c1c1f', SKIN = '#c99a7a', HELMET = '#e6e6e6';
 
 /** Low-poly models, one per kind; the instance colour tints the shade 1 parts. */
 function vehicleGeometry(kind: VehicleKind): THREE.BufferGeometry {
   switch (kind) {
     case 'moto':
-      // Bike, then rider with helmet; kept to two boxes, there are thousands of them.
-      return mergeGeometries([box(0.5, 0.75, 1.8, 0.05, 0, 0.55), box(0.44, 0.9, 0.34, 0.8, -0.1, 1)])!;
+      // Dark bike with wheels, rider in a coloured shirt, light helmet: three boxes, there are thousands.
+      return mergeGeometries([fixed(0.42, 0.85, 1.8, 0.0, 0, '#2f3238'), box(0.46, 0.62, 0.36, 0.85, -0.12), fixed(0.3, 0.3, 0.32, 1.47, -0.08, HELMET)])!;
     case 'bicycle':
-      return mergeGeometries([box(0.12, 0.85, 1.65, 0.0, 0, 0.3), box(0.42, 0.85, 0.3, 0.85, -0.15, 1)])!;
+      return mergeGeometries([fixed(0.1, 0.8, 1.65, 0.0, 0, '#3a3a3a'), box(0.42, 0.62, 0.3, 0.85, -0.15), fixed(0.24, 0.26, 0.26, 1.47, -0.1, SKIN)])!;
     case 'car':
-      return mergeGeometries([box(1.8, 0.75, 4.3, 0.25), box(1.62, 0.6, 2.3, 1.0, -0.2, 0.45)])!;
+      // Painted body and roof, dark glass cabin, tyres sticking out at both axles.
+      return mergeGeometries([
+        box(1.8, 0.62, 4.3, 0.32),
+        fixed(1.62, 0.55, 2.25, 0.94, -0.2, GLASS),
+        box(1.56, 0.08, 1.9, 1.49, -0.25),
+        fixed(1.9, 0.6, 0.62, 0.0, 1.35, TYRE),
+        fixed(1.9, 0.6, 0.62, 0.0, -1.35, TYRE),
+      ])!;
     case 'bus':
-      return mergeGeometries([box(2.5, 1.2, 11, 0.3), box(2.52, 1.35, 10.6, 1.5, 0, 0.4)])!;
+      return mergeGeometries([box(2.5, 1.3, 11, 0.35), fixed(2.52, 1.0, 10.4, 1.65, 0.1, GLASS), box(2.5, 0.4, 11, 2.65)])!;
     case 'truck':
-      return mergeGeometries([box(2.3, 1.9, 2.2, 0.35, 2.6, 1), box(2.4, 2.5, 5.2, 0.45, -1.2, 0.85)])!;
+      return mergeGeometries([box(2.3, 1.2, 2.1, 0.5, 2.65), fixed(2.32, 0.7, 1.9, 1.7, 2.7, GLASS), fixed(2.4, 2.6, 5.2, 0.55, -1.2, '#d9d8d2'), fixed(2.5, 0.75, 7.0, 0.0, 0.4, TYRE)])!;
   }
 }
 
@@ -171,7 +216,7 @@ export class Traffic {
     });
 
     for (const kind of VEHICLE_KINDS) {
-      const m = new THREE.InstancedMesh(vehicleGeometry(kind), new THREE.MeshLambertMaterial({ vertexColors: true }), Math.max(1, perKind[kind]));
+      const m = new THREE.InstancedMesh(vehicleGeometry(kind), applyTint(new THREE.MeshLambertMaterial({ vertexColors: true })), Math.max(1, perKind[kind]));
       m.count = perKind[kind];
       // Shadow maps are rendered on demand, so moving vehicles must not cast shadows.
       m.castShadow = false;
@@ -214,8 +259,8 @@ export class Traffic {
       }
     });
     if (this.people.length) {
-      const body = mergeGeometries([box(0.4, 0.85, 0.26, 0.0, 0, 0.35), box(0.46, 0.85, 0.28, 0.85, 0, 1)])!;
-      this.walkers = new THREE.InstancedMesh(body, new THREE.MeshLambertMaterial({ vertexColors: true }), this.people.length);
+      const body = mergeGeometries([fixed(0.4, 0.85, 0.26, 0.0, 0, '#2d3138'), box(0.46, 0.6, 0.28, 0.85, 0), fixed(0.24, 0.26, 0.24, 1.47, 0, SKIN)])!;
+      this.walkers = new THREE.InstancedMesh(body, applyTint(new THREE.MeshLambertMaterial({ vertexColors: true })), this.people.length);
       this.walkers.name = 'pedestrians';
       this.walkers.castShadow = false;
       this.walkers.frustumCulled = false;
