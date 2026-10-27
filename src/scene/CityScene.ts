@@ -116,7 +116,7 @@ export class CityScene {
     // Shadows only change with the sun or the model, so render them on demand (#8).
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
-    this.renderer.shadowMap.type = THREE.VSMShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
@@ -130,8 +130,6 @@ export class CityScene {
 
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
-    this.sun.shadow.radius = 10;
-    this.sun.shadow.blurSamples = 16;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.6;
     this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group);
@@ -644,11 +642,7 @@ export class CityScene {
     const info = this.renderer.info;
     info.autoReset = false;
     info.reset();
-    // Shadow-map passes are not part of the scene render; VSM alone adds 12 calls (10 receiver-only meshes + 2 blur).
-    const shadows = this.renderer.shadowMap.enabled;
-    this.renderer.shadowMap.enabled = false;
     this.renderer.render(this.scene, this.camera);
-    this.renderer.shadowMap.enabled = shadows;
     const r = { calls: info.render.calls, triangles: info.render.triangles };
     info.autoReset = true;
     return r;
