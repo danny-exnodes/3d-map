@@ -255,6 +255,10 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     city.onFrame = updateHud;
     city.onPick = showBuildingInfo;
     const bench = /[?&]bench\b/.test(location.search) ? startBench(city) : null;
+    if (bench) {
+      // Pin the clock so the benchmark does not depend on when it runs (dusk and night cost more).
+      slider.value = '720';
+    }
     const stats = await city.build(data, progress);
     bench?.(stats.seconds, data);
     applyTime();
