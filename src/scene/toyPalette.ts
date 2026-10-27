@@ -27,17 +27,23 @@ const entries = (list: readonly string[]): Entry[] =>
 
 const WALL_ENTRIES = entries(TOY_WALLS);
 const ROOF_ENTRIES = entries(TOY_ROOFS);
+/** Hue (0..1) that colourless sources lean towards: warm cream. */
+const NEUTRAL_HUE = 0.11;
+/** Saturation at which the source hue counts in full. */
+const HUE_SATURATION = 0.25;
+const hueDist = (a: number, b: number) => Math.min(Math.abs(a - b), 1 - Math.abs(a - b));
 const src = new THREE.Color();
 const hsl = { h: 0, s: 0, l: 0 };
 
-/** Nearest palette entry by hue (weighted ×2, circular) and lightness; the source data is left untouched. */
+/** Nearest palette entry by hue (circular, ×2) and lightness. Source hue counts in proportion to its saturation (fully from 0.25 up); the rest leans towards cream, so white and grey never turn pink; the source data is left untouched. */
 export function toyColor(hex: string, kind: 'wall' | 'roof', out = new THREE.Color()): THREE.Color {
   src.set(hex).getHSL(hsl);
-  let best = (kind === 'wall' ? WALL_ENTRIES : ROOF_ENTRIES)[0];
+  const list = kind === 'wall' ? WALL_ENTRIES : ROOF_ENTRIES;
+  let best = list[0];
   let bestD = Infinity;
-  for (const e of kind === 'wall' ? WALL_ENTRIES : ROOF_ENTRIES) {
-    const dh = Math.abs(e.h - hsl.h);
-    const d = 2 * Math.min(dh, 1 - dh) + Math.abs(e.l - hsl.l);
+  const w = Math.min(hsl.s / HUE_SATURATION, 1);
+  for (const e of list) {
+    const d = 2 * w * hueDist(e.h, hsl.h) + 2 * (1 - w) * hueDist(e.h, NEUTRAL_HUE) + Math.abs(e.l - hsl.l);
     if (d < bestD) {
       bestD = d;
       best = e;
