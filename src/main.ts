@@ -771,7 +771,7 @@ function moodBBox(): BBox | null {
 
 /** The slider shows local clock time at the area (UTC offset estimated from longitude). */
 function areaUtcOffsetHours(): number {
-  const b = city?.data?.bbox ?? mapView.bbox;
+  const b = moodBBox();
   return b ? Math.round((b.west + b.east) / 2 / 15) : -new Date().getTimezoneOffset() / 60;
 }
 
