@@ -247,8 +247,7 @@ export class CityScene {
     const mapSize = ext > 1200 || MOBILE ? 2048 : 4096;
     if (this.sun.shadow.mapSize.x !== mapSize) {
       this.sun.shadow.mapSize.set(mapSize, mapSize);
-      this.sun.shadow.map?.dispose();
-      this.sun.shadow.map = null;
+      this.sun.shadow.dispose();
     }
     this.renderer.shadowMap.needsUpdate = true;
     const cam = this.sun.shadow.camera;
@@ -645,7 +644,11 @@ export class CityScene {
     const info = this.renderer.info;
     info.autoReset = false;
     info.reset();
+    // Shadow-map passes are not part of the scene render; VSM alone adds 12 calls (10 receiver-only meshes + 2 blur).
+    const shadows = this.renderer.shadowMap.enabled;
+    this.renderer.shadowMap.enabled = false;
     this.renderer.render(this.scene, this.camera);
+    this.renderer.shadowMap.enabled = shadows;
     const r = { calls: info.render.calls, triangles: info.render.triangles };
     info.autoReset = true;
     return r;
