@@ -445,6 +445,54 @@ export class CityScene {
     this.resize();
   }
 
+  /**
+   * The camera as a MapLibre camera (centre, zoom, pitch, bearing) for the same field of view and
+   * viewport height, so the globe can take over seamlessly (#29). `pose` defaults to the current one.
+   */
+  mapPose(pose = this.saveView()) {
+    if (!this.proj) return null;
+    const off = pose.pos.clone().sub(pose.target);
+    const d = off.length();
+    const [lon, lat] = this.proj.unproject(pose.target.x, pose.target.z);
+    const h = this.container.clientHeight || 1;
+    const fov = (this.camera.fov * Math.PI) / 180;
+    const mpp = (d * 2 * Math.tan(fov / 2)) / h;
+    const zoom = Math.log2((2 * Math.PI * 6378137 * Math.cos((lat * Math.PI) / 180)) / (512 * mpp));
+    const bearing = ((Math.atan2(-off.x, off.z) * 180) / Math.PI + 360) % 360;
+    const pitch = (Math.acos(off.y / d) * 180) / Math.PI;
+    return { lon, lat, zoom, pitch, bearing, fov: this.camera.fov };
+  }
+
+  /** Inverse of mapPose(): put the 3D camera where a MapLibre camera is. */
+  applyMapPose(p: { lon: number; lat: number; zoom: number; pitch: number; bearing: number }) {
+    if (!this.proj) return;
+    const [x, z] = this.proj.project([p.lon, p.lat]);
+    const h = this.container.clientHeight || 1;
+    const fov = (this.camera.fov * Math.PI) / 180;
+    const mpp = (2 * Math.PI * 6378137 * Math.cos((p.lat * Math.PI) / 180)) / (512 * 2 ** p.zoom);
+    const d = (mpp * h) / (2 * Math.tan(fov / 2));
+    const b = (p.bearing * Math.PI) / 180, t = (p.pitch * Math.PI) / 180;
+    // The globe takes the camera far beyond the usual zoom limit.
+    this.controls.maxDistance = Infinity;
+    this.controls.maxPolarAngle = Math.PI / 2;
+    this.controls.target.set(x, 0, z);
+    this.camera.position.set(x - Math.sin(b) * Math.sin(t) * d, Math.cos(t) * d, z + Math.cos(b) * Math.sin(t) * d);
+    this.camera.far = Math.max(20000, d * 3);
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+  }
+
+  /** Puts back a saved camera exactly. */
+  restoreView(v: { pos: THREE.Vector3; target: THREE.Vector3 }) {
+    this.camera.position.copy(v.pos);
+    this.controls.target.copy(v.target);
+    this.camera.far = 20000;
+    this.controls.maxDistance = Math.max(this.size.width, this.size.depth) * 3;
+    this.controls.maxPolarAngle = Math.PI * 0.47;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+  }
+
   /** Current camera pose, to come back to it later (space view, #24). */
   saveView() {
     return { pos: this.camera.position.clone(), target: this.controls.target.clone() };

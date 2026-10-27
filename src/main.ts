@@ -258,6 +258,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
     $('i-stats').textContent = `${fmt(km2, 2)} km² · dựng xong trong ${fmt(stats.seconds, 1)} s · ${fmt(stats.buildings)} nhà · ${fmt(stats.trees)} cây · ${data.source}`;
     renderSourceStats(data);
+    setTimeout(prepareSpace, 1500);
     $('progress').hidden = true;
     if (PREVIEW) {
       document.querySelector('.w-icon')!.textContent = '🌡️';
@@ -513,23 +514,31 @@ $('btn-space').addEventListener('click', async () => {
   if (!city?.data || spaceBusy) return;
   spaceBusy = true;
   space ??= new SpaceView($('city-view'));
-  const b = city.data.bbox;
-  const bearing = city.view.bearing;
+  const c = city;
   try {
     if (!space.open) {
       $('btn-space').classList.add('on');
-      savedView = city.saveView();
-      const up = city.skyPose;
-      await Promise.all([city.animateCamera(up.pos, up.target, 1100), new Promise((r) => setTimeout(r, 600)).then(() => space!.show((b.west + b.east) / 2, (b.south + b.north) / 2, bearing))]);
-    } else {
-      await space.hide(bearing);
-      if (savedView) await city.animateCamera(savedView.pos, savedView.target, 1300);
+      savedView = c.saveView();
+      const from = c.mapPose()!;
+      await space.show(from, (p) => c.applyMapPose(p));
+    } else if (savedView) {
+      const to = c.mapPose(savedView)!;
+      await space.hide(to, (p) => c.applyMapPose(p));
+      c.restoreView(savedView);
       $('btn-space').classList.remove('on');
     }
   } finally {
     spaceBusy = false;
   }
 });
+/** Warms the globe up in the background once a model is on screen (#29). */
+function prepareSpace() {
+  if (!city?.data || PREVIEW) return;
+  const pose = city.mapPose();
+  if (!pose) return;
+  space ??= new SpaceView($('city-view'));
+  space.prepare(pose);
+}
 mapView.maxKm2 = MAX_KM2;
 mapView.observeResize();
 
