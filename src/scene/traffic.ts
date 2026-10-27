@@ -151,13 +151,13 @@ export class Traffic {
   private tmp = new THREE.Object3D();
   private pos = new THREE.Vector3();
   private dir = new THREE.Vector3();
-  stats = { vehicles: 0, segments: 0, flow: 1, people: 0, byKind: {} as Record<VehicleKind, number> };
+  stats = { vehicles: 0, segments: 0, flow: 1, people: 0, byKind: {} as Record<VehicleKind, number>, observed: 0 };
 
   /**
    * @param attractors local x/z of markets, schools, hospitals… (raise traffic nearby)
    * @param maxVehicles cap on simulated vehicles (fewer on phones)
    */
-  constructor(private readonly paths: RoadPath[], private readonly rails: RailPath[], attractors: XZ[] = [], maxVehicles = 2400, maxPeople = 700) {
+  constructor(readonly paths: RoadPath[], private readonly rails: RailPath[], attractors: XZ[] = [], maxVehicles = 2400, maxPeople = 700) {
     this.group.name = 'traffic';
     const n = paths.length;
     this.ratio = new Float32Array(n);
@@ -323,14 +323,32 @@ export class Traffic {
     return m;
   }
 
-  setHour(hour: number) {
+  /** Roads with live speeds (e.g. from Google, #11): path index → speed ratio. */
+  private observed = new Map<number, number>();
+  private lastHour = 12;
+  observedSource = '';
 
+  /** Replaces the model with observed speeds on some roads; the hour profile still drives the rest. */
+  setObserved(speeds: Map<number, number>, source: string) {
+    this.observed = speeds;
+    this.observedSource = source;
+    this.setHour(this.lastHour);
+  }
+
+  setHour(hour: number) {
+    this.lastHour = hour;
     this.walk = walkProfile(hour);
     for (let i = 0; i < this.paths.length; i++) {
       if (!this.peak[i]) continue;
       const load = roadLoad(this.paths[i].road.cls, hour, this.boost[i]);
       this.ratio[i] = Math.min(1, load.density / this.peak[i]);
       this.speedRatio[i] = load.speedRatio;
+      const obs = this.observed.get(i);
+      if (obs !== undefined) {
+        // Slow traffic means a full street.
+        this.speedRatio[i] = obs;
+        this.ratio[i] = obs < 0.3 ? 1 : obs < 0.6 ? Math.max(this.ratio[i], 0.85) : this.ratio[i];
+      }
     }
     const byKind = Object.fromEntries(VEHICLE_KINDS.map((k) => [k, 0])) as Record<VehicleKind, number>;
     let visible = 0;
@@ -350,6 +368,7 @@ export class Traffic {
     }
     col.needsUpdate = true;
     this.stats.flow = n ? sum / n : 1;
+    this.stats.observed = this.observed.size;
   }
 
   setNight(night: number) {

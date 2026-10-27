@@ -9,6 +9,7 @@ import { CityScene } from './scene/CityScene';
 import type { ColorMode } from './scene/colorMode';
 import { compassLabel } from './scene/sun';
 import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
+import { googleKey, setGoogleKey } from './data/googleTraffic';
 import { fetchWeather } from './services/weather';
 import { cityWorker } from './worker/client';
 import { DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
@@ -539,6 +540,31 @@ function prepareSpace() {
   space ??= new SpaceView($('city-view'));
   space.prepare(pose);
 }
+// ---------- Live traffic from Google (#11) ----------
+$('btn-gtraffic').addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (!city?.data) return;
+  let key = googleKey();
+  if (!key || (e as MouseEvent).shiftKey) {
+    key = prompt(
+      'Dán Google Maps Platform API key (bật Routes API và billing).\n' +
+        'Key chỉ lưu trong trình duyệt này. Mỗi lần lấy dữ liệu gọi tối đa 16 tuyến (khoảng 0,16 USD).\n' +
+        'Việc tuân thủ điều khoản Google Maps Platform thuộc về chủ key. Để trống để xoá key.',
+      key ?? '',
+    );
+    if (key === null) return;
+    setGoogleKey(key.trim() || null);
+    if (!key.trim()) return void ($('g-status').textContent = 'Đã xoá key.');
+  }
+  $('g-status').textContent = 'đang lấy…';
+  try {
+    const n = await city.applyGoogleTraffic(key.trim());
+    $('g-status').textContent = n ? `${fmt(n)} đoạn đường theo Google · Traffic © Google · ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` : 'Google không trả dữ liệu cho khu này.';
+    applyTime();
+  } catch (err) {
+    $('g-status').textContent = `Lỗi: ${(err as Error).message.slice(0, 120)}`;
+  }
+});
 mapView.maxKm2 = MAX_KM2;
 mapView.observeResize();
 

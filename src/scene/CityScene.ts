@@ -431,12 +431,39 @@ export class CityScene {
     this.scene.add(this.rain);
   }
 
+  /**
+   * Live speeds from Google Routes (#11): one route along each of the longest main roads (up to
+   * `maxRoutes`), matched onto every road of the model. Returns how many roads got a reading.
+   */
+  async applyGoogleTraffic(key: string, maxRoutes = 16, signal?: AbortSignal): Promise<number> {
+    const { routeTraffic, matchRoad } = await import('../data/googleTraffic');
+    const t = this.traffic, proj = this.proj;
+    if (!t || !proj) return 0;
+    const major = t.paths
+      .filter((p) => ['motorway', 'primary', 'secondary', 'tertiary'].includes(p.road.cls) && p.length > 120)
+      .sort((a, b) => b.length - a.length)
+      .slice(0, maxRoutes);
+    const pieces: { speed: import('../data/googleTraffic').Speed; line: [number, number][] }[] = [];
+    for (const p of major) {
+      const got = await routeTraffic(proj.unproject(...p.pts[0]), proj.unproject(...p.pts[p.pts.length - 1]), key, signal);
+      for (const x of got) pieces.push({ speed: x.speed, line: x.line.map((q) => proj.project(q)) });
+    }
+    const speeds = new Map<number, number>();
+    t.paths.forEach((p, i) => {
+      if (p.road.cls === 'path' || p.road.cls === 'service') return;
+      const r = matchRoad(p.pts, pieces);
+      if (r !== null) speeds.set(i, r);
+    });
+    t.setObserved(speeds, 'Google');
+    return speeds.size;
+  }
+
   setTrafficOverlay(v: boolean) {
     this.traffic?.setOverlayVisible(v);
   }
 
   get trafficStats() {
-    return this.traffic?.stats ?? { vehicles: 0, segments: 0, flow: 1, people: 0, byKind: {} as Record<string, number> };
+    return this.traffic?.stats ?? { vehicles: 0, segments: 0, flow: 1, people: 0, byKind: {} as Record<string, number>, observed: 0 };
   }
 
   setPixelMode(on: boolean) {
