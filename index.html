@@ -2,150 +2,55 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tiny Map</title>
-    <meta name="description" content="Vẽ một khu trên bản đồ, dựng thành mô hình thành phố 3D low-poly từ OpenStreetMap." />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Tiny Map · Google 3D</title>
+    <meta name="description" content="Xem một khu phố bằng mô hình 3D Photorealistic của Google, bản đồ và giao thông Google, ngay trong trình duyệt." />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 29 9.5v13L16 30 3 22.5v-13z' fill='%23ff7a45'/></svg>" />
   </head>
-  <body>
+  <body class="g-page">
     <header class="topbar">
-      <div class="brand"><span class="logo">⬡</span> Tiny Map <span class="tagline">Vẽ một khu, dựng thành mô hình 3D</span></div>
-      <div class="top-actions">
-        <label class="preview-only preview-label" for="preview-area">Khu vực</label>
-        <select id="preview-area" class="preview-select" hidden></select>
-        <button id="btn-example" class="ghost">Ví dụ Khương Thượng</button>
-        <button id="btn-fullscreen" class="ghost">⛶ Toàn màn hình</button>
+      <div class="brand">⬡ Tiny Map <span class="muted">· Google 3D</span></div>
+      <form id="g-search" class="g-search">
+        <input id="g-q" type="search" placeholder="Tìm địa điểm (Google)…" autocomplete="off" />
+      </form>
+      <div class="g-actions">
+        <button id="g-locate" title="Vị trí của tôi">◎</button>
+        <button id="g-traffic" class="on" title="Lớp giao thông Google">🚦</button>
+        <button id="g-key" title="Đổi API key Google">🔑</button>
+        <a id="g-osm" class="g-osm" href="./openstreetmap/" title="Bản dựng từ OpenStreetMap, không cần key">Bản OpenStreetMap →</a>
       </div>
     </header>
-
-    <main>
-      <!-- 2D: choose an area -->
-      <section id="map-view" class="view">
-        <div id="map"></div>
-        <div class="search card">
-          <span class="icon">⌕</span>
-          <input id="search" type="search" placeholder="Tìm địa điểm… (vd: Ngã Tư Sở)" autocomplete="off" />
-          <kbd>/</kbd>
-          <ul id="search-results" hidden></ul>
+    <main class="g-main">
+      <section class="g-map-pane"><div id="g-map"></div></section>
+      <section class="g-3d-pane">
+        <canvas id="g-canvas"></canvas>
+        <div id="g-info" class="card g-info" hidden>
+          <button id="g-info-close" class="bi-close" title="Đóng (Esc)">✕</button>
+          <div class="strong" id="g-info-title">Địa chỉ</div>
+          <a id="g-info-addr" class="bi-addr" target="_blank" rel="noopener"></a>
+          <div class="muted small" id="g-info-sub"></div>
+          <div class="bi-links"><a id="g-info-link" target="_blank" rel="noopener">Mở trong Google Maps ↗</a></div>
         </div>
-        <div class="draw-tools card">
-          <button id="btn-draw" title="Vẽ hình chữ nhật (kéo chuột)">▭</button>
-          <button id="btn-locate" title="Vị trí của tôi">📍</button>
-          <button id="btn-center" title="Chọn vùng 800 m quanh tâm bản đồ">◎</button>
-          <button id="btn-clear" title="Xoá vùng">🗑</button>
-          <button id="btn-offline" title="Tải bản đồ offline theo phường (TP.HCM, Hà Nội)">📥</button>
-          <button id="btn-cache" title="Xoá dữ liệu đã lưu trên máy (bộ nhớ đệm)">⟳</button>
-        </div>
-        <div id="offline" class="offline card" hidden>
-          <div class="off-head"><b>Bản đồ offline theo phường</b><button id="off-close" class="ghost small" title="Đóng">✕</button></div>
-          <div class="off-row">
-            <select id="off-city"><option value="hcm">TP. Hồ Chí Minh</option><option value="hn">Hà Nội</option></select>
-            <input id="off-search" type="search" placeholder="Tìm phường/xã (gõ không dấu cũng được)" autocomplete="off" />
-          </div>
-          <ul id="off-results" class="off-list"></ul>
-          <div id="off-selected" class="off-selected" hidden>
-            <div class="strong" id="off-name"></div>
-            <div class="muted small" id="off-info"></div>
-            <div class="off-row">
-              <button id="off-download" class="primary small">Tải về máy</button>
-              <button id="off-pick" class="ghost small" title="Chọn một khu 800 m ở giữa phường để dựng 3D">Chọn khu để dựng</button>
-            </div>
-            <div class="bar" id="off-progress" hidden><div id="off-bar"></div></div>
-            <div class="muted small" id="off-status"></div>
-          </div>
-          <div class="strong small off-saved-title">Đã tải về</div>
-          <ul id="off-saved" class="off-list"></ul>
-          <div class="muted small" id="off-usage"></div>
-        </div>
-        <div id="progress" class="progress card" hidden>
-          <div class="muted small"><span class="accent">Đang dựng</span> · <span id="p-title">Vùng mới</span></div>
-          <div class="big"><span id="p-pct">0</span><small>%</small><span id="p-time" class="muted small"></span></div>
-          <div class="bar"><div id="p-bar"></div></div>
-          <ul class="steps">
-            <li data-step="osm"><i></i>OpenStreetMap<span></span></li>
-            <li data-step="overture"><i></i>Overture (footprint)<span></span></li>
-            <li data-step="heights"><i></i>Chiều cao (Google 2.5D)<span></span></li>
-            <li data-step="merge"><i></i>Ghép dữ liệu<span></span></li>
-            <li data-step="build"><i></i>Dựng mô hình<span></span></li>
-          </ul>
-          <div id="p-error" class="error small" hidden></div>
-          <button id="btn-cancel" class="ghost small">Huỷ</button>
-        </div>
-        <footer class="map-bottom card">
-          <div>
-            <div><span class="dot accent"></span> <span id="area-label">Chưa chọn vùng</span></div>
-            <div class="muted small" id="area-hint">Bấm ▭ rồi kéo (hoặc Shift + kéo) để vẽ một khu, tối đa ~4 km². Kéo góc hoặc tâm để chỉnh.</div>
-          </div>
-          <div class="row">
-            <label class="opt small" title="Lấy dữ liệu OSM đầy đủ từ Overpass. Máy chủ công cộng hay quá tải; quá 20 s sẽ tự dùng Overture."><input id="opt-overpass" type="checkbox" /> OSM chi tiết (Overpass)</label>
-            <button id="btn-demo" class="ghost" title="Dựng thành phố mẫu không cần mạng">Demo offline</button>
-            <button id="btn-build" class="primary" disabled>Dựng 3D</button>
-          </div>
-        </footer>
+        <div class="g-hint muted small">Kéo để di chuyển · chuột phải/2 ngón để xoay · bấm vào toà nhà để xem địa chỉ</div>
+        <div id="g-attr" class="g-attr"><img alt="Google" src="https://maps.gstatic.com/mapfiles/api-3/images/google_white5_hdpi.png" height="18" /><span id="g-attr-text"></span></div>
+        <div id="g-status" class="g-status card" hidden></div>
       </section>
-
-      <!-- 3D: the model -->
-      <section id="city-view" class="view" hidden>
-        <div id="canvas"></div>
-        <div id="labels"></div>
-        <div class="info card">
-          <div class="strong" id="i-title">Vùng mới</div>
-          <div class="muted small" id="i-stats"></div>
-          <div class="muted small" id="i-traffic"></div>
-          <div class="small"><a href="#" id="btn-gtraffic" title="Dùng Google Routes API với API key của bạn (có tính phí)">🚦 Lấy giao thông thực từ Google…</a> <span class="muted" id="g-status"></span></div>
-          <div class="muted small" id="i-sources"></div>
-          <div class="weather" id="i-weather"><span class="w-icon">☀️</span><b id="w-temp">--°</b><span><span id="w-label">Thời tiết</span><br /><small class="muted" id="w-time"></small></span></div>
-        </div>
-        <div class="toolbar card">
-          <span class="compass" id="t-view">0° B<br /><small>nghiêng 0°</small></span>
-          <button id="btn-traffic" class="toggle" title="Lớp giao thông">🚦</button>
-          <button id="btn-sources" class="toggle" title="Tô màu nhà theo nguồn chiều cao">📏</button>
-          <button id="btn-mono" class="toggle" title="Chế độ xem: Có màu → Đơn sắc (mô hình kiến trúc) → Siêu thực">◑ Có màu</button>
-          <button id="btn-pixel" class="toggle" title="Chế độ pixel">▦ Pixel</button>
-          <button id="btn-rain" class="toggle" title="Bật/tắt mưa">🌧</button>
-          <button id="btn-space" class="toggle" title="Space view: bay lên vũ trụ nhìn trái đất">🌍</button>
-          <button id="btn-shot" title="Chụp ảnh PNG">📷</button>
-          <button id="btn-glb" title="Tải mô hình .glb (theo chế độ màu đang chọn)">⭳</button>
-          <button id="btn-back" title="Hiện / ẩn bản đồ">⇆</button>
-        </div>
-        <div id="building-info" class="building-info card" hidden>
-          <button id="bi-close" class="bi-close" title="Đóng (Esc)">✕</button>
-          <div class="strong" id="bi-title"></div>
-          <div class="muted small" id="bi-kind"></div>
-          <dl id="bi-facts"></dl>
-          <a id="bi-edit" target="_blank" rel="noopener"></a>
-        </div>
-        <div id="legend-sources" class="legend card" hidden>
-          <div class="strong small">Nguồn chiều cao</div>
-          <div><i style="background:#22c55e"></i>OpenStreetMap (tag)</div>
-          <div><i style="background:#3b82f6"></i>Google Open Buildings 2.5D</div>
-          <div><i style="background:#f59e0b"></i>Overture (số tầng)</div>
-          <div><i style="background:#9ca3af"></i>Ước lượng</div>
-        </div>
-        <div class="cam-tools card">
-          <button data-cam="in" title="Phóng to">＋</button>
-          <button data-cam="out" title="Thu nhỏ">－</button>
-          <button data-cam="left" title="Xoay trái">⟲</button>
-          <button data-cam="right" title="Xoay phải">⟳</button>
-          <button data-cam="top" title="Nhìn từ trên">⊡</button>
-          <button data-cam="reset" title="Góc nhìn mặc định">⌖</button>
-        </div>
-        <footer class="timebar card">
-          <button id="btn-play" class="play" title="Phát chu kỳ ngày đêm">▶</button>
-          <div class="clock"><b id="t-clock">12:00</b><small class="muted" id="t-sun"></small></div>
-          <div class="slider">
-            <input id="t-slider" type="range" min="0" max="1439" step="1" value="720" />
-            <div class="ticks"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>24h</span></div>
-          </div>
-          <input id="t-date" type="date" />
-        </footer>
-      </section>
-      <div id="splitter" hidden title="Kéo để đổi kích thước · bấm đúp để chia đôi"></div>
     </main>
-    <nav id="tabs" class="tabs">
-      <button data-tab="map" class="on">🗺 Bản đồ</button>
-      <button data-tab="city" disabled>🏙 Mô hình 3D</button>
-    </nav>
-    <script type="module" src="/src/main.ts"></script>
+    <div id="g-keybox" class="g-keybox" hidden>
+      <form class="card" id="g-keyform">
+        <div class="strong">Dùng dữ liệu Google</div>
+        <p class="small">
+          Bản này dùng mô hình 3D Photorealistic, bản đồ, giao thông và địa chỉ của Google. Cần một API key Google Maps Platform của bạn (có tính phí theo lượt dùng) đã bật
+          <b>Map Tiles API</b>, <b>Maps JavaScript API</b> và <b>Geocoding API</b>. Key chỉ lưu trong trình duyệt này.
+        </p>
+        <input id="g-keyinput" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false" />
+        <div class="g-keyrow">
+          <button class="primary" type="submit">Dùng key này</button>
+          <a class="small" href="https://developers.google.com/maps/documentation/tile/get-api-key" target="_blank" rel="noopener">Lấy key ↗</a>
+          <a class="small g-osm-link" href="./openstreetmap/">Không có key? Dùng bản OpenStreetMap →</a>
+        </div>
+      </form>
+    </div>
+    <script type="module" src="/src/google/main.ts"></script>
   </body>
 </html>

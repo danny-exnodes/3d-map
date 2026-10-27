@@ -2,6 +2,10 @@
 
 **Vẽ một khu trên bản đồ → dựng thành mô hình thành phố 3D low‑poly** ngay trong trình duyệt, từ dữ liệu mở OpenStreetMap. Có chu kỳ ngày/đêm theo vị trí mặt trời thật, cửa sổ sáng đèn về đêm, xe cộ và tàu điện chạy, lớp giao thông, thời tiết thực tế, chế độ pixel và xuất file `.glb`.
 
+> **Hai phiên bản (từ v0.0.5):**
+> - [`/`](https://danny-exnodes.github.io/3d-map/): **Google 3D**, gồm mô hình Photorealistic 3D Tiles, bản đồ và giao thông Google, địa chỉ Google. Cần API key Google Maps Platform của bạn (Map Tiles API, Maps JavaScript API, Geocoding API). Key chỉ lưu trong trình duyệt.
+> - [`/openstreetmap/`](https://danny-exnodes.github.io/3d-map/openstreetmap/): **bản dựng từ dữ liệu mở** (OSM, Overture, Google Open Buildings 2.5D), không cần key. Mọi tính năng bên dưới thuộc bản này.
+
 *Draw a rectangle on a map and get a stylised 3D diorama of that neighbourhood, built client-side from OpenStreetMap data.*
 
 | Chọn vùng | Ban ngày | Ban đêm |
@@ -50,6 +54,13 @@
 - Tiến độ hiện theo số byte tải thật. Có nút huỷ.
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
+
+**Mới trong v0.0.5**
+- Không còn nhà chồng lên nhau: footprint được xếp theo độ tin cậy (OSM, rồi Overture, rồi nhà suy ra). Nhà nào phần lớn bị đè thì thu nhỏ hoặc bỏ.
+- Bó vỉa nổi ở hai mép đường. Mặt nước xanh hơn (Siêu thực). Xe vào hoặc ra ở nút giao và mép mô hình, không tự hiện giữa đường.
+- Chọn vùng: kéo góc thì các góc khác chạy theo, kéo bên trong vùng để dời vùng.
+- Ghim vị trí hiện tại có hiệu ứng trên bản 3D. Thẻ toà nhà gọn hơn, địa chỉ mở thẳng Google Maps.
+- Bản Google 3D ở trang gốc. Bản này chuyển sang `/openstreetmap/`.
 
 **Mới trong v0.0.4**
 - Bấm vào toà nhà hiện địa chỉ (thẻ OSM, nếu không có thì tra ngược Nominatim, có cache).
@@ -135,6 +146,7 @@ Yêu cầu Node 22.18+ (CLI chiều cao chạy thẳng file `.ts`) và trình du
 | [Google Open Buildings 2.5D Temporal](https://sites.research.google/gr/open-buildings/temporal/) | chiều cao nhà | GeoTIFF công khai, **không có CORS** → tiền xử lý | CC BY 4.0 |
 | [OpenFreeMap](https://openfreemap.org/) | bản đồ nền, địa điểm | vector tiles (CORS) | ODbL (dữ liệu OSM) |
 | [Overture divisions](https://docs.overturemaps.org/guides/divisions/) | ranh giới phường/xã | `tools/wards.mjs` → `public/wards/` | ODbL |
+| [Google Map Tiles API](https://developers.google.com/maps/documentation/tile) (Photorealistic 3D Tiles, 2D, giao thông) + Geocoding | bản Google 3D | REST/JS API, key của người dùng | Google Maps Platform ToS |
 | [EOX Sentinel-2 cloudless 2016](https://s2maps.eu) | ảnh vệ tinh gần (Space view) | WMTS | CC BY 4.0 |
 | [Google Routes API](https://developers.google.com/maps/documentation/routes) | giao thông thực (tuỳ chọn) | REST, key của người dùng | Google Maps Platform ToS |
 | [NASA GIBS](https://earthdata.nasa.gov/gibs) Blue Marble | ảnh trái đất (Space view) | WMTS (CORS) | public domain |
@@ -204,6 +216,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.5](docs/releases/v0.0.5.md) (2026-10-27): bản Google 3D ở `/`, bản OSM ở `/openstreetmap/`; hết nhà chồng lấn, bó vỉa, xe vào ở nút giao, chọn vùng, ghim vị trí.
 - [v0.0.4](docs/releases/v0.0.4.md) (2026-10-27): địa chỉ toà nhà, vật liệu bớt nhựa, xe thật hơn, giao thông Google, Space view liền mạch.
 - [v0.0.3](docs/releases/v0.0.3.md) (2026-10-27): hiệu năng (nhà mẫu), chia đôi màn hình, mobile, Space view, ánh sáng đêm, cầu/hầm, giao thông xe máy.
 - [v0.0.2](docs/releases/v0.0.2.md) (2026-10-26): mật độ nhà thật, bỏ phụ thuộc Overpass, chế độ Siêu thực, bản đồ offline theo phường.

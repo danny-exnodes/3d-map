@@ -12,3 +12,10 @@ export const EXAMPLE_BBOX: BBox = { south: 20.9992, west: 105.8152, north: 21.00
 
 /** Half size of the area pre-selected around a location, in metres. */
 export const DEFAULT_AREA_HALF_M = 400;
+
+/**
+ * Root of the deployed app (where heights/, wards/, snapshots/ and sw.js live). The OSM app is
+ * served from <root>/openstreetmap/ since v0.0.5, the Google version from <root>/.
+ */
+export const APP_ROOT: string =
+  typeof location === 'undefined' ? './' : new URL(/\/openstreetmap\/?$/.test(new URL('.', location.href).pathname) ? '../' : './', location.href).href;

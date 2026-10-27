@@ -12,7 +12,7 @@ import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { googleKey, setGoogleKey } from './data/googleTraffic';
 import { fetchWeather } from './services/weather';
 import { cityWorker } from './worker/client';
-import { DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
+import { APP_ROOT, DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
 import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
 import { bboxAround, MapView } from './ui/MapView';
 import { SpaceView } from './ui/SpaceView';
@@ -66,6 +66,7 @@ $('btn-locate').addEventListener('click', async () => {
   $('btn-locate').classList.add('on');
   const p = (await permissionDenied()) ? null : await getBrowserPosition();
   $('btn-locate').classList.remove('on');
+  if (p) (gpsPos = p), void updatePin();
   if (p) goTo(p.lat, p.lon, 'Vị trí của bạn');
   else {
     goTo(DEFAULT_LOCATION.lat, DEFAULT_LOCATION.lon, DEFAULT_LOCATION.label);
@@ -184,7 +185,7 @@ function resetProgress(title: string) {
 let loadAbort: AbortController | null = null;
 
 /** Height grids: bundled under public/heights/, plus an on-demand endpoint in dev or when configured (#3, #4). */
-const HEIGHTS_BASE = new URL(`${import.meta.env.BASE_URL}heights/`, location.href).href;
+const HEIGHTS_BASE = new URL('heights/', APP_ROOT).href;
 const HEIGHTS_API = (import.meta.env.VITE_HEIGHTS_API as string | undefined) || (import.meta.env.DEV ? new URL('/api/heights', location.href).href : undefined);
 
 // OSM source (#17): Overture's OSM-derived data by default, Overpass on request.
@@ -238,7 +239,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
       data = cityWorker.available ? await cityWorker.demo(b).catch(() => generateDemoCity(b)) : generateDemoCity(b);
       progress('merge', 1, `${fmt(data.buildings.length)} nhà`);
     } else if (source === 'snapshot' && snapshot) {
-      const res = await fetch(`${import.meta.env.BASE_URL}snapshots/${snapshot.id}.json`);
+      const res = await fetch(new URL(`snapshots/${snapshot.id}.json`, APP_ROOT));
       if (!res.ok) throw new Error(`snapshot ${snapshot.id}: HTTP ${res.status}`);
       data = (await res.json()) as CityData;
     } else {
@@ -259,6 +260,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
     $('i-stats').textContent = `${fmt(km2, 2)} km² · dựng xong trong ${fmt(stats.seconds, 1)} s · ${fmt(stats.buildings)} nhà · ${fmt(stats.trees)} cây · ${data.source}`;
     renderSourceStats(data);
+    void updatePin();
     setTimeout(prepareSpace, 1500);
     $('progress').hidden = true;
     if (PREVIEW) {
@@ -297,7 +299,7 @@ $('btn-cache').addEventListener('click', async () => {
 
 // ---------- Offline packages per ward (#18) ----------
 
-const BASE_URL = new URL(import.meta.env.BASE_URL, location.href).href;
+const BASE_URL = APP_ROOT;
 let offCity: CityId = 'hcm';
 let offWard: Ward | null = null;
 let offAbort: AbortController | null = null;
@@ -621,6 +623,10 @@ const FOOTPRINT_VI: Record<FootprintSource, string> = {
   demo: 'Thành phố mẫu',
 };
 
+const ROOF_VI: Record<string, string> = { flat: 'bằng', gabled: 'hai mái', hipped: 'bốn mái', pyramidal: 'chóp', dome: 'vòm', skillion: 'một mái', round: 'tròn', onion: 'củ hành' };
+/** Building whose address is being looked up; a late answer for another one is dropped. */
+let selectedId = '';
+
 function showBuildingInfo(b: Building | null) {
   const panel = $('building-info');
   if (!b) {
@@ -630,34 +636,41 @@ function showBuildingInfo(b: Building | null) {
   $('bi-title').textContent = b.name || ARCHETYPE_VI[b.archetype ?? 'generic'];
   $('bi-kind').textContent = [b.name ? ARCHETYPE_VI[b.archetype ?? 'generic'] : '', b.kind !== 'yes' ? `building=${b.kind}` : ''].filter(Boolean).join(' · ');
   const facts: [string, string][] = [
-    ['Chiều cao', `${fmt(b.height, 1)} m${b.minHeight ? ` (từ ${fmt(b.minHeight, 1)} m)` : ''}`],
-    ['Số tầng', b.levels ? fmt(b.levels) : `~${fmt(Math.max(1, Math.round(b.height / 3.3)))}`],
-    ['Nguồn chiều cao', HEIGHT_SOURCE_VI[b.heightSource]],
+    ['Cao', `${fmt(b.height, 0)} m`],
+    ['Tầng', b.levels ? fmt(b.levels) : `~${fmt(Math.max(1, Math.round(b.height / 3.3)))}`],
+    ['Mái', ROOF_VI[b.roof] ?? b.roof],
+  ];
+  const sources: [string, string][] = [
+    ['Chiều cao', HEIGHT_SOURCE_VI[b.heightSource] + (b.minHeight ? ` · từ ${fmt(b.minHeight, 1)} m` : '')],
     ['Footprint', FOOTPRINT_VI[b.footprintSource]],
   ];
-  facts.push(['Địa chỉ', b.address ?? 'đang tìm…']);
-  if (b.roof !== 'flat') facts.push(['Mái', b.roof]);
-  const dl = $('bi-facts');
-  dl.innerHTML = '';
-  for (const [k, v] of facts) {
-    const dt = document.createElement('dt');
-    dt.textContent = k;
-    const dd = document.createElement('dd');
-    dd.textContent = v;
-    dl.append(dt, dd);
-  }
+  const fill = (dl: HTMLElement, rows: [string, string][]) => {
+    dl.innerHTML = '';
+    for (const [k, v] of rows) {
+      const dt = document.createElement('dt');
+      dt.textContent = k;
+      const dd = document.createElement('dd');
+      dd.textContent = v;
+      dl.append(dt, dd);
+    }
+  };
+  fill($('bi-facts'), facts);
+  fill($('bi-src'), sources);
+  const [clon, clat] = centroidOf(b);
+  const gmaps = `https://www.google.com/maps/search/?api=1&query=${clat.toFixed(6)},${clon.toFixed(6)}`;
+  $<HTMLAnchorElement>('bi-gmaps').href = gmaps;
+  const addr = $<HTMLAnchorElement>('bi-addr');
+  addr.href = gmaps;
+  addr.textContent = b.address ?? 'Đang tìm địa chỉ…';
   const link = $<HTMLAnchorElement>('bi-edit');
   const osm = /^(way|relation)\/(\d+)$/.exec(b.id);
   if (osm) {
     link.href = `https://www.openstreetmap.org/edit?${osm[1]}=${osm[2]}`;
-    link.textContent = b.heightSource === 'osm' ? 'Sửa trên OpenStreetMap ↗' : 'Bổ sung chiều cao / số tầng trên OpenStreetMap ↗';
+    link.textContent = b.heightSource === 'osm' ? 'Sửa trên OSM ↗' : 'Thêm chiều cao trên OSM ↗';
     link.hidden = false;
   } else if (b.footprintSource === 'overture') {
-    const ring = b.polygon[0];
-    const lon = ring.reduce((a, p) => a + p[0], 0) / ring.length;
-    const lat = ring.reduce((a, p) => a + p[1], 0) / ring.length;
-    link.href = `https://www.openstreetmap.org/edit#map=20/${lat.toFixed(6)}/${lon.toFixed(6)}`;
-    link.textContent = 'Nhà này chưa có trên OpenStreetMap — vẽ thêm ↗';
+    link.href = `https://www.openstreetmap.org/edit#map=20/${clat.toFixed(6)}/${clon.toFixed(6)}`;
+    link.textContent = 'Vẽ nhà này lên OSM ↗';
     link.hidden = false;
   } else link.hidden = true;
   panel.hidden = false;
@@ -665,26 +678,44 @@ function showBuildingInfo(b: Building | null) {
 }
 
 /** Fills the address row from Nominatim when the building has no addr:* tags (#28). */
+function centroidOf(b: Building): [number, number] {
+  const ring = b.polygon[0];
+  return [ring.reduce((a, p) => a + p[0], 0) / ring.length, ring.reduce((a, p) => a + p[1], 0) / ring.length];
+}
+
 async function lookupAddress(b: Building) {
   const ring = b.polygon[0];
-  const lon = ring.reduce((a, p) => a + p[0], 0) / ring.length;
-  const lat = ring.reduce((a, p) => a + p[1], 0) / ring.length;
-  const cell = () => [...$('bi-facts').querySelectorAll('dt')].find((d) => d.textContent === 'Địa chỉ')?.nextElementSibling as HTMLElement | undefined;
+  const [lon, lat] = centroidOf(b);
+  const shown = selectedId = b.id;
+  const cell = () => (selectedId === shown ? $('bi-addr') : undefined);
   try {
     const r = await reverseGeocode(lat, lon);
     const c = cell();
     if (!c || $('building-info').hidden) return;
+    c.title = 'Mở vị trí này trên Google Maps';
     if (!r) c.textContent = `Chưa có địa chỉ · ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
     else {
       const exact = r.osmId === b.id || pointInRing(r.lon, r.lat, ring);
       c.textContent = r.address + (exact ? '' : ' (gần đúng)');
-      c.title = 'Nguồn: OpenStreetMap Nominatim';
+      c.title = 'Địa chỉ: OpenStreetMap Nominatim · bấm để mở Google Maps';
     }
   } catch {
     const c = cell();
     if (c) c.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} (không tra được địa chỉ khi offline)`;
   }
 }
+/**
+ * Animated pin in 3D (v0.0.5): the device position when the browser gives it without asking
+ * again, otherwise the place last shown on the map (search result or default place).
+ */
+let gpsPos: { lat: number; lon: number } | null = null;
+async function updatePin() {
+  if (!city) return;
+  if (!gpsPos && !PREVIEW && !(await permissionDenied())) gpsPos = await getBrowserPosition();
+  const p = gpsPos ?? mapView.place ?? DEFAULT_LOCATION;
+  city.setPin(p ? [p.lon, p.lat] : null);
+}
+
 function closeBuildingInfo() {
   $('building-info').hidden = true;
   city?.select(-1);
@@ -912,7 +943,7 @@ async function bootPreview() {
   const select = $<HTMLSelectElement>('preview-area');
   let list: SnapshotEntry[] = [];
   try {
-    list = (await (await fetch(`${import.meta.env.BASE_URL}snapshots/index.json`)).json()) as SnapshotEntry[];
+    list = (await (await fetch(new URL('snapshots/index.json', APP_ROOT))).json()) as SnapshotEntry[];
   } catch {
     /* no snapshots bundled: demo only */
   }

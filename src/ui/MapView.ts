@@ -82,6 +82,7 @@ export class MapView {
     this.map.on('touchstart', (e) => e.points.length === 1 && begin(e));
     this.map.on('touchmove', (e) => this.drawing && this.start && (e.preventDefault(), move(e)));
     this.map.on('touchend', (e) => end(e));
+    this.enableBodyDrag();
     canvas.addEventListener('keydown', (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') this.setDrawing(false);
     });
@@ -131,6 +132,7 @@ export class MapView {
       for (let i = 0; i < 4; i++) this.handles.push(make('corner', 'Kéo để đổi kích thước vùng'));
       this.handles.push(make('centre', 'Kéo để di chuyển vùng'));
       this.handles.forEach((h, i) => {
+        h.on('dragstart', () => (this.dragFrom = this.bbox && { ...this.bbox }));
         h.on('drag', () => this.dragHandle(i, h.getLngLat(), false));
         h.on('dragend', () => this.dragHandle(i, h.getLngLat(), true));
       });
@@ -138,15 +140,19 @@ export class MapView {
     this.placeHandles();
   }
 
-  private placeHandles() {
+  /** Moves the handles to the selection's corners and centre, except the one being dragged. */
+  private placeHandles(skip = -1) {
     const b = this.bbox;
     if (!b || this.handles.length < 5) return;
     const pts: [number, number][] = [[b.west, b.south], [b.east, b.south], [b.east, b.north], [b.west, b.north], [(b.west + b.east) / 2, (b.south + b.north) / 2]];
-    this.handles.forEach((h, i) => h.setLngLat(pts[i]));
+    this.handles.forEach((h, i) => i !== skip && h.setLngLat(pts[i]));
   }
 
+  /** Selection when the current drag started: the anchor corner comes from it, not from the moving box. */
+  private dragFrom: BBox | null = null;
+
   private dragHandle(i: number, p: LngLat, done: boolean) {
-    const b = this.bbox;
+    const b = this.dragFrom ?? this.bbox;
     if (!b) return;
     let n: BBox;
     if (i === 4) {
@@ -157,12 +163,54 @@ export class MapView {
       const opp = [[b.east, b.north], [b.west, b.north], [b.west, b.south], [b.east, b.south]][i];
       n = { west: Math.min(p.lng, opp[0]), east: Math.max(p.lng, opp[0]), south: Math.min(p.lat, opp[1]), north: Math.max(p.lat, opp[1]) };
     }
+    this.commitMove(n, done, done ? -1 : i);
+  }
+
+  private commitMove(n: BBox, done: boolean, skip = -1) {
     this.bbox = n;
     this.render(false);
+    this.placeHandles(skip);
     if (done) {
-      this.placeHandles();
+      this.dragFrom = null;
       this.onChange?.(n);
     } else this.onPreview?.(n);
+  }
+
+  /** Dragging inside the selection moves it (mouse and one finger). */
+  private enableBodyDrag() {
+    let from: { p: LngLat; b: BBox } | null = null;
+    const inside = (p: LngLat) => !!this.bbox && p.lng >= this.bbox.west && p.lng <= this.bbox.east && p.lat >= this.bbox.south && p.lat <= this.bbox.north;
+    const down = (e: { lngLat: LngLat; preventDefault(): void; originalEvent: Event }) => {
+      if (this.drawing || (e.originalEvent as MouseEvent).shiftKey || !this.bbox || !inside(e.lngLat)) return;
+      e.preventDefault();
+      from = { p: e.lngLat, b: { ...this.bbox } };
+      this.map.dragPan.disable();
+      this.map.getCanvas().style.cursor = 'grabbing';
+    };
+    const move = (e: { lngLat: LngLat }) => {
+      if (!from) {
+        if (!this.drawing) this.map.getCanvas().style.cursor = this.bbox && inside(e.lngLat) ? 'grab' : '';
+        return;
+      }
+      const dx = e.lngLat.lng - from.p.lng, dy = e.lngLat.lat - from.p.lat;
+      const b = from.b;
+      this.commitMove({ west: b.west + dx, east: b.east + dx, south: b.south + dy, north: b.north + dy }, false);
+    };
+    const up = () => {
+      if (!from) return;
+      const moved = this.bbox;
+      const same = moved && moved.west === from.b.west && moved.south === from.b.south;
+      from = null;
+      this.map.dragPan.enable();
+      this.map.getCanvas().style.cursor = '';
+      if (moved && !same) this.commitMove(moved, true);
+    };
+    this.map.on('mousedown', down);
+    this.map.on('mousemove', move);
+    this.map.on('mouseup', up);
+    this.map.on('touchstart', (e) => e.points.length === 1 && down(e));
+    this.map.on('touchmove', (e) => from && (e.preventDefault(), move(e)));
+    this.map.on('touchend', up);
   }
 
   /** Called while a handle is being dragged (no rebuild yet). */
@@ -206,7 +254,11 @@ export class MapView {
     (this.map.getSource('ward') as GeoJSONSource | undefined)?.setData(this.ward ?? EMPTY);
   }
 
+  /** Last place shown with a labelled marker (search result, own position, default place). */
+  place: { lon: number; lat: number; label: string } | null = null;
+
   flyTo(lon: number, lat: number, label?: string, zoom = 16) {
+    if (label) this.place = { lon, lat, label };
     this.map.flyTo({ center: [lon, lat], zoom, essential: true });
     this.marker?.remove();
     if (label) {

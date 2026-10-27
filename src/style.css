@@ -46,10 +46,10 @@ main { flex: 1; position: relative; min-height: 0; }
 .error { color: #ff6b6b; margin-top: 8px; }
 .row { display: flex; gap: 8px; }
 
-button.ghost, button.primary, .toolbar button, .draw-tools button, .cam-tools button {
+button.ghost, a.link-btn, button.primary, .toolbar button, .draw-tools button, .cam-tools button {
   border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 6px 12px; font-size: 13px;
 }
-button.ghost:hover, .toolbar button:hover, .draw-tools button:hover, .cam-tools button:hover { background: rgba(255, 255, 255, 0.1); }
+button.ghost:hover, a.link-btn:hover, .toolbar button:hover, .draw-tools button:hover, .cam-tools button:hover { background: rgba(255, 255, 255, 0.1); }
 button.primary { background: var(--accent); border-color: transparent; color: #1b0f08; font-weight: 600; padding: 8px 18px; }
 button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
 button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); border-color: var(--accent); }
@@ -120,16 +120,25 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .attrib { font-size: 10px; opacity: 0.8; margin-top: 2px; }
 .building-info { position: absolute; right: 60px; bottom: 76px; width: min(300px, calc(100% - 24px)); padding: 12px 14px; font-size: 13px; }
-.building-info dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 8px 0; font-size: 12px; }
-.building-info dt { color: var(--muted); }
-.building-info dd { margin: 0; }
+.building-info .bi-title { padding-right: 22px; font-size: 15px; }
+.building-info .bi-addr { display: flex; gap: 6px; margin: 8px 0 2px; padding: 7px 9px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); color: var(--text); font-size: 12.5px; line-height: 1.35; text-decoration: none; }
+.building-info .bi-addr::before { content: '📍'; }
+.building-info .bi-addr:hover { background: rgba(255, 255, 255, 0.1); }
+.building-info dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px 10px; margin: 8px 0; font-size: 12px; }
+.building-info dt { color: var(--muted); font-size: 11px; grid-row: 1; }
+.building-info dd { margin: 0; font-weight: 600; grid-row: 2; }
+.building-info .bi-src { font-size: 11.5px; color: var(--muted); }
+.building-info .bi-src summary { cursor: pointer; }
+.building-info .bi-src dl { grid-template-columns: auto 1fr; }
+.building-info .bi-src dt, .building-info .bi-src dd { grid-row: auto; font-weight: normal; font-size: 11.5px; }
+.building-info .bi-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; }
 .building-info a { color: var(--accent); font-size: 12px; }
 .bi-close { position: absolute; top: 6px; right: 6px; background: none; border: none; color: var(--muted); }
 
 /* Preview build (hosted, offline): only the 3D view with bundled snapshots. */
 .preview-only { display: none; }
 body.preview .preview-only { display: inline; }
-body.preview #btn-example, body.preview #btn-back, body.preview #btn-shot, body.preview #btn-glb, body.preview #map-view { display: none !important; }
+body.preview #btn-example, body.preview #btn-google, body.preview #btn-back, body.preview #btn-shot, body.preview #btn-glb, body.preview #map-view { display: none !important; }
 .preview-label { color: var(--muted); font-size: 12px; align-self: center; }
 .preview-select { background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font: inherit; font-size: 13px; color-scheme: dark; max-width: 52vw; }
 .opt { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; white-space: nowrap; }
@@ -207,3 +216,4 @@ main[data-layout="split"] .map-bottom { flex-wrap: wrap; }
 .space-view .maplibregl-canvas-container, .space-view .maplibregl-map { background: transparent; }
 .space-hint { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%); color: #cfd6ea; font-size: 13px; opacity: 0.8; pointer-events: none; }
 #city-view .toolbar { z-index: 5; }
+a.link-btn { color: var(--text); text-decoration: none; display: inline-flex; align-items: center; }

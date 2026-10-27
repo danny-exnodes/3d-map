@@ -39,6 +39,8 @@ export const ROAD_COLORS: Record<RoadClass, string> = {
   path: '#cbbf9f',
 };
 const SIDEWALK = '#d9cfb8';
+const KERB = '#eeeae0';
+const KERB_H = 0.15;
 const PARAPET = '#cfc9be';
 /** Depth of covered tunnels below the street (m). */
 export const TUNNEL_DEPTH = 6.5;
@@ -96,6 +98,21 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
     return { road, pts, dist, h };
   });
 
+  // Street junctions (graph degree ≥ 3): kerbs stop short of them so crossings stay open.
+  const degree = new Map<string, { n: number; r: number }>();
+  for (const { road, pts, h } of pre) {
+    if (road.tunnel || h > 3 || road.cls === 'path') continue;
+    pts.forEach((p, i) => {
+      const e = degree.get(key(p)) ?? { n: 0, r: 0 };
+      e.n += i === 0 || i === pts.length - 1 ? 1 : 2;
+      e.r = Math.max(e.r, road.width / 2 + 2.5);
+      degree.set(key(p), e);
+    });
+  }
+  const junctionR = (p: XZ) => {
+    const e = degree.get(key(p));
+    return e && e.n >= 3 ? e.r : 0;
+  };
   const sidewalks = new MeshBuilder().setColor(SIDEWALK);
   const ground = new MeshBuilder();
   const elevated = new MeshBuilder();
@@ -132,6 +149,18 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
 
     if (!isElevated && road.cls !== 'path' && road.cls !== 'service') {
       ribbon(sidewalks, pts, lift, road.width + 4);
+      // Raised kerb stones on both edges (v0.0.5), cut back at junctions.
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const a = pts[i], b = pts[i + 1];
+        const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const t0 = junctionR(a) / L, t1 = 1 - junctionR(b) / L;
+        if (L < 0.5 || t1 - t0 < 0.5 / L) continue;
+        const seg: XZ[] = [
+          [a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0],
+          [a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1],
+        ];
+        for (const side of [-1, 1]) ribbon(elevated.setColor(KERB), seg, [KERB_H, KERB_H], 0.25, { offset: side * (road.width / 2 + 0.12), skirt: KERB_H });
+      }
     }
     if (isElevated) {
       ribbon(elevated.setColor(DECK), pts, lift.map((y) => y - 0.01), road.width + 1.2, { skirt: 1.3 });

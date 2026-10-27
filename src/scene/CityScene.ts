@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { LocationPin } from './locationPin';
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -69,6 +70,23 @@ export class CityScene {
   private timer = new THREE.Timer();
   private size = { width: 1000, depth: 1000 };
   private proj: LocalProjection | null = null;
+  private pin = new LocationPin();
+  private pinAt: [number, number] | null = null;
+
+  /** Shows the animated location pin at a place (when it lies in or near the model), or hides it. */
+  setPin(lonLat: [number, number] | null) {
+    this.pinAt = lonLat;
+    this.placePin();
+  }
+
+  private placePin() {
+    const p = this.pinAt, proj = this.proj;
+    if (!p || !proj) return this.pin.hide();
+    const [x, z] = proj.project(p);
+    // Within the model, plus a margin.
+    if (Math.abs(x) > this.size.width / 2 + 150 || Math.abs(z) > this.size.depth / 2 + 150) return this.pin.hide();
+    this.pin.set(x, z);
+  }
   private labels: { el: HTMLElement; pos: THREE.Vector3 }[] = [];
   private raf = 0;
   private pixelMode = false;
@@ -114,7 +132,7 @@ export class CityScene {
     this.sun.shadow.mapSize.set(4096, 4096);
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.6;
-    this.scene.add(this.sun, this.sun.target, this.hemi, this.city);
+    this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group);
     this.scene.fog = new THREE.Fog('#9fd3f2', 2000, 6000);
 
     this.composer = new EffectComposer(this.renderer);
@@ -224,6 +242,7 @@ export class CityScene {
       this.labels.push({ el, pos: new THREE.Vector3(x, 25, z) });
     }
 
+    this.placePin();
     const ext = Math.max(this.size.width, this.size.depth);
     const mapSize = ext > 1200 || MOBILE ? 2048 : 4096;
     if (this.sun.shadow.mapSize.x !== mapSize) {
@@ -614,6 +633,7 @@ export class CityScene {
       this.applySky();
     }
     this.traffic?.update(dt);
+    this.pin.update(dt, this.camera);
     const now = performance.now();
     if (this.lightDirty && now - this.lastLightUpdate > 120) {
       this.lightDirty = false;
