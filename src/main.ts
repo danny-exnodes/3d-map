@@ -6,7 +6,6 @@ import { loadCity } from './data/loader';
 import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressStep } from './data/types';
 import { bboxAreaKm2, pointInRing } from './geo/projection';
 import { CityScene } from './scene/CityScene';
-import type { ColorMode } from './scene/colorMode';
 import { compassLabel } from './scene/sun';
 import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { googleKey, setGoogleKey } from './data/googleTraffic';
@@ -251,7 +250,6 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     setLayout(layout);
     city.onFrame = updateHud;
     city.onPick = showBuildingInfo;
-    city.setColorMode(colorMode);
     const bench = /[?&]bench\b/.test(location.search) ? startBench(city) : null;
     const stats = await city.build(data, progress);
     bench?.(stats.seconds, data);
@@ -834,38 +832,6 @@ $('btn-traffic').addEventListener('click', () => {
   city?.setTrafficOverlay(trafficOn);
   $('btn-traffic').classList.toggle('on', trafficOn);
 });
-// Colour / monochrome (#7) / realistic (#19): remembered per browser, overridable with ?style=mono|color|real.
-const COLOR_KEY = 'tinymap:colorMode';
-const MODES: ColorMode[] = ['color', 'mono', 'real'];
-const MODE_LABEL: Record<ColorMode, string> = { color: '◑ Có màu', mono: '◐ Đơn sắc', real: '✦ Siêu thực' };
-function initialColorMode(): ColorMode {
-  const q = /[?&]style=(mono|color|real)\b/.exec(location.search)?.[1];
-  if (q) return q as ColorMode;
-  try {
-    const v = localStorage.getItem(COLOR_KEY) as ColorMode | null;
-    return v && MODES.includes(v) ? v : 'color';
-  } catch {
-    return 'color';
-  }
-}
-let colorMode = initialColorMode();
-function applyColorMode() {
-  city?.setColorMode(colorMode);
-  const btn = $('btn-mono');
-  btn.classList.toggle('on', colorMode !== 'color');
-  btn.textContent = MODE_LABEL[colorMode];
-}
-$('btn-mono').addEventListener('click', () => {
-  colorMode = MODES[(MODES.indexOf(colorMode) + 1) % MODES.length];
-  try {
-    localStorage.setItem(COLOR_KEY, colorMode);
-  } catch {
-    /* ignore */
-  }
-  applyColorMode();
-});
-applyColorMode();
-
 let pixelOn = false;
 $('btn-pixel').addEventListener('click', () => {
   pixelOn = !pixelOn;

@@ -11,9 +11,7 @@ import type { Building, CityData, ProgressFn } from '../data/types';
 import { bboxSizeMeters, LocalProjection } from '../geo/projection';
 import { cityWorker } from '../worker/client';
 import { buildCity } from './buildCity';
-import { bakeMono, type ColorMode, colorModeUniforms, monoSky, patchObject } from './colorMode';
 import type { RailPath, RoadPath } from './roads';
-import { Realism, realUniforms } from './realistic';
 import { deserializeObjects } from './serialize';
 import { createLampPools, litShare } from './nightLights';
 import { lighting, sunState, type SunState } from './sun';
@@ -39,16 +37,12 @@ export class CityScene {
   readonly controls: MapControls;
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
-  /** Ambient occlusion, only in the realistic view (#19). */
+  /** Ambient occlusion pass; constructed but disabled. */
   private gtao: GTAOPass;
-  private realism: Realism;
-  private hemiBase = 1.2;
   private sunDir = new THREE.Vector3(0, 1, 0);
   private night = 0;
-  private wet = 0;
   private lightDirty = false;
   private lastLightUpdate = 0;
-  private light = lighting(sunState(new Date(), 10.8, 106.7), 0);
   private sun = new THREE.DirectionalLight('#ffffff', 2.5);
   private hemi = new THREE.HemisphereLight('#bcd8ff', '#d8c9a8', 1.2);
   private city = new THREE.Group();
@@ -101,9 +95,6 @@ export class CityScene {
   /** Average FPS over the last 2 s window. */
   fps = 0;
   private cloud = 0;
-  private colorMode: ColorMode = 'color';
-  private modeFrom = 0;
-  private modeChangedAt = 0;
   private lastSky = new THREE.Color('#9fd3f2');
   data: CityData | null = null;
   sunInfo: SunState | null = null;
@@ -146,8 +137,6 @@ export class CityScene {
     this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.2, 0.5, 0.92);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
-    this.realism = new Realism(this.renderer);
-    this.scene.add(this.realism.sky);
 
     new ResizeObserver(() => this.resize()).observe(container);
     // Click (not drag) on the model picks a building.
@@ -172,12 +161,6 @@ export class CityScene {
     this.renderer.setSize(w, h);
     this.composer.setPixelRatio(pr);
     this.composer.setSize(w, h);
-  }
-
-  /** Ambient occlusion is the most expensive part of the realistic view; drop it on slow devices. */
-  private adaptRealism() {
-    if (this.colorMode !== 'real') return;
-    if (this.fps < 30 && this.gtao.enabled && this.pixelRatio <= 1) this.gtao.enabled = false;
   }
 
   async build(data: CityData, onProgress: ProgressFn): Promise<BuildStats> {
@@ -262,10 +245,6 @@ export class CityScene {
     this.controls.minDistance = 20;
     this.resetView();
 
-    patchObject(this.city);
-    patchObject(this.traffic.group);
-    if (this.colorMode === 'real') this.applyRealism(true);
-
     onProgress('build', 1, 'Xong');
     return {
       buildings: built.buildings,
@@ -285,7 +264,6 @@ export class CityScene {
         if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
         else mat?.dispose();
       });
-    this.realism.reset();
     dispose(this.city);
     this.city.clear();
     this.buildingsMesh = null;
@@ -306,7 +284,7 @@ export class CityScene {
   setTime(date: Date, localHour: number) {
     if (!this.proj) return;
     const s = (this.sunInfo = sunState(date, this.proj.lat0, this.proj.lon0));
-    const L = (this.light = lighting(s, this.cloud));
+    const L = lighting(s, this.cloud);
     const ext = Math.max(this.size.width, this.size.depth);
     this.sun.position.copy(s.direction).multiplyScalar(ext * 1.5);
     this.sun.target.position.set(0, 0, 0);
@@ -318,10 +296,9 @@ export class CityScene {
       // It fades in from zero as the sun sinks, so the switch of light direction is invisible (#22).
       this.sun.position.set(-0.4, 0.8, -0.45).normalize().multiplyScalar(ext * 1.5);
       this.sun.color.set('#8fa2ff');
-      this.sun.intensity = (this.colorMode === 'real' ? 0.3 : 0.55) * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25);
+      this.sun.intensity = 0.55 * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25);
     }
-    this.hemiBase = L.hemiIntensity;
-    this.hemi.intensity = this.colorMode === 'real' ? L.hemiIntensity * 0.15 : L.hemiIntensity;
+    this.hemi.intensity = L.hemiIntensity;
     this.sunDir.copy(s.direction);
     this.night = s.night;
     this.hemi.color.copy(L.hemiSky);
@@ -338,7 +315,7 @@ export class CityScene {
     if (this.lampBulbs) this.lampBulbs.visible = s.night > 0.35;
     if (this.lampPools) {
       this.lampPools.visible = s.night > 0.3;
-      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * (this.colorMode === 'real' ? 0.75 : 0.45);
+      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * 0.45;
     }
     if (this.buildingUniforms) this.buildingUniforms.uLit.value = litShare(localHour);
     this.traffic?.setHour(localHour);
@@ -346,51 +323,18 @@ export class CityScene {
   }
 
   private applySky() {
-    const sky = monoSky(this.lastSky, colorModeUniforms.uMono.value);
-    this.scene.background = sky;
-    (this.scene.fog as THREE.Fog).color.copy(sky);
+    this.scene.background = this.lastSky;
+    (this.scene.fog as THREE.Fog).color.copy(this.lastSky);
   }
 
-  setColorMode(mode: ColorMode) {
-    if (mode === this.colorMode) return;
-    const wasReal = this.colorMode === 'real';
-    this.colorMode = mode;
-    if (wasReal !== (mode === 'real')) this.applyRealism(mode === 'real');
-    this.modeFrom = colorModeUniforms.uMono.value;
-    this.modeChangedAt = performance.now();
-  }
-
-  /** Switches between the stylised and the physically based look (#19). */
-  private applyRealism(on: boolean) {
-    if (on) {
-      this.realism.apply(this.city);
-      if (this.traffic) this.realism.apply(this.traffic.group);
-      this.realism.update(this.scene, this.sunDir, this.night, this.cloud, this.light);
-    } else {
-      this.realism.restore();
-      this.scene.environment = null;
-      this.realism.sky.visible = false;
-    }
-    this.gtao.enabled = on;
-    this.sun.shadow.radius = on ? 3 : 1;
-    this.hemi.intensity = on ? this.hemiBase * 0.15 : this.hemiBase;
-    this.renderer.shadowMap.needsUpdate = true;
-    // Street glow emissive lives on the material, so re-apply it to the swapped materials.
-    this.applyStreetGlow();
-  }
-
-  /** Warm sodium glow on streets after dark (dimmer in the realistic view, which has less ambient light). */
+  /** Warm sodium glow on streets after dark. */
   private applyStreetGlow() {
     // Lamp pools carry most of the street light now; keep only a faint overall tint.
-    const k = this.night * (this.colorMode === 'real' ? 0.1 : 0.35);
+    const k = this.night * (0.35);
     this.city.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
       if (!Array.isArray(m) && m?.userData?.streetGlow) m.emissive.setRGB(0.32, 0.17, 0.06).multiplyScalar(k * m.userData.streetGlow);
     });
-  }
-
-  get currentColorMode() {
-    return this.colorMode;
   }
 
   /** Raycasts the buildings mesh at a screen point and selects the building under it. */
@@ -424,7 +368,6 @@ export class CityScene {
   }
 
   setRain(on: boolean) {
-    this.wet = on ? 1 : 0;
     if (!on) {
       if (this.rain) {
         this.scene.remove(this.rain);
@@ -606,12 +549,7 @@ export class CityScene {
 
   async exportGLB(): Promise<Blob> {
     const exporter = new GLTFExporter();
-    let root: THREE.Object3D = this.city;
-    if (this.colorMode === 'mono') {
-      root = this.city.clone(true);
-      bakeMono(root);
-    }
-    const result = await exporter.parseAsync(root, { binary: true });
+    const result = await exporter.parseAsync(this.city, { binary: true });
     return new Blob([result as ArrayBuffer], { type: 'model/gltf-binary' });
   }
 
@@ -624,14 +562,6 @@ export class CityScene {
     this.timer.update();
     const dt = Math.min(this.timer.getDelta(), 0.1);
     this.controls.update();
-    // Ease towards the target colour mode over ~300 ms of wall-clock time (frame-rate independent).
-    const u = colorModeUniforms.uMono;
-    const target = this.colorMode === 'mono' ? 1 : 0;
-    if (u.value !== target) {
-      const t = Math.min(1, (performance.now() - this.modeChangedAt) / 300);
-      u.value = this.modeFrom + (target - this.modeFrom) * t;
-      this.applySky();
-    }
     this.traffic?.update(dt);
     this.pin.update(dt, this.camera);
     const now = performance.now();
@@ -639,11 +569,7 @@ export class CityScene {
       this.lightDirty = false;
       this.lastLightUpdate = now;
       this.renderer.shadowMap.needsUpdate = true;
-      if (this.colorMode === 'real') this.realism.update(this.scene, this.sunDir, this.night, this.cloud, this.light);
     }
-    realUniforms.uTime.value = this.timer.getElapsed();
-    realUniforms.uWet.value += (this.wet - realUniforms.uWet.value) * Math.min(1, dt * 0.5);
-    if (this.realism.sky.visible) this.realism.sky.position.copy(this.camera.position);
     if (this.details.length) {
       const near = this.camera.position.distanceTo(this.controls.target) < 700;
       if (this.details[0].visible !== near) {
@@ -676,7 +602,6 @@ export class CityScene {
     this.fps = (w.frames * 1000) / (now - w.start);
     w.start = now;
     w.frames = 0;
-    this.adaptRealism();
     if (this.pixelMode || !this.data) return;
     if (this.fps < 40 && this.pixelRatio > 1) {
       this.pixelRatio = Math.max(1, this.pixelRatio - 0.25);
