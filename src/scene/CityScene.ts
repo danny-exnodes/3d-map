@@ -116,7 +116,7 @@ export class CityScene {
     // Shadows only change with the sun or the model, so render them on demand (#8).
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
@@ -132,6 +132,7 @@ export class CityScene {
     this.sun.shadow.mapSize.set(4096, 4096);
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.6;
+    this.sun.shadow.radius = 3;
     this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group);
     this.scene.fog = new THREE.Fog('#9fd3f2', 2000, 6000);
 

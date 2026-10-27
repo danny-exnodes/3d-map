@@ -8,8 +8,8 @@ import { MeshBuilder, type XZ } from './geometry';
 import { PrototypeCollector } from './prototypes';
 import { buildRoof, flatCap, minAreaRect } from './roofs';
 import { SpatialGrid } from './spatial';
-import { TOY_GLSL } from './toyGeometry';
-import { toyColor } from './toyPalette';
+import { TOY, TOY_GLSL } from './toyGeometry';
+import { PLINTH_SHADE, toyColor } from './toyPalette';
 
 /** Integer codes of HeightSource stored in aSeed (see the "theo nguồn chiều cao" view, #3). */
 export const HEIGHT_SOURCE_CODE: Record<Building['heightSource'], number> = { osm: 0, gob: 1, overture: 2, heuristic: 3 };
@@ -247,6 +247,7 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         varying vec3 vWNormal;
         varying float vSeed;
         varying float vRoof;
+        varying float vDiag;
         #ifdef TOY_PROTO
         ${TOY_GLSL}
         #endif`,
@@ -282,8 +283,11 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         // Toy roof units never get windows; the exact mesh has no aRoof attribute.
         #ifdef TOY_PROTO
           vRoof = aRoof;
+          // 0 on the four flat wall faces, > 0 across the rounded corner facets (their own window grids would look chopped).
+          vDiag = abs(aBevel.x * aBevel.y);
         #else
           vRoof = 0.0;
+          vDiag = 0.0;
         #endif
         vSelected = abs(aBid - uSelected) < 0.5 ? 1.0 : 0.0;`,
       );
@@ -299,10 +303,8 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         varying vec3 vWNormal;
         varying float vSeed;
         varying float vRoof;
+        varying float vDiag;
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-        float vn(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
-          return mix(mix(h21(i), h21(i + vec2(1, 0)), u.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), u.x), u.y); }
-        float fbm3(vec2 p) { return 0.5 * vn(p) + 0.3 * vn(p * 2.1 + 7.0) + 0.2 * vn(p * 4.3 + 3.0); }
         float winMask; float winLit; vec3 winColor; float winBright;`,
       )
       .replace(
@@ -314,14 +316,14 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         float src = mod(code, 4.0);
         float matCode = floor(code / 4.0 + 0.001);
         // Facade materials (#5): 1 glass curtain wall, 2 brick, 3 metal cladding.
-        if (matCode > 1.5 && matCode < 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.13, 0.07), 0.55);
-        if (matCode > 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.38, 0.41, 0.45), 0.6);
+        if (matCode > 1.5 && matCode < 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.13, 0.07), 0.275);
+        if (matCode > 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.38, 0.41, 0.45), 0.3);
         if (uSourceView > 0.5) {
           diffuseColor.rgb = src < 0.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[0])}) : src < 1.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[1])})
             : src < 2.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[2])}) : vec3(${hexToVec(HEIGHT_SOURCE_COLORS[3])});
         }
         winMask = 0.0; winLit = 0.0; winColor = vec3(0.0); winBright = 0.0;
-        if (vRoof < 0.5 && abs(bN.y) < 0.3 && vWPos.y > 0.6) {
+        if (vRoof < 0.5 && vDiag < 0.02 && abs(bN.y) < 0.3 && vWPos.y > 0.6) {
           vec2 t = normalize(vec2(-bN.z, bN.x));
           float u = dot(vWPos.xz, t);
           float cellW = 3.2;
@@ -332,42 +334,38 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
           bool glassWall = matCode > 0.5 && matCode < 1.5;
           float wx0 = glassWall ? 0.05 : 0.22, wx1 = glassWall ? 0.95 : 0.78;
           float wy0 = glassWall ? 0.08 : 0.32, wy1 = glassWall ? 0.92 : 0.82;
-          float mx = smoothstep(wx0 - aa, wx0 + aa, f.x) * (1.0 - smoothstep(wx1 - aa, wx1 + aa, f.x));
-          float my = smoothstep(wy0, wy0 + 0.04, f.y) * (1.0 - smoothstep(wy1, wy1 + 0.04, f.y));
-          winMask = mx * my;
+          float frameMask = 0.0;
+          if (glassWall) {
+            float mx = smoothstep(wx0 - aa, wx0 + aa, f.x) * (1.0 - smoothstep(wx1 - aa, wx1 + aa, f.x));
+            float my = smoothstep(wy0, wy0 + 0.04, f.y) * (1.0 - smoothstep(wy1, wy1 + 0.04, f.y));
+            winMask = mx * my;
+          } else {
+            // Rounded box in cell space (corner radius 0.25 of the short side) with a light frame around the glass.
+            vec2 hs = 0.5 * vec2(wx1 - wx0, wy1 - wy0);
+            float rad = 0.25 * 2.0 * min(hs.x, hs.y);
+            vec2 q = abs(f - 0.5 * vec2(wx0 + wx1, wy0 + wy1)) - hs + rad;
+            float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
+            winMask = 1.0 - smoothstep(-aa, aa, sd);
+            frameMask = (1.0 - smoothstep(0.08 - aa, 0.08 + aa, sd)) * (1.0 - winMask);
+          }
           float r = h21(cell + fract(vSeed) * 97.0);
           float floorDark = step(0.82, h21(vec2(cell.y, fract(vSeed) * 31.0)));
           winLit = step(r, uLit) * (1.0 - floorDark);
           winBright = 0.3 + 0.7 * h21(cell * 1.7 + 3.1);
           winColor = mix(vec3(1.0, 0.72, 0.42), vec3(0.9, 0.93, 1.0), step(0.8, h21(cell.yx + fract(vSeed))));
-          vec3 glass = mix(vec3(0.42, 0.52, 0.62), vec3(0.08, 0.1, 0.16), uNight);
+          vec3 glass = mix(vec3(${hexToVec('#93a9c4')}), vec3(0.08, 0.1, 0.16), uNight);
           if (glassWall) {
             // Curtain wall: bluish, a little brighter towards the top (sky reflection).
             glass = mix(vec3(0.30, 0.45, 0.62) + 0.12 * clamp(vWPos.y / 120.0, 0.0, 1.0), vec3(0.06, 0.08, 0.14), uNight);
             winLit = step(r, uLit * 1.25) * (1.0 - floorDark);
           }
-          diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 0.75));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(${hexToVec('#fffaf0')}), frameMask);
+          diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 1.0));
         }
-        // Weathering so walls and roofs read as plaster, concrete and metal rather than plastic (#28):
-        // less saturated paint, blotches, rain streaks under each floor, dark splash zone at the foot.
-        {
-          float l = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-          diffuseColor.rgb = mix(vec3(l), diffuseColor.rgb, 0.82);
-          float seedOff = fract(vSeed) * 61.0;
-          if (abs(bN.y) < 0.3) {
-            vec2 t2 = normalize(vec2(-bN.z, bN.x));
-            float u2 = dot(vWPos.xz, t2);
-            diffuseColor.rgb *= 0.88 + 0.2 * fbm3(vec2(u2, vWPos.y) * 0.35 + seedOff);
-            float fy = fract(vWPos.y / 3.3);
-            float streak = smoothstep(0.55, 0.95, vn(vec2(u2 * 1.4, floor(vWPos.y / 3.3) + seedOff))) * (1.0 - fy);
-            diffuseColor.rgb *= 1.0 - 0.16 * streak;
-            diffuseColor.rgb *= 1.0 + 0.06 * (1.0 - smoothstep(0.0, 0.06, fy));
-          } else {
-            diffuseColor.rgb *= 0.8 + 0.3 * fbm3(vWPos.xz * 0.3 + seedOff);
-          }
-          // Ambient occlusion where walls meet the ground.
-          diffuseColor.rgb *= mix(0.62, 1.0, smoothstep(0.0, 2.2, vWPos.y));
-        }
+        // Plinth band on the exact mesh; prototypes have a real plinth.
+        #ifndef TOY_PROTO
+        if (abs(bN.y) < 0.3 && vWPos.y < ${TOY.plinthH.toFixed(2)}) diffuseColor.rgb *= ${PLINTH_SHADE.toFixed(2)};
+        #endif
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.32, 0.08), vSelected * 0.85);`,
       )
       .replace(
