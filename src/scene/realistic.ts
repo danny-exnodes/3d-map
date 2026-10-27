@@ -216,8 +216,9 @@ function injectVertex(shader: THREE.WebGLProgramParametersWithUniforms) {
 const FADE = /* glsl */ `float rFade() { return clamp(1.0 - length(vViewPosition) / 900.0, 0.0, 1.0); }`;
 
 /**
- * River/lake water: murky green-brown like Sông Sài Gòn, small animated waves built from
- * two scrolling noise layers, sky reflections from the environment map, sun glints.
+ * River/lake water: deep blue-green with a little silt, small animated waves built from two
+ * scrolling noise layers, sky reflections tinted blue (a grey sky alone made it look like
+ * concrete), sun glints.
  */
 function waterMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
@@ -226,7 +227,7 @@ function waterMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
     roughness: 0.04,
     metalness: 0,
     // Sky reflections carry the look of water; the scene-wide environment level is low.
-    envMapIntensity: 3.5,
+    envMapIntensity: 2.4,
     depthWrite: (orig as THREE.MeshStandardMaterial).depthWrite,
   });
   mat.onBeforeCompile = (shader) => {
@@ -246,7 +247,7 @@ function waterMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
         {
           vec2 p = vWPos.xz;
           float silt = rFbm(p * 0.01 + 5.0);
-          diffuseColor.rgb = mix(vec3(0.07, 0.1, 0.07), vec3(0.15, 0.13, 0.07), silt);
+          diffuseColor.rgb = mix(vec3(0.03, 0.16, 0.26), vec3(0.07, 0.2, 0.2), silt);
         }`,
       )
       .replace(
@@ -261,7 +262,8 @@ function waterMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
           vec3 nW = normalize(vec3(-hx * k, 1.0, -hz * k));
           normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);
         }`,
-      );
+      )
+      .replace('#include <opaque_fragment>', 'outgoingLight *= vec3(0.72, 0.92, 1.12);\n#include <opaque_fragment>');
   };
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, r) => {

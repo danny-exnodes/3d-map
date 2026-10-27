@@ -21,6 +21,14 @@ interface Vehicle {
   slot: number;
   /** Shown when the current road's load ratio exceeds it. */
   threshold: number;
+  /**
+   * Whether it is drawn. Re-evaluated only when it turns onto another road (or when the hour
+   * jumps), so vehicles enter and leave at junctions and map edges instead of popping up in the
+   * middle of a street.
+   */
+  shown: boolean;
+  /** 0–1, eased towards `shown` so the few that do change in place fade instead of pop. */
+  fade: number;
   color: THREE.Color;
 }
 
@@ -210,7 +218,7 @@ export class Traffic {
           roll -= mix[k];
         }
         const dir: 1 | -1 = p.road.oneway || r() < 0.5 ? 1 : -1;
-        this.vehicles.push({ path: i, d: r() * p.length, dir, lateral: 0, pace: 0.8 + r() * 0.4, kind, slot: perKind[kind]++, threshold: r(), color: new THREE.Color() });
+        this.vehicles.push({ path: i, d: r() * p.length, dir, lateral: 0, pace: 0.8 + r() * 0.4, kind, slot: perKind[kind]++, threshold: r(), shown: false, fade: 0, color: new THREE.Color() });
         this.placeInLane(this.vehicles[this.vehicles.length - 1]);
       }
     });
@@ -326,6 +334,7 @@ export class Traffic {
   /** Roads with live speeds (e.g. from Google, #11): path index → speed ratio. */
   private observed = new Map<number, number>();
   private lastHour = 12;
+  private dealt = false;
   observedSource = '';
 
   /** Replaces the model with observed speeds on some roads; the hour profile still drives the rest. */
@@ -336,6 +345,7 @@ export class Traffic {
   }
 
   setHour(hour: number) {
+    const prev = this.lastHour;
     this.lastHour = hour;
     this.walk = walkProfile(hour);
     for (let i = 0; i < this.paths.length; i++) {
@@ -352,7 +362,18 @@ export class Traffic {
     }
     const byKind = Object.fromEntries(VEHICLE_KINDS.map((k) => [k, 0])) as Record<VehicleKind, number>;
     let visible = 0;
-    for (const v of this.vehicles) if (v.threshold < this.ratio[v.path]) (visible++, byKind[v.kind]++);
+    // A real jump of the clock (slider, first build) re-deals who is on the street; small steps
+    // of the running clock only act through junctions.
+    const first = !this.dealt;
+    this.dealt = true;
+    const jump = first || Math.abs(hour - prev) > 0.75;
+    for (const v of this.vehicles) {
+      if (jump) {
+        v.shown = v.threshold < this.ratio[v.path];
+        if (first) v.fade = v.shown ? 1 : 0;
+      }
+      if (v.threshold < this.ratio[v.path]) (visible++, byKind[v.kind]++);
+    }
     this.stats.vehicles = visible;
     this.stats.byKind = byKind;
     this.stats.people = this.people.filter((w) => w.threshold < this.walk * (1 - this.night * 0.6)).length;
@@ -390,13 +411,15 @@ export class Traffic {
     let lit = 0;
     for (let i = 0; i < this.vehicles.length; i++) {
       const v = this.vehicles[i];
-      if (v.threshold >= this.ratio[v.path]) continue;
+      if (!this.peak[v.path]) continue;
       let p = this.paths[v.path];
       v.d += speedOf(v.kind, p.road.cls) * v.pace * this.speedRatio[v.path] * dt * v.dir;
       if (v.d > p.length || v.d < 0) {
         this.advance(v);
         p = this.paths[v.path];
       }
+      v.fade = v.shown ? Math.min(1, v.fade + dt * 2) : Math.max(0, v.fade - dt * 2);
+      if (v.fade <= 0) continue;
       pointAt(p, v.d, v.lateral * v.dir, this.pos, this.dir);
       if (v.dir < 0) this.dir.negate();
       // Inside a covered tunnel: not visible from above.
@@ -406,7 +429,7 @@ export class Traffic {
       written.set(v.kind, k + 1);
       t.position.copy(this.pos).setY(this.pos.y + 0.05);
       t.rotation.set(0, Math.atan2(this.dir.x, this.dir.z), 0);
-      t.scale.setScalar(1);
+      t.scale.setScalar(v.fade);
       t.updateMatrix();
       mesh.setMatrixAt(k, t.matrix);
       mesh.setColorAt(k, v.color);
@@ -486,13 +509,17 @@ export class Traffic {
       v.path = o.path;
       v.dir = o.atStart ? 1 : -1;
       v.d = o.atStart ? 0.01 : np.length - 0.01;
+      v.shown = v.threshold < this.ratio[v.path];
       this.placeInLane(v);
     } else if (!p.road.oneway) {
       // Dead end: U-turn.
       v.dir = v.dir > 0 ? -1 : 1;
       v.d = Math.min(Math.max(v.d, 0.01), p.length - 0.01);
     } else {
+      // One-way dead end (usually the edge of the model): leave, and come back in at the start.
       v.d = v.dir > 0 ? 0.01 : p.length - 0.01;
+      v.fade = 0;
+      v.shown = v.threshold < this.ratio[v.path];
     }
   }
 

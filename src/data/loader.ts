@@ -5,6 +5,7 @@ import { loadOvertureBuildings } from './overture';
 import { loadOfmPois } from './openfreemap';
 import { synthesizeFromGrid } from './synth';
 import { loadOvertureContext } from './overtureBase';
+import { removeOverlaps } from './overlap';
 import { fetchOverpassText, linkedAbort, parseOverpass, slimOverpass, type OverpassResponse } from './osm';
 import type { BBox, CityData } from './types';
 
@@ -137,6 +138,7 @@ export async function loadCity(bbox: BBox, opts: CityLoadOptions, onProgress: (p
     onProgress({ step: 'merge', f: 0.8, detail: 'bổ sung nhà từ ảnh vệ tinh' });
     if (opts.synthesize !== false) synthesizeFromGrid(data, grid);
   }
+  removeOverlaps(data);
   data.source = data.source === 'Overture' ? 'OSM + Overture' : 'Overpass + Overture';
   data.stats = computeStats(data);
   onProgress({ step: 'merge', f: 1, detail: `${data.buildings.length.toLocaleString('vi-VN')} nhà` });
