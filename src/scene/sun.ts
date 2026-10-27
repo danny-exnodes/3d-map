@@ -19,7 +19,7 @@ export function compassLabel(bearingDeg: number, short = false): string {
   return (short ? COMPASS_SHORT : COMPASS_VI)[i];
 }
 
-const smooth = (a: number, b: number, x: number) => {
+export const smooth = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
@@ -59,28 +59,5 @@ export function sunState(date: Date, lat: number, lon: number): SunState {
     azimuthDeg: bearing,
     night: 1 - smooth(-0.1, 0.12, Math.sin(alt)),
     compass: compassLabel(bearing),
-  };
-}
-
-const DAY_SKY = new THREE.Color('#9fd3f2');
-const DUSK_SKY = new THREE.Color('#f2a96b');
-const NIGHT_SKY = new THREE.Color('#101a3d');
-const DAY_SUN = new THREE.Color('#fff4e0');
-const LOW_SUN = new THREE.Color('#ffb070');
-
-/** Sky / fog colour, sun light colour and intensities for a sun state and cloud cover (0..1). */
-export function lighting(s: SunState, cloud = 0) {
-  const elev = Math.sin((s.altitudeDeg * Math.PI) / 180);
-  const dusk = Math.exp(-((elev - 0.02) ** 2) / 0.006);
-  const sky = NIGHT_SKY.clone().lerp(DAY_SKY, 1 - s.night).lerp(DUSK_SKY, dusk * 0.55);
-  sky.lerp(new THREE.Color('#9aa3ad'), cloud * 0.45 * (1 - s.night));
-  const sunColor = LOW_SUN.clone().lerp(DAY_SUN, smooth(0.05, 0.45, elev));
-  return {
-    sky,
-    sunColor,
-    sunIntensity: Math.max(0, smooth(-0.02, 0.2, elev)) * 2.6 * (1 - cloud * 0.6),
-    hemiIntensity: 1.1 + (1 - s.night) * 0.4,
-    hemiSky: new THREE.Color('#bcd8ff').lerp(new THREE.Color('#4b5bb0'), s.night),
-    hemiGround: new THREE.Color('#d8c9a8').lerp(new THREE.Color('#2b2540'), s.night),
   };
 }

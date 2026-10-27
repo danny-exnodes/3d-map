@@ -6,6 +6,9 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { HorizontalTiltShiftShader } from 'three/examples/jsm/shaders/HorizontalTiltShiftShader.js';
+import { VerticalTiltShiftShader } from 'three/examples/jsm/shaders/VerticalTiltShiftShader.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import type { Building, CityData, ProgressFn } from '../data/types';
 import { bboxSizeMeters, LocalProjection } from '../geo/projection';
@@ -14,7 +17,9 @@ import { buildCity } from './buildCity';
 import type { RailPath, RoadPath } from './roads';
 import { deserializeObjects } from './serialize';
 import { createLampPools, litShare } from './nightLights';
-import { lighting, sunState, type SunState } from './sun';
+import { dominantMood, isRising, moodLighting, type Mood } from './moods';
+import { sunState, type SunState } from './sun';
+import { tiltShiftStrength } from './tiltShift';
 import { Traffic } from './traffic';
 
 export interface BuildStats {
@@ -95,6 +100,10 @@ export class CityScene {
   /** Average FPS over the last 2 s window. */
   fps = 0;
   private cloud = 0;
+  private tiltH: ShaderPass;
+  private tiltV: ShaderPass;
+  private tiltBase = { h: 2 / 512, v: 2 / 512 };
+  private mood: Mood = 'noon';
   private lastSky = new THREE.Color('#9fd3f2');
   data: CityData | null = null;
   sunInfo: SunState | null = null;
@@ -107,7 +116,7 @@ export class CityScene {
     // Shadows only change with the sun or the model, so render them on demand (#8).
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.VSMShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
@@ -121,6 +130,8 @@ export class CityScene {
 
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(4096, 4096);
+    this.sun.shadow.radius = 10;
+    this.sun.shadow.blurSamples = 16;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.6;
     this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group);
@@ -136,6 +147,11 @@ export class CityScene {
     this.composer.addPass(this.gtao);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.2, 0.5, 0.92);
     this.composer.addPass(this.bloom);
+    this.tiltH = new ShaderPass(HorizontalTiltShiftShader);
+    this.tiltV = new ShaderPass(VerticalTiltShiftShader);
+    this.tiltH.uniforms.r.value = this.tiltV.uniforms.r.value = 0.5;
+    this.composer.addPass(this.tiltH);
+    this.composer.addPass(this.tiltV);
     this.composer.addPass(new OutputPass());
 
     new ResizeObserver(() => this.resize()).observe(container);
@@ -161,6 +177,7 @@ export class CityScene {
     this.renderer.setSize(w, h);
     this.composer.setPixelRatio(pr);
     this.composer.setSize(w, h);
+    this.tiltBase = { h: 2 / w, v: 2 / h };
   }
 
   async build(data: CityData, onProgress: ProgressFn): Promise<BuildStats> {
@@ -284,7 +301,10 @@ export class CityScene {
   setTime(date: Date, localHour: number) {
     if (!this.proj) return;
     const s = (this.sunInfo = sunState(date, this.proj.lat0, this.proj.lon0));
-    const L = lighting(s, this.cloud);
+    const rising = isRising(date, this.proj.lat0, this.proj.lon0);
+    const L = moodLighting(s, rising, this.cloud);
+    this.mood = dominantMood(s, rising);
+    this.renderer.toneMappingExposure = L.exposure;
     const ext = Math.max(this.size.width, this.size.depth);
     this.sun.position.copy(s.direction).multiplyScalar(ext * 1.5);
     this.sun.target.position.set(0, 0, 0);
@@ -539,6 +559,10 @@ export class CityScene {
     this.controls.update();
   }
 
+  get currentMood(): Mood {
+    return this.mood;
+  }
+
   /** Camera bearing (deg from north, clockwise) and tilt from vertical (deg). */
   get view() {
     const off = this.camera.position.clone().sub(this.controls.target);
@@ -587,6 +611,10 @@ export class CityScene {
       p.needsUpdate = true;
     }
     if (this.paused) return;
+    const tilt = tiltShiftStrength(this.view.tilt);
+    this.tiltH.enabled = this.tiltV.enabled = tilt > 0;
+    this.tiltH.uniforms.h.value = this.tiltBase.h * tilt;
+    this.tiltV.uniforms.v.value = this.tiltBase.v * tilt;
     this.composer.render();
     this.adaptPixelRatio();
     this.updateLabels();

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { sunPosition, sunState, type SunState } from './sun';
+import { smooth, sunPosition, sunState, type SunState } from './sun';
 
 export type Mood = 'morning' | 'noon' | 'golden' | 'night';
 
@@ -27,11 +27,6 @@ export const MOOD_KEYS: Record<Mood, MoodKey> = {
   noon: { sky: '#cdeaf3', sun: '#fff0d8', sunIntensity: 1.9, hemiSky: '#e3f0ff', hemiGround: '#f0dcc0', hemiIntensity: 1.7, exposure: 1.05 },
   golden: { sky: '#f8cfab', sun: '#ffb36b', sunIntensity: 2.6, hemiSky: '#ffe0c2', hemiGround: '#c4b0d4', hemiIntensity: 1.2, exposure: 1.0 },
   night: { sky: '#7a76a8', sun: '#a9b0ff', sunIntensity: 0.6, hemiSky: '#9692cc', hemiGround: '#4a4160', hemiIntensity: 0.9, exposure: 1.1 },
-};
-
-const smooth = (a: number, b: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
 };
 
 /** True while the sun is climbing: the altitude 10 minutes later is higher. */
