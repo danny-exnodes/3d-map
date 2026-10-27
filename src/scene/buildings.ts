@@ -8,6 +8,7 @@ import { MeshBuilder, type XZ } from './geometry';
 import { PrototypeCollector } from './prototypes';
 import { buildRoof, flatCap, minAreaRect } from './roofs';
 import { SpatialGrid } from './spatial';
+import { toyColor } from './toyPalette';
 
 /** Integer codes of HeightSource stored in aSeed (see the "theo nguồn chiều cao" view, #3). */
 export const HEIGHT_SOURCE_CODE: Record<Building['heightSource'], number> = { osm: 0, gob: 1, overture: 2, heuristic: 3 };
@@ -126,8 +127,8 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
     const seed = HEIGHT_SOURCE_CODE[b.heightSource] + 4 * MATERIAL_CODE[b.material ?? 'none'] + (h % 10007) / 10008;
     const y0 = b.minHeight;
     const y1 = b.height;
-    facade.set(b.color ?? '#f0e6d2');
-    roofCol.set(b.roofColor ?? '#d2cbbb');
+    toyColor(b.color ?? '#f0e6d2', 'wall', facade);
+    toyColor(b.roofColor ?? '#d2cbbb', 'roof', roofCol);
     mb.setColor(facade).setSeed(seed).setBid(bid);
     footprints.insert(rings[0], rings[0]);
 

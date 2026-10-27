@@ -5,16 +5,17 @@ import { bboxSizeMeters, pointInRing, type LocalProjection } from '../geo/projec
 import { flatPolygon, merge, MeshBuilder, ribbon, sampleAlong, type XZ } from './geometry';
 import type { RoadPath } from './roads';
 import type { SpatialGrid } from './spatial';
+import { TOY_GRASS, TOY_GROUND, TOY_TREES, TOY_WATER } from './toyPalette';
 
 const AREA_COLORS: Record<AreaFeature['kind'], string> = {
-  water: '#5fa8d8',
-  park: '#8cc66b',
-  grass: '#9fd07a',
-  forest: '#6aa752',
+  water: TOY_WATER,
+  park: TOY_GRASS,
+  grass: TOY_GRASS,
+  forest: TOY_TREES[2],
   plaza: '#e2d8c2',
   parking: '#b9b4aa',
 };
-export const GROUND_COLOR = '#e8dcc0';
+export const GROUND_COLOR = TOY_GROUND;
 
 export interface LandscapeResult {
   group: THREE.Group;
@@ -179,7 +180,7 @@ function buildTrees(spots: [number, number, number][], r: () => number): THREE.G
   const q = new THREE.Quaternion();
   const s = new THREE.Vector3();
   const p = new THREE.Vector3();
-  const greens = ['#4f9d3a', '#5cae45', '#69b84d', '#3f8a35', '#78c25a'].map((c) => new THREE.Color(c));
+  const greens = TOY_TREES.map((c) => new THREE.Color(c));
   spots.forEach(([x, z, k], i) => {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * Math.PI * 2);
     s.set(k, k * (0.9 + r() * 0.3), k);

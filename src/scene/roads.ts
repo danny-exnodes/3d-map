@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Rail, Road, RoadClass } from '../data/types';
 import type { LocalProjection } from '../geo/projection';
 import { MeshBuilder, ribbon, sampleAlong, type XZ } from './geometry';
+import { TOY_ROAD } from './toyPalette';
 
 export interface RoadPath {
   road: Road;
@@ -30,15 +31,15 @@ export interface RoadsResult {
 
 const ORDER: RoadClass[] = ['path', 'service', 'residential', 'tertiary', 'secondary', 'primary', 'motorway'];
 export const ROAD_COLORS: Record<RoadClass, string> = {
-  motorway: '#3b3f48',
-  primary: '#40444d',
-  secondary: '#454953',
-  tertiary: '#4a4e57',
-  residential: '#50545c',
-  service: '#5d6068',
+  motorway: TOY_ROAD,
+  primary: TOY_ROAD,
+  secondary: TOY_ROAD,
+  tertiary: TOY_ROAD,
+  residential: TOY_ROAD,
+  service: TOY_ROAD,
   path: '#cbbf9f',
 };
-const SIDEWALK = '#d9cfb8';
+const SIDEWALK = '#f6eeda';
 const KERB = '#eeeae0';
 const KERB_H = 0.15;
 const PARAPET = '#cfc9be';
