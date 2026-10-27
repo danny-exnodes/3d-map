@@ -254,7 +254,11 @@ export class MapView {
     (this.map.getSource('ward') as GeoJSONSource | undefined)?.setData(this.ward ?? EMPTY);
   }
 
+  /** Last place shown with a labelled marker (search result, own position, default place). */
+  place: { lon: number; lat: number; label: string } | null = null;
+
   flyTo(lon: number, lat: number, label?: string, zoom = 16) {
+    if (label) this.place = { lon, lat, label };
     this.map.flyTo({ center: [lon, lat], zoom, essential: true });
     this.marker?.remove();
     if (label) {

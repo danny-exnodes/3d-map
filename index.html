@@ -110,10 +110,15 @@
         </div>
         <div id="building-info" class="building-info card" hidden>
           <button id="bi-close" class="bi-close" title="Đóng (Esc)">✕</button>
-          <div class="strong" id="bi-title"></div>
+          <div class="strong bi-title" id="bi-title"></div>
           <div class="muted small" id="bi-kind"></div>
+          <a id="bi-addr" class="bi-addr" target="_blank" rel="noopener" title="Mở vị trí này trên Google Maps"></a>
           <dl id="bi-facts"></dl>
-          <a id="bi-edit" target="_blank" rel="noopener"></a>
+          <details class="bi-src"><summary>Nguồn dữ liệu</summary><dl id="bi-src"></dl></details>
+          <div class="bi-links">
+            <a id="bi-gmaps" target="_blank" rel="noopener">Google Maps ↗</a>
+            <a id="bi-edit" target="_blank" rel="noopener"></a>
+          </div>
         </div>
         <div id="legend-sources" class="legend card" hidden>
           <div class="strong small">Nguồn chiều cao</div>
