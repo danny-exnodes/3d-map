@@ -64,6 +64,12 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 .draw-tools { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; padding: 4px; z-index: 2; }
 .draw-tools button { padding: 6px 10px; }
 .map-bottom { position: absolute; left: 12px; right: 12px; bottom: 28px; display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; gap: 12px; z-index: 2; font-size: 14px; }
+.moods { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.moods button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 5px 6px; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, 0.04); }
+.moods button:hover { background: rgba(255, 255, 255, 0.1); }
+.moods button.on { background: rgba(255, 122, 69, 0.25); border-color: var(--accent); }
+.moods i { display: block; width: 44px; height: 26px; border-radius: 6px; background: linear-gradient(to bottom, var(--sky) 0%, var(--wall) 55%, var(--roof) 100%); }
+@media (max-width: 480px) { .moods { grid-template-columns: repeat(2, minmax(0, 1fr)); } .moods i { width: 100%; } }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .progress { position: absolute; right: 12px; top: 64px; width: 260px; padding: 14px; z-index: 2; }
 .progress .big { font-size: 40px; font-weight: 300; display: flex; align-items: baseline; gap: 4px; }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { LocationPin } from './locationPin';
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
@@ -19,6 +20,7 @@ import { deserializeObjects } from './serialize';
 import { createLampPools, litShare } from './nightLights';
 import { dominantMood, isRising, moodLighting, type Mood } from './moods';
 import { sunState, type SunState } from './sun';
+import { bakeToyInstance } from './toyGeometry';
 import { tiltShiftStrength } from './tiltShift';
 import { Traffic } from './traffic';
 
@@ -571,7 +573,22 @@ export class CityScene {
 
   async exportGLB(): Promise<Blob> {
     const exporter = new GLTFExporter();
-    const result = await exporter.parseAsync(this.city, { binary: true });
+    const root = this.city.clone();
+    // Toy houses are shaped in the vertex shader, which a .glb cannot carry: bake each instance to real geometry.
+    const toy: THREE.InstancedMesh[] = [];
+    root.traverse((o) => {
+      if ((o as THREE.InstancedMesh).isInstancedMesh && (o as THREE.InstancedMesh).geometry.getAttribute('aCorner')) toy.push(o as THREE.InstancedMesh);
+    });
+    for (const im of toy) {
+      const mesh = new THREE.Mesh(bakeToyInstances(im), (im.material as THREE.Material).clone());
+      mesh.name = im.name;
+      mesh.position.copy(im.position);
+      mesh.quaternion.copy(im.quaternion);
+      mesh.scale.copy(im.scale);
+      im.parent!.add(mesh);
+      im.removeFromParent();
+    }
+    const result = await exporter.parseAsync(root, { binary: true });
     return new Blob([result as ArrayBuffer], { type: 'model/gltf-binary' });
   }
 
@@ -667,4 +684,25 @@ export class CityScene {
     this.clear();
     this.renderer.dispose();
   }
+}
+
+/** One merged mesh geometry for an instanced toy prototype: every instance baked in place, its colour as vertex colour. */
+function bakeToyInstances(im: THREE.InstancedMesh): THREE.BufferGeometry {
+  const seed = im.geometry.getAttribute('aSeed');
+  const m = new THREE.Matrix4();
+  const c = new THREE.Color();
+  const parts: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < im.count; i++) {
+    im.getMatrixAt(i, m);
+    const g = bakeToyInstance(im.geometry, m, seed ? seed.getX(i) : undefined);
+    if (im.instanceColor) {
+      im.getColorAt(i, c);
+      const col = g.getAttribute('color') as THREE.BufferAttribute;
+      for (let v = 0; v < col.count; v++) col.setXYZ(v, col.getX(v) * c.r, col.getY(v) * c.g, col.getZ(v) * c.b);
+    }
+    parts.push(g);
+  }
+  const out = mergeGeometries(parts)!;
+  parts.forEach((g) => g.dispose());
+  return out;
 }

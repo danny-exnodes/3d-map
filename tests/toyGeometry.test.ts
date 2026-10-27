@@ -90,4 +90,12 @@ describe('toy prototypes: shading and chimneys', () => {
     expect(top(0.01)).toBeGreaterThan(2.4);
     expect(top()).toBeGreaterThan(2.4);
   });
+  it('bakes instances at their real place and size for export', () => {
+    const mat = new THREE.Matrix4().compose(new THREE.Vector3(100, 0, -50), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2), new THREE.Vector3(6, 12, 18));
+    const b = box(bakeToyInstance(toyWallsUnit(), mat));
+    expect((b.min.x + b.max.x) / 2).toBeCloseTo(100, 3);
+    expect((b.min.z + b.max.z) / 2).toBeCloseTo(-50, 3);
+    expect(b.max.x - b.min.x).toBeCloseTo(18, 2); // rotated 90°: length lies along x
+    expect(b.max.y).toBeCloseTo(12, 2);
+  });
 });

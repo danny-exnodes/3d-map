@@ -6,7 +6,9 @@ import { loadCity } from './data/loader';
 import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressStep } from './data/types';
 import { bboxAreaKm2, pointInRing } from './geo/projection';
 import { CityScene } from './scene/CityScene';
-import { compassLabel } from './scene/sun';
+import { dominantMood, isRising, minuteForMood, MOOD_KEYS, MOOD_LABEL, MOODS, type Mood } from './scene/moods';
+import { compassLabel, sunState } from './scene/sun';
+import { TOY_ROOFS, TOY_WALLS } from './scene/toyPalette';
 import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { googleKey, setGoogleKey } from './data/googleTraffic';
 import { fetchWeather } from './services/weather';
@@ -761,7 +763,7 @@ let playing = false;
 
 /** The slider shows local clock time at the area (UTC offset estimated from longitude). */
 function areaUtcOffsetHours(): number {
-  const b = city?.data?.bbox;
+  const b = city?.data?.bbox ?? mapView.bbox;
   return b ? Math.round((b.west + b.east) / 2 / 15) : -new Date().getTimezoneOffset() / 60;
 }
 
@@ -773,8 +775,47 @@ function currentDate(): Date {
 
 const clockLabel = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(Math.floor(mins % 60)).padStart(2, '0')}`;
 
+/** Where the mood is judged: the built city, else the selected area, else the map centre. */
+function moodPlace(): { lat: number; lon: number } {
+  const b = city?.data?.bbox ?? mapView.bbox;
+  if (b) return { lat: (b.south + b.north) / 2, lon: (b.west + b.east) / 2 };
+  const c = mapView.map.getCenter();
+  return { lat: c.lat, lon: c.lng };
+}
+
+function currentMood(): Mood {
+  if (city) return city.currentMood;
+  const { lat, lon } = moodPlace();
+  const date = currentDate();
+  return dominantMood(sunState(date, lat, lon), isRising(date, lat, lon));
+}
+
+function highlightMood() {
+  const mood = currentMood();
+  document.querySelectorAll<HTMLButtonElement>('#mood-picker button').forEach((b) => b.classList.toggle('on', b.dataset.mood === mood));
+  $('btn-mood').textContent = MOOD_LABEL[mood];
+}
+
+function pickMood(m: Mood) {
+  const { lat, lon } = moodPlace();
+  const [y, mo, d] = (dateInput.value || new Date().toISOString().slice(0, 10)).split('-').map(Number);
+  slider.value = String(minuteForMood(m, new Date(Date.UTC(y, mo - 1, d)), lat, lon, areaUtcOffsetHours()));
+  applyTime();
+}
+
+document.querySelectorAll<HTMLButtonElement>('#mood-picker button').forEach((b) => {
+  const m = b.dataset.mood as Mood;
+  b.querySelector('i')!.setAttribute('style', `--sky:${MOOD_KEYS[m].sky};--wall:${TOY_WALLS[0]};--roof:${TOY_ROOFS[0]}`);
+  b.addEventListener('click', () => pickMood(m));
+});
+$('btn-mood').addEventListener('click', () => pickMood(MOODS[(MOODS.indexOf(currentMood()) + 1) % MOODS.length]));
+
 function applyTime() {
-  if (!city) return;
+  if (!city) {
+    $('t-clock').textContent = clockLabel(Number(slider.value));
+    highlightMood();
+    return;
+  }
   const mins = Number(slider.value);
   city.setTime(currentDate(), mins / 60);
   const s = city.sunInfo!;
@@ -784,7 +825,9 @@ function applyTime() {
   const bk = ts.byKind as Record<string, number>;
   $('i-traffic').textContent = `🛵 ${fmt(bk.moto ?? 0)} xe máy · 🚗 ${fmt((bk.car ?? 0) + (bk.bus ?? 0) + (bk.truck ?? 0))} ô tô/buýt/tải · 🚲 ${fmt(bk.bicycle ?? 0)} · 🚶 ${fmt(ts.people)} người · ~${fmt(ts.flow * 100)}% tốc độ thông thường (mô phỏng)`;
   document.querySelector('#city-view .info')?.classList.toggle('night', s.night > 0.5);
+  highlightMood();
 }
+applyTime();
 slider.addEventListener('input', applyTime);
 dateInput.addEventListener('change', applyTime);
 
