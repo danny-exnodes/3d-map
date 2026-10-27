@@ -51,6 +51,13 @@
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
 
+**Mới trong v0.0.4**
+- Bấm vào toà nhà hiện địa chỉ (thẻ OSM, nếu không có thì tra ngược Nominatim, có cache).
+- Tường và mái có vết bẩn, vệt mưa, AO chân tường, bớt "nhựa".
+- Xe có kính, lốp; xe máy có người lái đội mũ; người đi bộ có tay chân màu da.
+- Space view chuyển cảnh liền mạch: globe dựng sẵn, bắt đầu đúng góc camera 3D, mô hình hoà dần vào ảnh vệ tinh Sentinel-2.
+- 🚦 Lấy giao thông thực từ Google (Routes API, key của bạn, chỉ lưu trong trình duyệt).
+
 **Mới trong v0.0.3**
 - **Giao diện:**
   - desktop chia đôi Bản đồ | 3D, thanh chia kéo được (#23);
@@ -128,6 +135,8 @@ Yêu cầu Node 22.18+ (CLI chiều cao chạy thẳng file `.ts`) và trình du
 | [Google Open Buildings 2.5D Temporal](https://sites.research.google/gr/open-buildings/temporal/) | chiều cao nhà | GeoTIFF công khai, **không có CORS** → tiền xử lý | CC BY 4.0 |
 | [OpenFreeMap](https://openfreemap.org/) | bản đồ nền, địa điểm | vector tiles (CORS) | ODbL (dữ liệu OSM) |
 | [Overture divisions](https://docs.overturemaps.org/guides/divisions/) | ranh giới phường/xã | `tools/wards.mjs` → `public/wards/` | ODbL |
+| [EOX Sentinel-2 cloudless 2016](https://s2maps.eu) | ảnh vệ tinh gần (Space view) | WMTS | CC BY 4.0 |
+| [Google Routes API](https://developers.google.com/maps/documentation/routes) | giao thông thực (tuỳ chọn) | REST, key của người dùng | Google Maps Platform ToS |
 | [NASA GIBS](https://earthdata.nasa.gov/gibs) Blue Marble | ảnh trái đất (Space view) | WMTS (CORS) | public domain |
 | [Open‑Meteo](https://open-meteo.com/) | thời tiết | trình duyệt | CC BY 4.0 |
 
@@ -195,6 +204,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.4](docs/releases/v0.0.4.md) (2026-10-27): địa chỉ toà nhà, vật liệu bớt nhựa, xe thật hơn, giao thông Google, Space view liền mạch.
 - [v0.0.3](docs/releases/v0.0.3.md) (2026-10-27): hiệu năng (nhà mẫu), chia đôi màn hình, mobile, Space view, ánh sáng đêm, cầu/hầm, giao thông xe máy.
 - [v0.0.2](docs/releases/v0.0.2.md) (2026-10-26): mật độ nhà thật, bỏ phụ thuộc Overpass, chế độ Siêu thực, bản đồ offline theo phường.
 - [v0.0.1](docs/releases/v0.0.1.md) (2026-10-26): release note kiêm checkpoint (kiến trúc, quy trình, giới hạn, việc tiếp theo).
