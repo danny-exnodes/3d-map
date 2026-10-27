@@ -34,15 +34,10 @@
 - **Bấm vào một nhà** để xem tên, loại, số tầng, chiều cao, nguồn dữ liệu, kèm link sửa hoặc vẽ thêm trên OpenStreetMap.
 
 **Hiển thị**
-- Ba chế độ xem **Có màu / Đơn sắc / Siêu thực**. Lựa chọn được ghi nhớ, đặt được qua URL `?style=mono|real`.
-  - Đơn sắc theo phong cách mô hình kiến trúc, đèn đêm vẫn giữ màu ấm.
-  - **Siêu thực** (#19) dùng vật liệu PBR sinh hoàn toàn bằng shader, không tải texture nên chạy được offline:
-    - mặt tiền: vữa loang, vệt mưa, gờ sàn, cửa sổ có khung và bậu, kính phản chiếu trời, cục lạnh, cửa cuốn và bảng hiệu tầng trệt, tường kính, gạch, ốp kim loại;
-    - mái: mái bằng bê tông có vết ố, mái tôn sóng có gỉ, mái ngói;
-    - mặt đất: đường nhựa có vá và ướt khi mưa, vỉa hè lát gạch, cỏ;
-    - sông hồ có sóng động và phản chiếu bầu trời;
-    - tán cây nhiều khối;
-    - bầu trời khí quyển có mây, chiếu sáng môi trường, ambient occlusion (tự tắt khi máy yếu), bóng mềm.
+- Một phong cách duy nhất: **đồ chơi** (toy, #32). Nhà bo tròn, mập mạp trong bảng màu pastel, cửa sổ tròn có khung, cây tròn phình, bụi cây ở công viên, đèn đường có đầu tròn, xe màu kẹo, bóng đổ mềm và viền mờ kiểu tilt-shift ở mép khung hình. Phong cách này thay cho ba chế độ cũ Có màu / Đơn sắc / Siêu thực (#7, #19).
+- Bốn **tâm trạng** gắn với vòng ngày/đêm, pha trộn mượt theo vị trí mặt trời: **Buổi sáng** (trong, mát), **Nắng trưa** (ấm, trời xanh nhạt), **Hoàng hôn** (nắng cam thấp, bóng dài), **Đêm ấm** (trời tím, cửa sổ và đèn sáng ấm).
+  - Trước khi dựng có bốn thẻ chọn tâm trạng phía trên nút **Dựng 3D**. Trang vẫn mở ở giờ thật của khu vực, thẻ của tâm trạng đang diễn ra được tô sáng. Bấm một thẻ thì đồng hồ nhảy tới giờ hợp với tâm trạng đó, và thành phố được dựng trong ánh sáng ấy.
+  - Sau khi dựng, bốn lựa chọn này nằm ở thanh công cụ 3D (thay cho nút Có màu). Thanh thời gian vẫn kéo tự do; thẻ tô sáng chạy theo tâm trạng mạnh nhất.
 - Chế độ pixel.
 - Thanh thời gian 24h + chọn ngày. Mặt trời đặt đúng vị trí thiên văn theo toạ độ. Ban đêm có ánh trăng, cửa sổ và đèn xe sáng, bloom.
 - **Giao thông (mô phỏng)**: xe máy, ô tô, xe buýt chạy theo làn bên phải, mật độ đổi theo giờ cao điểm. Lớp 🚦 tô màu tốc độ. Có tàu chạy trên ray.
@@ -55,9 +50,13 @@
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
 
+**Mới trong v0.0.6**
+- Phong cách đồ chơi duy nhất cho bản OSM, bốn tâm trạng theo vòng ngày/đêm và thẻ chọn tâm trạng trước khi dựng. Các chế độ Có màu / Đơn sắc / Siêu thực và tham số `?style=` đã bỏ.
+- Ngân sách tam giác của benchmark nâng lên 500k.
+
 **Mới trong v0.0.5**
 - Không còn nhà chồng lên nhau: footprint được xếp theo độ tin cậy (OSM, rồi Overture, rồi nhà suy ra). Nhà nào phần lớn bị đè thì thu nhỏ hoặc bỏ.
-- Bó vỉa nổi ở hai mép đường. Mặt nước xanh hơn (Siêu thực). Xe vào hoặc ra ở nút giao và mép mô hình, không tự hiện giữa đường.
+- Bó vỉa nổi ở hai mép đường. Mặt nước xanh hơn. Xe vào hoặc ra ở nút giao và mép mô hình, không tự hiện giữa đường.
 - Chọn vùng: kéo góc thì các góc khác chạy theo, kéo bên trong vùng để dời vùng.
 - Ghim vị trí hiện tại có hiệu ứng trên bản 3D. Thẻ toà nhà gọn hơn, địa chỉ mở thẳng Google Maps.
 - Bản Google 3D ở trang gốc. Bản này chuyển sang `/openstreetmap/`.
@@ -105,21 +104,13 @@
   Một phường khoảng 30–40 MB.
 - Khi mất mạng, app vẫn mở được (service worker): bản đồ nền hiện đầy đủ, dựng 3D được mọi khu trong phường đã tải. Dữ liệu offline được ghim, không bị xoá khi dọn bộ nhớ đệm. Phường dùng chung ô dữ liệu vẫn xoá riêng được.
 
-**Xuất**: ảnh PNG, mô hình `.glb` (theo chế độ màu đang chọn).
+**Xuất**: ảnh PNG, mô hình `.glb` (nhà bo tròn, màu pastel như trên màn hình).
 
 **Demo offline**: thêm `?demo` vào URL để dựng thành phố sinh ngẫu nhiên.
 
-| Ngã Tư Sở (OSM + Overture + Google 2.5D) | Nguồn chiều cao 📏 | Đơn sắc |
-| --- | --- | --- |
-| ![ngatuso](docs/ngatuso.png) | ![sources](docs/height-sources.png) | ![mono](docs/mono.png) |
-
-| Có màu | Siêu thực | Siêu thực – cận cảnh |
-| --- | --- | --- |
-| ![before](docs/real-before.jpg) | ![after](docs/real-after.jpg) | ![street](docs/real-street.jpg) |
-
-| Siêu thực – sông, cầu cạn | Siêu thực – ban đêm | |
-| --- | --- | --- |
-| ![river](docs/real-river.jpg) | ![night](docs/real-night.jpg) | |
+| Ngã Tư Sở (OSM + Overture + Google 2.5D) | Nguồn chiều cao 📏 |
+| --- | --- |
+| ![ngatuso](docs/ngatuso.png) | ![sources](docs/height-sources.png) |
 
 | Én Nam – Q.8, TP.HCM | Thông tin toà nhà | Ban đêm |
 | --- | --- | --- |
@@ -197,8 +188,10 @@ src/
   scene/buildings.ts      # tường + mái gộp 1 mesh, shader cửa sổ/vật liệu/chọn
   scene/roofs.ts          # OBB, mái dốc/chóp/vòm/chùa
   scene/details.ts        # ban công, tum thang, bồn nước (instanced, LOD)
-  scene/colorMode.ts      # Có màu / Đơn sắc
-  scene/realistic.ts      # Siêu thực: vật liệu PBR thủ tục, bầu trời, nước, cây
+  scene/toyPalette.ts     # bảng màu pastel cho nhà và mặt đất
+  scene/toyGeometry.ts    # nhà bo tròn (đặt đỉnh theo footprint), bake cho xuất GLB
+  scene/moods.ts          # bốn tâm trạng pha trộn theo mặt trời, giờ cho từng thẻ
+  scene/tiltShift.ts      # viền mờ tilt-shift theo góc nhìn
   scene/prototypes.ts     # nhà mẫu dùng chung (instancing)
   scene/trafficModel.ts   # mô hình lưu lượng, tỉ lệ phương tiện
   scene/nightLights.ts    # tỉ lệ cửa sổ sáng, vũng đèn đường
@@ -216,6 +209,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.6](docs/releases/v0.0.6.md) (2026-10-27): phong cách đồ chơi duy nhất (nhà bo tròn, pastel), bốn tâm trạng và thẻ chọn trước khi dựng; bỏ Có màu / Đơn sắc / Siêu thực.
 - [v0.0.5](docs/releases/v0.0.5.md) (2026-10-27): bản Google 3D ở `/`, bản OSM ở `/openstreetmap/`; hết nhà chồng lấn, bó vỉa, xe vào ở nút giao, chọn vùng, ghim vị trí.
 - [v0.0.4](docs/releases/v0.0.4.md) (2026-10-27): địa chỉ toà nhà, vật liệu bớt nhựa, xe thật hơn, giao thông Google, Space view liền mạch.
 - [v0.0.3](docs/releases/v0.0.3.md) (2026-10-27): hiệu năng (nhà mẫu), chia đôi màn hình, mobile, Space view, ánh sáng đêm, cầu/hầm, giao thông xe máy.
