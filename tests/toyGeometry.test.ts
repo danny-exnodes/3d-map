@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { bakeToyInstance, toyFlatRoofUnit, toyPitchedRoofUnit, toyWallsUnit, TOY } from '../src/scene/toyGeometry';
+import { bakeToyInstance, bakeToyInstances, toyFlatRoofUnit, toyPitchedRoofUnit, toyWallsUnit, TOY } from '../src/scene/toyGeometry';
 
 const m = (w: number, h: number, l: number, y = 0) => new THREE.Matrix4().compose(new THREE.Vector3(0, y, 0), new THREE.Quaternion(), new THREE.Vector3(w, h, l));
 const box = (g: THREE.BufferGeometry) => (g.computeBoundingBox(), g.boundingBox!);
@@ -97,5 +97,28 @@ describe('toy prototypes: shading and chimneys', () => {
     expect((b.min.z + b.max.z) / 2).toBeCloseTo(-50, 3);
     expect(b.max.x - b.min.x).toBeCloseTo(18, 2); // rotated 90°: length lies along x
     expect(b.max.y).toBeCloseTo(12, 2);
+  });
+  it('bakes an instanced mesh into one plain mesh with vertex colours', () => {
+    const unit = toyWallsUnit();
+    unit.setAttribute('aSeed', new THREE.InstancedBufferAttribute(new Float32Array([0.05, 0.01]), 1));
+    const im = new THREE.InstancedMesh(unit, new THREE.MeshLambertMaterial({ vertexColors: true }), 2);
+    im.setMatrixAt(0, new THREE.Matrix4().compose(new THREE.Vector3(-100, 0, 0), new THREE.Quaternion(), new THREE.Vector3(6, 9, 12)));
+    im.setMatrixAt(1, new THREE.Matrix4().compose(new THREE.Vector3(100, 0, 0), new THREE.Quaternion(), new THREE.Vector3(8, 15, 10)));
+    im.setColorAt(0, new THREE.Color(1, 0, 0));
+    im.setColorAt(1, new THREE.Color(0, 0, 1));
+    const out = bakeToyInstances(im);
+    expect(out.isMesh).toBe(true);
+    expect(out.geometry.getAttribute('position').count).toBe(2 * unit.getAttribute('position').count);
+    const col = out.geometry.getAttribute('color');
+    let red = false, blue = false;
+    for (let i = 0; i < col.count; i++) {
+      if (col.getX(i) > 0.1 && col.getZ(i) === 0) red = true;
+      if (col.getZ(i) > 0.1 && col.getX(i) === 0) blue = true;
+    }
+    expect(red && blue).toBe(true);
+    const b = box(out.geometry);
+    expect(b.min.x).toBeLessThan(-100 + 1);
+    expect(b.max.x).toBeGreaterThan(100 - 1);
+    expect(b.max.y).toBeCloseTo(15, 2);
   });
 });

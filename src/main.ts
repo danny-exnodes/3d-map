@@ -42,6 +42,7 @@ function onBBox(b: BBox | null) {
     $('area-label').textContent = 'Chưa chọn vùng';
     $('area-hint').textContent = 'Bấm ▭ rồi kéo chuột để vẽ một khu (tối đa ~4 km²).';
     btn.disabled = true;
+    highlightMood();
     return;
   }
   const km2 = bboxAreaKm2(b);
@@ -51,6 +52,7 @@ function onBBox(b: BBox | null) {
       ? `Vùng quá lớn — hãy chọn ≤ ${MAX_KM2} km² để trình duyệt dựng mượt.`
       : locationNotice || 'Sẵn sàng. Bấm “Dựng 3D” để tải dữ liệu và dựng mô hình.';
   btn.disabled = km2 > MAX_KM2 || busy;
+  highlightMood();
   history.replaceState(null, '', `#bbox=${[b.south, b.west, b.north, b.east].map((v) => v.toFixed(5)).join(',')}`);
 }
 mapView.onChange = onBBox;
@@ -453,6 +455,7 @@ function setLayout(l: Layout) {
     if (b.dataset.tab === 'city') b.disabled = !city;
   }
   if (l === 'map') playing = false;
+  highlightMood();
 }
 function showCity() {
   // The preview build has no map pane.
@@ -761,6 +764,11 @@ dateInput.valueAsDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now
 slider.value = String((now.getUTCHours() * 60 + now.getUTCMinutes() + 7 * 60) % 1440);
 let playing = false;
 
+/** The built city's area while the 3D view is showing, otherwise the area selected on the map. */
+function moodBBox(): BBox | null {
+  return city && !$('city-view').hidden ? (city.data?.bbox ?? null) : mapView.bbox;
+}
+
 /** The slider shows local clock time at the area (UTC offset estimated from longitude). */
 function areaUtcOffsetHours(): number {
   const b = city?.data?.bbox ?? mapView.bbox;
@@ -777,14 +785,14 @@ const clockLabel = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2
 
 /** Where the mood is judged: the built city, else the selected area, else the map centre. */
 function moodPlace(): { lat: number; lon: number } {
-  const b = city?.data?.bbox ?? mapView.bbox;
+  const b = moodBBox();
   if (b) return { lat: (b.south + b.north) / 2, lon: (b.west + b.east) / 2 };
   const c = mapView.map.getCenter();
   return { lat: c.lat, lon: c.lng };
 }
 
 function currentMood(): Mood {
-  if (city) return city.currentMood;
+  if (city && !$('city-view').hidden) return city.currentMood;
   const { lat, lon } = moodPlace();
   const date = currentDate();
   return dominantMood(sunState(date, lat, lon), isRising(date, lat, lon));
@@ -792,7 +800,10 @@ function currentMood(): Mood {
 
 function highlightMood() {
   const mood = currentMood();
-  document.querySelectorAll<HTMLButtonElement>('#mood-picker button').forEach((b) => b.classList.toggle('on', b.dataset.mood === mood));
+  document.querySelectorAll<HTMLButtonElement>('#mood-picker button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.mood === mood);
+    b.setAttribute('aria-pressed', String(b.dataset.mood === mood));
+  });
   $('btn-mood').textContent = MOOD_LABEL[mood];
 }
 

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PLINTH_SHADE } from './toyPalette';
 
 /**
@@ -385,4 +386,30 @@ export function bakeToyInstance(geo: THREE.BufferGeometry, matrix: THREE.Matrix4
   if (geo.index) out.setIndex(geo.index.clone());
   out.computeBoundingSphere();
   return out;
+}
+
+/** A plain Mesh for an instanced toy prototype: every instance baked in place, its colour as vertex colour. For the GLB export. */
+export function bakeToyInstances(im: THREE.InstancedMesh): THREE.Mesh {
+  const seed = im.geometry.getAttribute('aSeed');
+  const m = new THREE.Matrix4();
+  const c = new THREE.Color();
+  const parts: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < im.count; i++) {
+    im.getMatrixAt(i, m);
+    const g = bakeToyInstance(im.geometry, m, seed ? seed.getX(i) : undefined);
+    if (im.instanceColor) {
+      im.getColorAt(i, c);
+      const col = g.getAttribute('color') as THREE.BufferAttribute;
+      for (let v = 0; v < col.count; v++) col.setXYZ(v, col.getX(v) * c.r, col.getY(v) * c.g, col.getZ(v) * c.b);
+    }
+    parts.push(g);
+  }
+  const geometry = mergeGeometries(parts)!;
+  parts.forEach((g) => g.dispose());
+  const mesh = new THREE.Mesh(geometry, (im.material as THREE.Material).clone());
+  mesh.name = im.name;
+  mesh.position.copy(im.position);
+  mesh.quaternion.copy(im.quaternion);
+  mesh.scale.copy(im.scale);
+  return mesh;
 }
