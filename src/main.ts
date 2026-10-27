@@ -4,11 +4,11 @@ import { cacheClearUnpinned, cacheUsage } from './data/cache';
 import { type CityId, deletePackage, downloadPackage, listPackages, loadWards, packageSize, registerServiceWorker, searchWards, type Ward, wardAreaKm2 } from './data/offline';
 import { loadCity } from './data/loader';
 import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressStep } from './data/types';
-import { bboxAreaKm2 } from './geo/projection';
+import { bboxAreaKm2, pointInRing } from './geo/projection';
 import { CityScene } from './scene/CityScene';
 import type { ColorMode } from './scene/colorMode';
 import { compassLabel } from './scene/sun';
-import { searchPlaces, type Place } from './services/geocode';
+import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { fetchWeather } from './services/weather';
 import { cityWorker } from './worker/client';
 import { DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
@@ -600,7 +600,7 @@ function showBuildingInfo(b: Building | null) {
     ['Nguồn chiều cao', HEIGHT_SOURCE_VI[b.heightSource]],
     ['Footprint', FOOTPRINT_VI[b.footprintSource]],
   ];
-  if (b.address) facts.push(['Địa chỉ', b.address]);
+  facts.push(['Địa chỉ', b.address ?? 'đang tìm…']);
   if (b.roof !== 'flat') facts.push(['Mái', b.roof]);
   const dl = $('bi-facts');
   dl.innerHTML = '';
@@ -626,6 +626,29 @@ function showBuildingInfo(b: Building | null) {
     link.hidden = false;
   } else link.hidden = true;
   panel.hidden = false;
+  if (!b.address) lookupAddress(b);
+}
+
+/** Fills the address row from Nominatim when the building has no addr:* tags (#28). */
+async function lookupAddress(b: Building) {
+  const ring = b.polygon[0];
+  const lon = ring.reduce((a, p) => a + p[0], 0) / ring.length;
+  const lat = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+  const cell = () => [...$('bi-facts').querySelectorAll('dt')].find((d) => d.textContent === 'Địa chỉ')?.nextElementSibling as HTMLElement | undefined;
+  try {
+    const r = await reverseGeocode(lat, lon);
+    const c = cell();
+    if (!c || $('building-info').hidden) return;
+    if (!r) c.textContent = `Chưa có địa chỉ · ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    else {
+      const exact = r.osmId === b.id || pointInRing(r.lon, r.lat, ring);
+      c.textContent = r.address + (exact ? '' : ' (gần đúng)');
+      c.title = 'Nguồn: OpenStreetMap Nominatim';
+    }
+  } catch {
+    const c = cell();
+    if (c) c.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} (không tra được địa chỉ khi offline)`;
+  }
 }
 function closeBuildingInfo() {
   $('building-info').hidden = true;
