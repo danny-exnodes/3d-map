@@ -98,7 +98,7 @@ export function moodLighting(s: SunState, rising: boolean, cloud = 0) {
   return { sky, sunColor, sunIntensity: sunIntensity * (1 - cloud * 0.6), hemiSky, hemiGround, hemiIntensity, exposure };
 }
 
-/** Local clock minute (0..1439) where `mood` is strongest on the day starting at `dateUtcMidnight` (UTC) at the given place. */
+/** Local clock minute (0..1439) where `mood` is strongest (middle of a plateau) on the day starting at `dateUtcMidnight` (UTC) at the given place. */
 export function minuteForMood(mood: Mood, dateUtcMidnight: Date, lat: number, lon: number, utcOffsetHours: number): number {
   const STEP = 5;
   const fallback = mood === 'night' ? 0 : 720;
@@ -117,7 +117,16 @@ export function minuteForMood(mood: Mood, dateUtcMidnight: Date, lat: number, lo
       for (let i = set + 60 / STEP; i < weights.length; i++) if (weights[i] > 0.05) return i * STEP;
     }
   }
-  let best = 0;
-  for (let i = 1; i < weights.length; i++) if (weights[i] > weights[best]) best = i;
-  return best * STEP;
+  // Middle of the longest run of steps within 1e-3 of the peak, so a plateau (noon) lands in its centre.
+  const peak = Math.max(...weights);
+  let bestStart = 0;
+  let bestLen = 0;
+  for (let i = 0; i < weights.length; i++) {
+    if (weights[i] < peak - 1e-3) continue;
+    let j = i;
+    while (j + 1 < weights.length && weights[j + 1] >= peak - 1e-3) j++;
+    if (j - i + 1 > bestLen) [bestStart, bestLen] = [i, j - i + 1];
+    i = j;
+  }
+  return (bestStart + Math.floor((bestLen - 1) / 2)) * STEP;
 }

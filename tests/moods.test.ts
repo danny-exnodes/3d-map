@@ -36,6 +36,20 @@ describe('moods', () => {
       expect(g).toBeLessThan(sunsetMin);
     }
   });
+  it('places each mood sensibly in a Hà Nội day', () => {
+    for (const mo of [6, 12]) {
+      const day = new Date(Date.UTC(2026, mo - 1, 21));
+      const f = (k: 'morning' | 'noon' | 'golden' | 'night') => minuteForMood(k, day, HN.lat, HN.lon, 7);
+      expect(f('noon')).toBeGreaterThanOrEqual(11 * 60 + 30);
+      expect(f('noon')).toBeLessThanOrEqual(13 * 60);
+      expect(f('morning')).toBeLessThan(9 * 60);
+      expect(sunState(at(2026, mo, 21, f('morning')), HN.lat, HN.lon).altitudeDeg).toBeGreaterThan(0);
+      expect(f('night')).toBeGreaterThan(f('golden'));
+    }
+  });
+  it('returns 0 for night when the sun never sets', () => {
+    expect(minuteForMood('night', new Date(Date.UTC(2026, 5, 21)), 78.2, 15.6, 1)).toBe(0); // Svalbard, midnight sun
+  });
   it('returns a valid minute when the mood never occurs', () => {
     const m = minuteForMood('golden', new Date(Date.UTC(2026, 5, 21)), 78.2, 15.6, 1); // Svalbard, midnight sun
     expect(m).toBeGreaterThanOrEqual(0);
