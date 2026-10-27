@@ -29,6 +29,8 @@ describe('worker mesh serialization', () => {
     const walls = g.getObjectByName('buildings-walls') as THREE.InstancedMesh;
     expect((walls.material as THREE.Material).userData.toyProto).toBe(true);
     expect(walls.customDepthMaterial).toBeDefined();
+    const flatRoof = g.getObjectByName('buildings-roof-flat') as THREE.InstancedMesh;
+    expect(flatRoof.geometry.getAttribute('aRoof').getX(0)).toBe(1);
     const bulbs = g.getObjectByName('lampBulbs') as THREE.InstancedMesh;
     expect((bulbs.material as THREE.MeshBasicMaterial).color.r).toBeGreaterThan(1); // HDR colour preserved
   });

@@ -246,6 +246,7 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         varying vec3 vWPos;
         varying vec3 vWNormal;
         varying float vSeed;
+        varying float vRoof;
         #ifdef TOY_PROTO
         ${TOY_GLSL}
         #endif`,
@@ -278,6 +279,12 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
           vWNormal = normalize(mat3(modelMatrix) * bn);
         }
         vSeed = aSeed;
+        // Toy roof units never get windows; the exact mesh has no aRoof attribute.
+        #ifdef TOY_PROTO
+          vRoof = aRoof;
+        #else
+          vRoof = 0.0;
+        #endif
         vSelected = abs(aBid - uSelected) < 0.5 ? 1.0 : 0.0;`,
       );
     shader.fragmentShader = shader.fragmentShader
@@ -291,6 +298,7 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         varying vec3 vWPos;
         varying vec3 vWNormal;
         varying float vSeed;
+        varying float vRoof;
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
         float vn(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
           return mix(mix(h21(i), h21(i + vec2(1, 0)), u.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), u.x), u.y); }
@@ -313,7 +321,7 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
             : src < 2.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[2])}) : vec3(${hexToVec(HEIGHT_SOURCE_COLORS[3])});
         }
         winMask = 0.0; winLit = 0.0; winColor = vec3(0.0); winBright = 0.0;
-        if (abs(bN.y) < 0.3 && vWPos.y > 0.6) {
+        if (vRoof < 0.5 && abs(bN.y) < 0.3 && vWPos.y > 0.6) {
           vec2 t = normalize(vec2(-bN.z, bN.x));
           float u = dot(vWPos.xz, t);
           float cellW = 3.2;

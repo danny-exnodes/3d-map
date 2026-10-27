@@ -72,6 +72,17 @@ describe('toy prototypes: shading and chimneys', () => {
       }
     }
   });
+  it('flags every roof vertex, and no wall vertex, so roofs get no windows', () => {
+    const flags = (g: THREE.BufferGeometry) => Array.from(g.getAttribute('aRoof').array as Float32Array);
+    for (const unit of [toyFlatRoofUnit(), toyPitchedRoofUnit(false), toyPitchedRoofUnit(true)]) {
+      const f = flags(unit);
+      expect(f.length).toBe(unit.getAttribute('position').count);
+      expect(f.every((v) => v === 1)).toBe(true);
+    }
+    const w = toyWallsUnit();
+    expect(flags(w).length).toBe(w.getAttribute('position').count);
+    expect(flags(w).every((v) => v === 0)).toBe(true);
+  });
   it('drops the chimney by the same seed rule as the shader', () => {
     const top = (seed?: number) => box(bakeToyInstance(toyPitchedRoofUnit(false), m(6, 2, 12), seed)).max.y;
     // fract(seed × 13) > 0.6 drops it.

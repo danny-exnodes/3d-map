@@ -17,6 +17,7 @@ import { PLINTH_SHADE } from './toyPalette';
  *   by the bevel radius r (equal to aCorner.xz on sharp vertices, which makes r cancel out);
  *   z = 1 when `normal` is a unit-box normal (pitched-roof slopes), 0 when it is in metres.
  * - `aChimney` (float): 1 on chimney vertices.
+ * - `aRoof` (float): 1 on every vertex of the roof units, which never get windows.
  * - `position`: the vertex placed for a reference size, divided by it. Only bounds and picking use it.
  *
  * Everything stays inside the true footprint, so neighbouring row houses never overlap: the
@@ -94,6 +95,7 @@ attribute vec3 aCorner;
 attribute vec3 aOffset;
 attribute vec3 aBevel;
 attribute float aChimney;
+attribute float aRoof;
 vec3 toyScale() {
   return max(vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz)), vec3(1e-4));
 }
@@ -150,21 +152,25 @@ interface ToyVertex {
 
 /** Indexed toy unit under construction. Triangles are wound to face their vertices' normals. */
 class ToyMesh {
-  private attrs: Record<'position' | 'normal' | 'color' | 'aCorner' | 'aOffset' | 'aBevel' | 'aChimney', number[]> = {
-    position: [], normal: [], color: [], aCorner: [], aOffset: [], aBevel: [], aChimney: [],
+  private attrs: Record<'position' | 'normal' | 'color' | 'aCorner' | 'aOffset' | 'aBevel' | 'aChimney' | 'aRoof', number[]> = {
+    position: [], normal: [], color: [], aCorner: [], aOffset: [], aBevel: [], aChimney: [], aRoof: [],
   };
   private index: number[] = [];
   /** Vertices placed at the reference size, to wind triangles. */
   private placed: THREE.Vector3[] = [];
   private normals: THREE.Vector3[] = [];
 
-  constructor(private ref: THREE.Vector3) {}
+  constructor(
+    private ref: THREE.Vector3,
+    private roof: boolean,
+  ) {}
 
   v(x: ToyVertex): number {
     const d = x.d ?? [x.c[0], x.c[2]];
     const p = placeToyVertex(new THREE.Vector3(...x.c), new THREE.Vector3(...x.o), this.ref, new THREE.Vector3(), new THREE.Vector2(...d));
     const n = new THREE.Vector3(...x.n).normalize();
     const a = this.attrs;
+    // Approximate reference shape, only for raycasting and bounds; the shader does the real placement.
     a.position.push(p.x / this.ref.x, p.y / this.ref.y, p.z / this.ref.z);
     a.normal.push(n.x, n.y, n.z);
     const k = x.shade ?? 1;
@@ -173,6 +179,7 @@ class ToyMesh {
     a.aOffset.push(...x.o);
     a.aBevel.push(d[0], d[1], x.unit ? 1 : 0);
     a.aChimney.push(x.chimney ? 1 : 0);
+    a.aRoof.push(this.roof ? 1 : 0);
     this.placed.push(p);
     // Wind against the placed normal (unit-box normals divided by the reference run).
     this.normals.push(n.clone().divide(normalDivisor(this.ref, x.unit ? 1 : 0, new THREE.Vector3())));
@@ -203,7 +210,7 @@ class ToyMesh {
 
   build(): THREE.BufferGeometry {
     const g = new THREE.BufferGeometry();
-    const sizes = { position: 3, normal: 3, color: 3, aCorner: 3, aOffset: 3, aBevel: 3, aChimney: 1 };
+    const sizes = { position: 3, normal: 3, color: 3, aCorner: 3, aOffset: 3, aBevel: 3, aChimney: 1, aRoof: 1 };
     for (const [name, size] of Object.entries(sizes)) g.setAttribute(name, new THREE.Float32BufferAttribute(this.attrs[name as keyof typeof sizes], size));
     g.setIndex(this.index);
     g.computeBoundingSphere();
@@ -240,7 +247,7 @@ const down = (): V3 => [0, -1, 0];
  * no cap and no bevel.
  */
 export function toyWallsUnit(): THREE.BufferGeometry {
-  const m = new ToyMesh(new THREE.Vector3(10, 10, 10));
+  const m = new ToyMesh(new THREE.Vector3(10, 10, 10), false);
   const { inset, plinthH } = TOY;
   m.band(ring(m, 0, 0, inset, side, PLINTH_SHADE), ring(m, 0, plinthH, inset, side, PLINTH_SHADE), true);
   // The ledge on top of the plinth, out to the body.
@@ -254,7 +261,7 @@ export function toyWallsUnit(): THREE.BufferGeometry {
  * the top. One band whose normals turn from the side to straight up, so the whole edge shades round.
  */
 export function toyFlatRoofUnit(): THREE.BufferGeometry {
-  const m = new ToyMesh(new THREE.Vector3(10, 1, 10));
+  const m = new ToyMesh(new THREE.Vector3(10, 1, 10), true);
   const { inset } = TOY;
   const top = ring(m, 0, 0, inset - LIP_INSET, up);
   m.band(ring(m, 0, -SLAB, inset, side), top, true);
@@ -271,7 +278,7 @@ export function toyFlatRoofUnit(): THREE.BufferGeometry {
  * half the length of the house.
  */
 export function toyPitchedRoofUnit(hipped: boolean): THREE.BufferGeometry {
-  const m = new ToyMesh(new THREE.Vector3(10, 3, 10));
+  const m = new ToyMesh(new THREE.Vector3(10, 3, 10), true);
   const b = TOY.roofBevel;
   const n = TOY.segments;
   const ridgeHalf = SLOPE_INSET - LIP_INSET;
@@ -292,7 +299,6 @@ export function toyPitchedRoofUnit(hipped: boolean): THREE.BufferGeometry {
     for (const cz of [1, -1]) ridge[`${sx},${cz}`] = m.v({ c: [0, 1, ridgeZ * cz], o: [sx * ridgeHalf, 0, 0], n: long(sx), unit: true });
   }
   // Long sides (±x): lip rows then the slope up to the ridge.
-  const lipTops: Record<string, number> = {};
   for (const sx of [1, -1]) {
     const rows: number[][] = [];
     for (let k = 0; k <= n; k++) {
@@ -302,8 +308,6 @@ export function toyPitchedRoofUnit(hipped: boolean): THREE.BufferGeometry {
     }
     for (let k = 0; k < n; k++) m.band(rows[k], rows[k + 1], false);
     m.poly([rows[n][0], rows[n][1], ridge[`${sx},-1`], ridge[`${sx},1`]]);
-    lipTops[`${sx},1`] = rows[n][0];
-    lipTops[`${sx},-1`] = rows[n][1];
   }
   // Ridge strip.
   m.poly([ridge['1,1'], ridge['1,-1'], ridge['-1,-1'], ridge['-1,1']]);
