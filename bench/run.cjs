@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 const budget = require('./budget.json');
 
 (async () => {
-  const url = process.argv[2] || 'http://localhost:4173/?demo&bench';
+  const url = process.argv[2] || 'http://localhost:4173/openstreetmap/?demo&bench';
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on('pageerror', (e) => console.error('pageerror:', e.message));

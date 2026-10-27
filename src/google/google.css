@@ -1,0 +1,38 @@
+/* Google version (v0.0.5). Shares the base styles of the OSM builder. */
+.g-page .topbar { gap: 12px; }
+.g-search { flex: 1; max-width: 420px; }
+.g-search input, .g-keybox input {
+  width: 100%; background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px;
+}
+.g-actions { display: flex; gap: 6px; align-items: center; }
+.g-actions button { border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 5px 10px; font-size: 13px; }
+.g-actions button.on { background: rgba(255, 122, 69, 0.25); border-color: var(--accent); }
+.g-osm { color: var(--accent); font-size: 13px; text-decoration: none; white-space: nowrap; }
+.g-main { display: flex; }
+.g-map-pane { position: relative; flex: 0 0 38%; border-right: 1px solid var(--line); }
+.g-3d-pane { position: relative; flex: 1; min-width: 0; }
+#g-map, #g-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+#g-canvas { display: block; touch-action: none; }
+.g-hint { position: absolute; left: 12px; top: 10px; padding: 4px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.45); color: #e9ecf3; }
+.g-attr { position: absolute; left: 8px; bottom: 6px; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 16px); color: #fff; font-size: 10.5px; text-shadow: 0 0 3px #000; pointer-events: none; }
+.g-attr span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-status { position: absolute; left: 50%; top: 44px; transform: translateX(-50%); max-width: min(520px, calc(100% - 24px)); padding: 10px 14px; font-size: 13px; }
+.g-status.error { border-color: #ef4444; }
+.g-info { position: absolute; right: 12px; bottom: 34px; width: min(320px, calc(100% - 24px)); padding: 12px 14px; font-size: 13px; }
+.g-info .bi-addr { display: flex; gap: 6px; margin: 8px 0 4px; padding: 7px 9px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); color: var(--text); font-size: 13px; line-height: 1.35; text-decoration: none; }
+.g-info .bi-addr::before { content: '📍'; }
+.g-info .bi-links { margin-top: 8px; }
+.g-info a { color: var(--accent); font-size: 12px; }
+.g-keybox { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: rgba(5, 6, 12, 0.7); }
+.g-keybox form { width: min(460px, calc(100% - 32px)); padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.g-keybox p { margin: 0; color: var(--muted); line-height: 1.5; }
+.g-keyrow { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.g-keyrow a { color: var(--accent); }
+.me-dot { width: 16px; height: 16px; border-radius: 50%; background: #2f7bff; border: 3px solid #fff; box-shadow: 0 0 0 0 rgba(47, 123, 255, 0.6); animation: me-pulse 1.8s infinite; }
+@keyframes me-pulse { to { box-shadow: 0 0 0 16px rgba(47, 123, 255, 0); } }
+@media (max-width: 760px) {
+  .g-main { flex-direction: column; }
+  .g-map-pane { flex: 0 0 34%; border-right: none; border-bottom: 1px solid var(--line); }
+  .g-page .brand .muted, .g-hint { display: none; }
+  .g-osm { font-size: 12px; }
+}

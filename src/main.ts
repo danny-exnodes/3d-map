@@ -12,7 +12,7 @@ import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { googleKey, setGoogleKey } from './data/googleTraffic';
 import { fetchWeather } from './services/weather';
 import { cityWorker } from './worker/client';
-import { DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
+import { APP_ROOT, DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
 import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
 import { bboxAround, MapView } from './ui/MapView';
 import { SpaceView } from './ui/SpaceView';
@@ -185,7 +185,7 @@ function resetProgress(title: string) {
 let loadAbort: AbortController | null = null;
 
 /** Height grids: bundled under public/heights/, plus an on-demand endpoint in dev or when configured (#3, #4). */
-const HEIGHTS_BASE = new URL(`${import.meta.env.BASE_URL}heights/`, location.href).href;
+const HEIGHTS_BASE = new URL('heights/', APP_ROOT).href;
 const HEIGHTS_API = (import.meta.env.VITE_HEIGHTS_API as string | undefined) || (import.meta.env.DEV ? new URL('/api/heights', location.href).href : undefined);
 
 // OSM source (#17): Overture's OSM-derived data by default, Overpass on request.
@@ -239,7 +239,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
       data = cityWorker.available ? await cityWorker.demo(b).catch(() => generateDemoCity(b)) : generateDemoCity(b);
       progress('merge', 1, `${fmt(data.buildings.length)} nhà`);
     } else if (source === 'snapshot' && snapshot) {
-      const res = await fetch(`${import.meta.env.BASE_URL}snapshots/${snapshot.id}.json`);
+      const res = await fetch(new URL(`snapshots/${snapshot.id}.json`, APP_ROOT));
       if (!res.ok) throw new Error(`snapshot ${snapshot.id}: HTTP ${res.status}`);
       data = (await res.json()) as CityData;
     } else {
@@ -299,7 +299,7 @@ $('btn-cache').addEventListener('click', async () => {
 
 // ---------- Offline packages per ward (#18) ----------
 
-const BASE_URL = new URL(import.meta.env.BASE_URL, location.href).href;
+const BASE_URL = APP_ROOT;
 let offCity: CityId = 'hcm';
 let offWard: Ward | null = null;
 let offAbort: AbortController | null = null;
@@ -943,7 +943,7 @@ async function bootPreview() {
   const select = $<HTMLSelectElement>('preview-area');
   let list: SnapshotEntry[] = [];
   try {
-    list = (await (await fetch(`${import.meta.env.BASE_URL}snapshots/index.json`)).json()) as SnapshotEntry[];
+    list = (await (await fetch(new URL('snapshots/index.json', APP_ROOT))).json()) as SnapshotEntry[];
   } catch {
     /* no snapshots bundled: demo only */
   }

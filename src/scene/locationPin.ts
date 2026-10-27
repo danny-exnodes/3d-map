@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
  * Animated "you are here" pin for the 3D view (v0.0.5): a bobbing map pin over a pulsing ring
@@ -15,33 +16,30 @@ export class LocationPin {
     this.group.name = 'location-pin';
     this.group.visible = false;
     const top = (m: THREE.Material) => Object.assign(m, { depthTest: false, depthWrite: false, transparent: true });
-    const body = top(new THREE.MeshBasicMaterial({ color }));
-    const white = top(new THREE.MeshBasicMaterial({ color: '#ffffff' }));
     this.head = new THREE.Group();
-    // Teardrop: a sphere on an inverted cone, tip at y = 0, with a white dot.
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), body);
-    ball.position.y = 2.2;
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.86, 1.9, 24, 1, true), body);
-    cone.rotation.x = Math.PI;
-    cone.position.y = 1.15;
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), white);
-    dot.position.set(0, 2.25, 0);
-    dot.scale.z = 0.3;
-    dot.position.z = 0.9;
-    this.head.add(cone, ball, dot);
-    this.head.renderOrder = 20;
-    this.head.traverse((o) => (o.renderOrder = 20));
-    for (let i = 0; i < 2; i++) {
+    // Teardrop (a sphere on an inverted cone, tip at y = 0) with a white dot, merged into one
+    // mesh with vertex colours so the pin costs a single draw call.
+    const paint = (g: THREE.BufferGeometry, hex: string) => {
+      const c = new THREE.Color(hex);
+      const n = g.attributes.position.count;
+      g.setAttribute('color', new THREE.Float32BufferAttribute(Array.from({ length: n * 3 }, (_, i) => [c.r, c.g, c.b][i % 3]), 3));
+      return g.index ? g.toNonIndexed() : g;
+    };
+    const ball = new THREE.SphereGeometry(1, 24, 16).translate(0, 2.2, 0);
+    const cone = new THREE.ConeGeometry(0.86, 1.9, 24, 1, true).rotateX(Math.PI).translate(0, 1.15, 0);
+    const dot = new THREE.SphereGeometry(0.42, 16, 12).scale(1, 1, 0.3).translate(0, 2.25, 0.9);
+    const geo = mergeGeometries([paint(ball, color), paint(cone, color), paint(dot, '#ffffff')]);
+    const headMesh = new THREE.Mesh(geo, top(new THREE.MeshBasicMaterial({ vertexColors: true })));
+    headMesh.renderOrder = 20;
+    this.head.add(headMesh);
+    for (let i = 0; i < 1; i++) {
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 48), top(new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide })));
       ring.rotation.x = -Math.PI / 2;
       ring.renderOrder = 19;
       this.rings.push(ring);
       this.group.add(ring);
     }
-    const base = new THREE.Mesh(new THREE.CircleGeometry(0.5, 24), top(new THREE.MeshBasicMaterial({ color, opacity: 0.9 })));
-    base.rotation.x = -Math.PI / 2;
-    base.renderOrder = 19;
-    this.group.add(base, this.head);
+    this.group.add(this.head);
   }
 
   set(x: number, z: number) {

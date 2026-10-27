@@ -44,7 +44,7 @@ function precacheManifest(): Plugin {
     name: 'tinymap-precache',
     apply: 'build',
     generateBundle(_, bundle) {
-      const files = ['./', ...Object.keys(bundle).filter((f) => !f.endsWith('.map'))].concat(['wards/hcm.json', 'wards/hn.json']);
+      const files = ['./', 'openstreetmap/', ...Object.keys(bundle).filter((f) => !f.endsWith('.map'))].concat(['wards/hcm.json', 'wards/hn.json']);
       this.emitFile({ type: 'asset', fileName: 'precache.json', source: JSON.stringify(files) });
     },
   };
@@ -53,5 +53,9 @@ function precacheManifest(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [heightsApi(), precacheManifest()],
-  build: { chunkSizeWarningLimit: 2000 },
+  build: {
+    chunkSizeWarningLimit: 2000,
+    // Google Photorealistic 3D at the root, the OpenStreetMap builder at /openstreetmap/ (v0.0.5).
+    rollupOptions: { input: { google: 'index.html', osm: 'openstreetmap/index.html' } },
+  },
 });

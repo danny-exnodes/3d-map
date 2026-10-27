@@ -46,10 +46,10 @@ main { flex: 1; position: relative; min-height: 0; }
 .error { color: #ff6b6b; margin-top: 8px; }
 .row { display: flex; gap: 8px; }
 
-button.ghost, button.primary, .toolbar button, .draw-tools button, .cam-tools button {
+button.ghost, a.link-btn, button.primary, .toolbar button, .draw-tools button, .cam-tools button {
   border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 6px 12px; font-size: 13px;
 }
-button.ghost:hover, .toolbar button:hover, .draw-tools button:hover, .cam-tools button:hover { background: rgba(255, 255, 255, 0.1); }
+button.ghost:hover, a.link-btn:hover, .toolbar button:hover, .draw-tools button:hover, .cam-tools button:hover { background: rgba(255, 255, 255, 0.1); }
 button.primary { background: var(--accent); border-color: transparent; color: #1b0f08; font-weight: 600; padding: 8px 18px; }
 button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
 button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); border-color: var(--accent); }
@@ -138,7 +138,7 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 /* Preview build (hosted, offline): only the 3D view with bundled snapshots. */
 .preview-only { display: none; }
 body.preview .preview-only { display: inline; }
-body.preview #btn-example, body.preview #btn-back, body.preview #btn-shot, body.preview #btn-glb, body.preview #map-view { display: none !important; }
+body.preview #btn-example, body.preview #btn-google, body.preview #btn-back, body.preview #btn-shot, body.preview #btn-glb, body.preview #map-view { display: none !important; }
 .preview-label { color: var(--muted); font-size: 12px; align-self: center; }
 .preview-select { background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font: inherit; font-size: 13px; color-scheme: dark; max-width: 52vw; }
 .opt { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; white-space: nowrap; }
@@ -216,3 +216,4 @@ main[data-layout="split"] .map-bottom { flex-wrap: wrap; }
 .space-view .maplibregl-canvas-container, .space-view .maplibregl-map { background: transparent; }
 .space-hint { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%); color: #cfd6ea; font-size: 13px; opacity: 0.8; pointer-events: none; }
 #city-view .toolbar { z-index: 5; }
+a.link-btn { color: var(--text); text-decoration: none; display: inline-flex; align-items: center; }
