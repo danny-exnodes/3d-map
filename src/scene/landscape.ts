@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { rng } from '../data/rand';
 import type { AreaFeature, CityData } from '../data/types';
 import { bboxSizeMeters, pointInRing, type LocalProjection } from '../geo/projection';
-import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { flatPolygon, merge, MeshBuilder, ribbon, sampleAlong, type XZ } from './geometry';
 import type { RoadPath } from './roads';
 import type { SpatialGrid } from './spatial';
@@ -145,14 +145,19 @@ export function buildLandscape(
   let lampBulbs: THREE.InstancedMesh | null = null;
   const lampList = lampSpots.filter(([x, , z]) => Math.abs(x) < width / 2 && Math.abs(z) < depth / 2 && !footprints.contains(x, z, 0));
   if (lampList.length) {
-    const post = new THREE.CylinderGeometry(0.2, 0.26, 6, 8).translate(0, 3, 0);
+    // Post, arm and head in one geometry; the arm points along +x and each lamp is turned towards the carriageway.
+    const post = mergeGeometries([
+      new THREE.CylinderGeometry(0.2, 0.26, 6, 6, 1, true).translate(0, 3, 0),
+      new THREE.CylinderGeometry(0.1, 0.1, 1.2, 4, 1, true).rotateZ(Math.PI / 2).translate(0.6, 6, 0),
+      new THREE.SphereGeometry(0.45, 6, 4).translate(1.2, 6, 0),
+    ])!;
     const bulb = new THREE.SphereGeometry(0.5, 12, 8);
     lamps = new THREE.InstancedMesh(post, new THREE.MeshLambertMaterial({ color: '#55585f' }), lampList.length);
     lampBulbs = new THREE.InstancedMesh(bulb, new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 2.8, 1.4), toneMapped: false }), lampList.length);
     const m = new THREE.Matrix4();
     // Spots store travel direction × side; (oz, -ox) points back towards the carriageway.
     lampList.forEach(([x, y, z, ox, oz], i) => {
-      lamps!.setMatrixAt(i, m.makeTranslation(x, y, z));
+      lamps!.setMatrixAt(i, m.makeRotationY(Math.atan2(ox, oz)).setPosition(x, y, z));
       lampBulbs!.setMatrixAt(i, m.makeTranslation(x + oz * 1.2, y + 6, z - ox * 1.2));
     });
     lamps.name = 'lamps';
@@ -228,7 +233,7 @@ function buildTrees(spots: [number, number, number][], bushes: [number, number, 
   bushes.forEach(([x, z, k], j) => {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * Math.PI * 2);
     s.set(k, k, k);
-    p.set(x, -2.6 * k + 0.4, z);
+    p.set(x, 0.4 - 1.53 * k, z);
     m.compose(p, q, s);
     crowns.setMatrixAt(spots.length + j, m);
     crowns.setColorAt(spots.length + j, greens[Math.floor(r() * greens.length)]);

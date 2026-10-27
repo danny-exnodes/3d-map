@@ -11,10 +11,12 @@ describe('toy landscape', () => {
     const { south, west, north, east } = bbox;
     const [mx, my] = [(west + east) / 2, (south + north) / 2];
     city.areas.push({ id: 'test/park', kind: 'park', polygon: [[[west, my], [mx, my], [mx, north], [west, north]]] });
-    const { group } = buildCity(city);
+    const { group, trees } = buildCity(city);
     const crowns = group.getObjectByName('crowns') as THREE.InstancedMesh;
     const trunks = group.getObjectByName('trunks') as THREE.InstancedMesh;
     expect(crowns.count).toBeGreaterThan(trunks.count);
+    expect(crowns.count).toBeLessThanOrEqual(trunks.count + 300);
+    expect(trees).toBe(trunks.count);
     expect((crowns.material as THREE.MeshLambertMaterial).flatShading).toBe(false);
     const g = crowns.geometry;
     expect((g.index ? g.index.count : g.getAttribute('position').count) / 3).toBeLessThanOrEqual(20);
