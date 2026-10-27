@@ -8,6 +8,7 @@ import { MeshBuilder, type XZ } from './geometry';
 import { PrototypeCollector } from './prototypes';
 import { buildRoof, flatCap, minAreaRect } from './roofs';
 import { SpatialGrid } from './spatial';
+import { TOY_GLSL } from './toyGeometry';
 import { toyColor } from './toyPalette';
 
 /** Integer codes of HeightSource stored in aSeed (see the "theo nguồn chiều cao" view, #3). */
@@ -199,7 +200,7 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
 
   const geom = mb.empty ? new THREE.BufferGeometry() : mb.build(true, true);
   const material = createBuildingMaterial();
-  // Same uniforms (night, selection, source view) for both; flat shading for the scaled prototypes.
+  // Same uniforms (night, selection, source view) for both; toy placement for the prototypes.
   const instanced = protos.build(createBuildingMaterial(material.userData.uniforms, true));
   const mesh = new THREE.Mesh(geom, material);
   mesh.castShadow = true;
@@ -214,13 +215,21 @@ const V = (p: XZ, y: number) => new THREE.Vector3(p[0], y, p[1]);
 /**
  * Lambert material with procedural windows: glazing by day, randomly lit
  * windows at night. Window grid is derived from world position so it needs no UVs.
+ * With `toyProto`, it places the vertices of instanced toy prototypes for each house's real
+ * size (TOY_PROTO, see toyGeometry.ts); such meshes take toyDepthMaterial() for their shadows.
  */
-export function createBuildingMaterial(shared?: BuildingUniforms, flat = false): THREE.MeshLambertMaterial {
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: flat });
+export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = false): THREE.MeshLambertMaterial {
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   // uLit: share of windows lit at the current hour (#25).
   const uniforms: BuildingUniforms = shared ?? { uNight: { value: 0 }, uSourceView: { value: 0 }, uSelected: { value: -1 }, uLit: { value: 0.35 } };
   mat.userData.uniforms = uniforms;
   mat.userData.isBuildingMaterial = true;
+  if (toyProto) {
+    mat.userData.toyProto = true;
+    mat.defines = { TOY_PROTO: '' };
+  }
+  // Never share a compiled program between the exact and the toy material.
+  mat.customProgramCacheKey = () => (toyProto ? 'buildings-toy' : 'buildings');
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
     shader.uniforms.uSourceView = uniforms.uSourceView;
@@ -236,7 +245,24 @@ export function createBuildingMaterial(shared?: BuildingUniforms, flat = false):
         varying float vSelected;
         varying vec3 vWPos;
         varying vec3 vWNormal;
-        varying float vSeed;`,
+        varying float vSeed;
+        #ifdef TOY_PROTO
+        ${TOY_GLSL}
+        #endif`,
+      )
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+        #ifdef TOY_PROTO
+          objectNormal *= toyNormalScale(toyScale());
+        #endif`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        #ifdef TOY_PROTO
+          transformed = toyTransformed();
+        #endif`,
       )
       .replace(
         '#include <project_vertex>',

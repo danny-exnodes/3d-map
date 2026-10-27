@@ -32,5 +32,6 @@ describe('prototype instancing (#22)', () => {
     const sx = Math.hypot(m[0], m[1], m[2]), sz = Math.hypot(m[8], m[9], m[10]);
     expect(Math.min(sx, sz)).toBeCloseTo(4.5, 0);
     expect(Math.max(sx, sz)).toBeCloseTo(16, 0);
+    expect(r.instanced.length).toBeLessThanOrEqual(4);
   });
 });

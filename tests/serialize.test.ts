@@ -25,6 +25,10 @@ describe('worker mesh serialization', () => {
     expect(after).toEqual(before);
     const buildings = g.getObjectByName('buildings') as THREE.Mesh;
     expect((buildings.material as THREE.Material).userData.uniforms.uNight).toBeDefined();
+    // Toy prototypes keep their shader placement and their shadow material (#32).
+    const walls = g.getObjectByName('buildings-walls') as THREE.InstancedMesh;
+    expect((walls.material as THREE.Material).userData.toyProto).toBe(true);
+    expect(walls.customDepthMaterial).toBeDefined();
     const bulbs = g.getObjectByName('lampBulbs') as THREE.InstancedMesh;
     expect((bulbs.material as THREE.MeshBasicMaterial).color.r).toBeGreaterThan(1); // HDR colour preserved
   });
