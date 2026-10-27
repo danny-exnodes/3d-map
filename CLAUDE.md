@@ -1,6 +1,6 @@
 # Tiny Map: hướng dẫn cho agent
 
-Trước khi làm gì, đọc **checkpoint mới nhất** trong `docs/releases/` (hiện là [`docs/releases/v0.0.3.md`](docs/releases/v0.0.3.md)). Sau đó xem [issue #1 (Roadmap)](https://github.com/danny-exnodes/3d-map/issues/1) trên GitHub để biết trạng thái hiện tại.
+Trước khi làm gì, đọc **checkpoint mới nhất** trong `docs/releases/` (hiện là [`docs/releases/v0.0.4.md`](docs/releases/v0.0.4.md)). Sau đó xem [issue #1 (Roadmap)](https://github.com/danny-exnodes/3d-map/issues/1) trên GitHub để biết trạng thái hiện tại.
 
 Tóm tắt:
 - Web app Vite + TypeScript + Three.js + MapLibre, chạy hoàn toàn phía client. UI tiếng Việt.

@@ -4,11 +4,12 @@ import { cacheClearUnpinned, cacheUsage } from './data/cache';
 import { type CityId, deletePackage, downloadPackage, listPackages, loadWards, packageSize, registerServiceWorker, searchWards, type Ward, wardAreaKm2 } from './data/offline';
 import { loadCity } from './data/loader';
 import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressStep } from './data/types';
-import { bboxAreaKm2 } from './geo/projection';
+import { bboxAreaKm2, pointInRing } from './geo/projection';
 import { CityScene } from './scene/CityScene';
 import type { ColorMode } from './scene/colorMode';
 import { compassLabel } from './scene/sun';
-import { searchPlaces, type Place } from './services/geocode';
+import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
+import { googleKey, setGoogleKey } from './data/googleTraffic';
 import { fetchWeather } from './services/weather';
 import { cityWorker } from './worker/client';
 import { DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
@@ -258,6 +259,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
     $('i-stats').textContent = `${fmt(km2, 2)} km² · dựng xong trong ${fmt(stats.seconds, 1)} s · ${fmt(stats.buildings)} nhà · ${fmt(stats.trees)} cây · ${data.source}`;
     renderSourceStats(data);
+    setTimeout(prepareSpace, 1500);
     $('progress').hidden = true;
     if (PREVIEW) {
       document.querySelector('.w-icon')!.textContent = '🌡️';
@@ -513,21 +515,54 @@ $('btn-space').addEventListener('click', async () => {
   if (!city?.data || spaceBusy) return;
   spaceBusy = true;
   space ??= new SpaceView($('city-view'));
-  const b = city.data.bbox;
-  const bearing = city.view.bearing;
+  const c = city;
   try {
     if (!space.open) {
       $('btn-space').classList.add('on');
-      savedView = city.saveView();
-      const up = city.skyPose;
-      await Promise.all([city.animateCamera(up.pos, up.target, 1100), new Promise((r) => setTimeout(r, 600)).then(() => space!.show((b.west + b.east) / 2, (b.south + b.north) / 2, bearing))]);
-    } else {
-      await space.hide(bearing);
-      if (savedView) await city.animateCamera(savedView.pos, savedView.target, 1300);
+      savedView = c.saveView();
+      const from = c.mapPose()!;
+      await space.show(from, (p) => c.applyMapPose(p));
+    } else if (savedView) {
+      const to = c.mapPose(savedView)!;
+      await space.hide(to, (p) => c.applyMapPose(p));
+      c.restoreView(savedView);
       $('btn-space').classList.remove('on');
     }
   } finally {
     spaceBusy = false;
+  }
+});
+/** Warms the globe up in the background once a model is on screen (#29). */
+function prepareSpace() {
+  if (!city?.data || PREVIEW) return;
+  const pose = city.mapPose();
+  if (!pose) return;
+  space ??= new SpaceView($('city-view'));
+  space.prepare(pose);
+}
+// ---------- Live traffic from Google (#11) ----------
+$('btn-gtraffic').addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (!city?.data) return;
+  let key = googleKey();
+  if (!key || (e as MouseEvent).shiftKey) {
+    key = prompt(
+      'Dán Google Maps Platform API key (bật Routes API và billing).\n' +
+        'Key chỉ lưu trong trình duyệt này. Mỗi lần lấy dữ liệu gọi tối đa 16 tuyến (khoảng 0,16 USD).\n' +
+        'Việc tuân thủ điều khoản Google Maps Platform thuộc về chủ key. Để trống để xoá key.',
+      key ?? '',
+    );
+    if (key === null) return;
+    setGoogleKey(key.trim() || null);
+    if (!key.trim()) return void ($('g-status').textContent = 'Đã xoá key.');
+  }
+  $('g-status').textContent = 'đang lấy…';
+  try {
+    const n = await city.applyGoogleTraffic(key.trim());
+    $('g-status').textContent = n ? `${fmt(n)} đoạn đường theo Google · Traffic © Google · ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` : 'Google không trả dữ liệu cho khu này.';
+    applyTime();
+  } catch (err) {
+    $('g-status').textContent = `Lỗi: ${(err as Error).message.slice(0, 120)}`;
   }
 });
 mapView.maxKm2 = MAX_KM2;
@@ -600,7 +635,7 @@ function showBuildingInfo(b: Building | null) {
     ['Nguồn chiều cao', HEIGHT_SOURCE_VI[b.heightSource]],
     ['Footprint', FOOTPRINT_VI[b.footprintSource]],
   ];
-  if (b.address) facts.push(['Địa chỉ', b.address]);
+  facts.push(['Địa chỉ', b.address ?? 'đang tìm…']);
   if (b.roof !== 'flat') facts.push(['Mái', b.roof]);
   const dl = $('bi-facts');
   dl.innerHTML = '';
@@ -626,6 +661,29 @@ function showBuildingInfo(b: Building | null) {
     link.hidden = false;
   } else link.hidden = true;
   panel.hidden = false;
+  if (!b.address) lookupAddress(b);
+}
+
+/** Fills the address row from Nominatim when the building has no addr:* tags (#28). */
+async function lookupAddress(b: Building) {
+  const ring = b.polygon[0];
+  const lon = ring.reduce((a, p) => a + p[0], 0) / ring.length;
+  const lat = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+  const cell = () => [...$('bi-facts').querySelectorAll('dt')].find((d) => d.textContent === 'Địa chỉ')?.nextElementSibling as HTMLElement | undefined;
+  try {
+    const r = await reverseGeocode(lat, lon);
+    const c = cell();
+    if (!c || $('building-info').hidden) return;
+    if (!r) c.textContent = `Chưa có địa chỉ · ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    else {
+      const exact = r.osmId === b.id || pointInRing(r.lon, r.lat, ring);
+      c.textContent = r.address + (exact ? '' : ' (gần đúng)');
+      c.title = 'Nguồn: OpenStreetMap Nominatim';
+    }
+  } catch {
+    const c = cell();
+    if (c) c.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} (không tra được địa chỉ khi offline)`;
+  }
 }
 function closeBuildingInfo() {
   $('building-info').hidden = true;

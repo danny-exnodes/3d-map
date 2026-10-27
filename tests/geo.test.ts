@@ -118,3 +118,11 @@ describe('Overture segments with ranged rules (#25)', () => {
     expect(roadsFromSegment({ class: 'primary' }, line, 's2')).toHaveLength(1);
   });
 });
+
+describe('reverse geocoding (#28)', () => {
+  it('formats a Vietnamese address from Nominatim parts', async () => {
+    const { formatAddress } = await import('../src/services/geocode');
+    expect(formatAddress({ house_number: '101', road: 'Châu Thị Hoá', quarter: 'Phường Chánh Hưng', city: 'Thành phố Hồ Chí Minh' })).toBe('101 Châu Thị Hoá, Phường Chánh Hưng, Thành phố Hồ Chí Minh');
+    expect(formatAddress({ road: 'Đường Láng', suburb: 'Phường Láng', city: 'Hà Nội', amenity: 'Trường X' })).toBe('Trường X, Đường Láng, Phường Láng, Hà Nội');
+  });
+});

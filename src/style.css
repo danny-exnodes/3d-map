@@ -199,8 +199,10 @@ main[data-layout="split"] .map-bottom { flex-wrap: wrap; }
 }
 
 /* Space view (#24) */
-.space-view { position: absolute; inset: 0; z-index: 4; opacity: 0; transition: opacity 0.45s ease; background: #02030a; }
-.space-view.on { opacity: 1; }
+.space-view { position: absolute; inset: 0; z-index: 4; opacity: 0; background: #02030a; pointer-events: none; }
+/* Interactive only once it covers the model. */
+.space-view.on { pointer-events: auto; }
+.space-view:not(.active) .space-hint { display: none; }
 .space-view .stars, .space-view .space-map { position: absolute; inset: 0; width: 100%; height: 100%; }
 .space-view .maplibregl-canvas-container, .space-view .maplibregl-map { background: transparent; }
 .space-hint { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%); color: #cfd6ea; font-size: 13px; opacity: 0.8; pointer-events: none; }

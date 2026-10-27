@@ -265,6 +265,9 @@ export function createBuildingMaterial(shared?: BuildingUniforms, flat = false):
         varying vec3 vWNormal;
         varying float vSeed;
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+        float vn(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(h21(i), h21(i + vec2(1, 0)), u.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), u.x), u.y); }
+        float fbm3(vec2 p) { return 0.5 * vn(p) + 0.3 * vn(p * 2.1 + 7.0) + 0.2 * vn(p * 4.3 + 3.0); }
         float winMask; float winLit; vec3 winColor; float winBright;`,
       )
       .replace(
@@ -310,8 +313,26 @@ export function createBuildingMaterial(shared?: BuildingUniforms, flat = false):
           }
           diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 0.75));
         }
-        // Slight darkening towards the ground for depth.
-        diffuseColor.rgb *= mix(0.82, 1.0, clamp(vWPos.y / 10.0, 0.0, 1.0));
+        // Weathering so walls and roofs read as plaster, concrete and metal rather than plastic (#28):
+        // less saturated paint, blotches, rain streaks under each floor, dark splash zone at the foot.
+        {
+          float l = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+          diffuseColor.rgb = mix(vec3(l), diffuseColor.rgb, 0.82);
+          float seedOff = fract(vSeed) * 61.0;
+          if (abs(bN.y) < 0.3) {
+            vec2 t2 = normalize(vec2(-bN.z, bN.x));
+            float u2 = dot(vWPos.xz, t2);
+            diffuseColor.rgb *= 0.88 + 0.2 * fbm3(vec2(u2, vWPos.y) * 0.35 + seedOff);
+            float fy = fract(vWPos.y / 3.3);
+            float streak = smoothstep(0.55, 0.95, vn(vec2(u2 * 1.4, floor(vWPos.y / 3.3) + seedOff))) * (1.0 - fy);
+            diffuseColor.rgb *= 1.0 - 0.16 * streak;
+            diffuseColor.rgb *= 1.0 + 0.06 * (1.0 - smoothstep(0.0, 0.06, fy));
+          } else {
+            diffuseColor.rgb *= 0.8 + 0.3 * fbm3(vWPos.xz * 0.3 + seedOff);
+          }
+          // Ambient occlusion where walls meet the ground.
+          diffuseColor.rgb *= mix(0.62, 1.0, smoothstep(0.0, 2.2, vWPos.y));
+        }
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.32, 0.08), vSelected * 0.85);`,
       )
       .replace(
