@@ -32,18 +32,22 @@ export interface WeatherPreset {
   /** Multiplier on the fog distances of the build. */
   fogScale: number;
   lightning: boolean;
-  /** How much sun and hemisphere light are taken away, 0..1 (intensity x (1 - dim)). */
+  /** How much sun light is taken away, 0..1 (intensity x (1 - dim)); shadows fade with it. */
   dim: number;
+  /** Same for the hemisphere light. */
+  hemiDim: number;
+  /** Multiplier on the tone-mapping exposure. */
+  exposure: number;
   /** How far the sky is pulled toward slate grey, 0..1. */
   grey: number;
 }
 
 const PRESETS: Record<Exclude<WeatherKind, 'auto'>, WeatherPreset> = {
-  clear: { cloud: 0, rain: 0, slant: 0, fogScale: 1, lightning: false, dim: 0, grey: 0 },
-  cloudy: { cloud: 0.85, rain: 0, slant: 0, fogScale: 0.9, lightning: false, dim: 0.15, grey: 0.25 },
-  rain: { cloud: 0.9, rain: 1, slant: 0.15, fogScale: 0.6, lightning: false, dim: 0.3, grey: 0.6 },
-  storm: { cloud: 1, rain: 2, slant: 0.5, fogScale: 0.5, lightning: true, dim: 0.5, grey: 0.9 },
-  fog: { cloud: 0.5, rain: 0, slant: 0, fogScale: 0.3, lightning: false, dim: 0.2, grey: 0.4 },
+  clear: { cloud: 0, rain: 0, slant: 0, fogScale: 1, lightning: false, dim: 0, hemiDim: 0, exposure: 1, grey: 0 },
+  cloudy: { cloud: 0.85, rain: 0, slant: 0, fogScale: 0.9, lightning: false, dim: 0.3, hemiDim: 0.1, exposure: 1, grey: 0.25 },
+  rain: { cloud: 0.9, rain: 1, slant: 0.15, fogScale: 0.6, lightning: false, dim: 0.55, hemiDim: 0.2, exposure: 0.95, grey: 0.6 },
+  storm: { cloud: 1, rain: 2, slant: 0.5, fogScale: 0.5, lightning: true, dim: 0.75, hemiDim: 0.4, exposure: 0.9, grey: 0.9 },
+  fog: { cloud: 0.5, rain: 0, slant: 0, fogScale: 0.3, lightning: false, dim: 0.2, hemiDim: 0.15, exposure: 1, grey: 0.4 },
 };
 
 export function weatherPreset(kind: Exclude<WeatherKind, 'auto'>): WeatherPreset {

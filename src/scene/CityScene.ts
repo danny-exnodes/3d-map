@@ -323,7 +323,7 @@ export class CityScene {
     const rising = isRising(date, this.proj.lat0, this.proj.lon0);
     const L = moodLighting(s, rising, this.cloud);
     this.mood = dominantMood(s, rising);
-    this.renderer.toneMappingExposure = L.exposure;
+    this.renderer.toneMappingExposure = L.exposure * this.weather.exposure;
     const ext = Math.max(this.size.width, this.size.depth);
     this.sun.position.copy(s.direction).multiplyScalar(ext * 1.5);
     this.sun.target.position.set(0, 0, 0);
@@ -337,7 +337,7 @@ export class CityScene {
       this.sun.color.set('#8fa2ff');
       this.sun.intensity = 0.55 * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25) * (1 - this.weather.dim);
     }
-    this.hemiBase = L.hemiIntensity * (1 - this.weather.dim);
+    this.hemiBase = L.hemiIntensity * (1 - this.weather.hemiDim);
     this.hemi.intensity = this.hemiBase;
     this.sunDir.copy(s.direction);
     this.night = s.night;
