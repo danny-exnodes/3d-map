@@ -279,8 +279,8 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
   }
   if (plain) defines.STYLE_PLAIN = '';
   if (toyProto || plain) mat.defines = defines;
-  // Never share a compiled program between the exact and the toy material, nor between styles.
-  mat.customProgramCacheKey = () => (toyProto ? 'buildings-toy' : 'buildings') + (plain ? `-${style}` : '');
+  // Never share a compiled program between the exact and the toy material, nor between the toy and plain looks.
+  mat.customProgramCacheKey = () => (toyProto ? 'buildings-toy' : 'buildings') + (plain ? '-plain' : '');
   const F = TOY_FACADE;
   const door = F.door;
   mat.onBeforeCompile = (shader) => {

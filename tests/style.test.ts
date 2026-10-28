@@ -5,6 +5,7 @@ import { buildCity } from '../src/scene/buildCity';
 import { createBuildingMaterial } from '../src/scene/buildings';
 import { deserializeObjects, serializeObject } from '../src/scene/serialize';
 import { parseStyle, STYLE_LABEL, STYLES, toyParamsFor } from '../src/scene/style';
+import { TOY_ROAD } from '../src/scene/toyPalette';
 import { bakeToyInstance, bakeToyInstances, TOY, toyDepthMaterial, toyFlatRoofUnit, toyPitchedRoofUnit, toyWallsUnit } from '../src/scene/toyGeometry';
 
 const m = (w: number, h: number, l: number, y = 0) => new THREE.Matrix4().compose(new THREE.Vector3(0, y, 0), new THREE.Quaternion(), new THREE.Vector3(w, h, l));
@@ -118,6 +119,26 @@ describe('Khối build', () => {
     expect(toy.shader.vertexShader).toContain(`- ${TOY.inset.toFixed(4)}, 0.0, ${TOY.radius.toFixed(4)})`);
     expect(block.mat.customProgramCacheKey()).not.toBe(toy.mat.customProgramCacheKey());
     expect(compiled(false, 'block').mat.customProgramCacheKey()).not.toBe(compiled(false, 'toy').mat.customProgramCacheKey());
+    // Siêu thực is drawn as Khối until it gets its own materials: no extra programs.
+    expect(createBuildingMaterial(undefined, true, 'real').customProgramCacheKey()).toBe(block.mat.customProgramCacheKey());
+  });
+
+  it('paints Khối roads grey asphalt and leaves the toy roads as they were', () => {
+    const bbox = { south: 20.9992, west: 105.8152, north: 21.0068, east: 105.8238 };
+    const roadColours = (style?: 'toy' | 'block') => {
+      const g = (style ? buildCity(generateDemoCity(bbox), () => {}, style) : buildCity(generateDemoCity(bbox))).group.getObjectByName('roads')!;
+      const out = new Set<string>();
+      g.traverse((o) => {
+        const c = (o as THREE.Mesh).geometry?.getAttribute('color');
+        if (c) for (let i = 0; i < c.count; i += 7) out.add(new THREE.Color(c.getX(i), c.getY(i), c.getZ(i)).getHexString());
+      });
+      return out;
+    };
+    const block = roadColours('block');
+    expect(block.has(new THREE.Color('#50545c').getHexString())).toBe(true);
+    expect(block.has(new THREE.Color(TOY_ROAD).getHexString())).toBe(false);
+    expect(roadColours('toy')).toEqual(roadColours());
+    expect(roadColours('toy').has(new THREE.Color(TOY_ROAD).getHexString())).toBe(true);
   });
 
   it('keeps the style across the worker boundary, shadows included', () => {

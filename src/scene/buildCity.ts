@@ -23,7 +23,8 @@ export function buildCity(input: CityData, onProgress: (f: number, detail: strin
   const proj = new LocalProjection(data.bbox);
   const group = new THREE.Group();
   onProgress(0.05, 'Đường & cầu');
-  const roads = buildRoads(data.roads, data.rails, proj);
+  const pastel = toyParamsFor(style).pastel;
+  const roads = buildRoads(data.roads, data.rails, proj, pastel);
   group.add(roads.group);
   onProgress(0.3, 'Nhà cửa');
   const b = buildBuildings(data.buildings, proj, {
@@ -33,7 +34,7 @@ export function buildCity(input: CityData, onProgress: (f: number, detail: strin
   });
   group.add(b.mesh, ...b.instanced, b.details);
   onProgress(0.7, 'Cây, sông, đèn đường');
-  const land = buildLandscape(data, proj, roads.paths, b.footprints, roads.lampSpots, toyParamsFor(style).pastel);
+  const land = buildLandscape(data, proj, roads.paths, b.footprints, roads.lampSpots, pastel);
   group.add(land.group);
   return { group, paths: roads.paths, railPaths: roads.railPaths, buildings: b.count, trees: land.treeCount, buildingIds: b.ids };
 }

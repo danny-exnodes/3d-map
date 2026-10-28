@@ -298,9 +298,9 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     busy = false;
     $('btn-build').textContent = 'Dựng 3D';
     onBBox(mapView.bbox);
+    // The style was changed while building (or loading, aborted or not).
+    applyStyleIfShown();
   }
-  // The style was changed while building.
-  if (city?.data && city.style !== style) void rebuildInStyle();
 }
 
 $('btn-build').addEventListener('click', () => build('osm'));
@@ -472,6 +472,7 @@ function setLayout(l: Layout) {
   }
   if (l === 'map') playing = false;
   highlightMood();
+  applyStyleIfShown();
 }
 function showCity() {
   // The preview build has no map pane.
@@ -889,7 +890,15 @@ function setStyle(s: Style) {
     /* storage blocked */
   }
   showStyle();
-  if (city?.data && city.style !== s) void rebuildInStyle();
+  applyStyleIfShown();
+}
+
+/**
+ * Rebuilds when the 3D view shows a model in another style than the chosen one. While the 3D view is
+ * hidden the choice is only remembered: it applies to the next build, or when the 3D view is shown again.
+ */
+function applyStyleIfShown() {
+  if (city?.data && !$('city-view').hidden && city.style !== style) void rebuildInStyle();
 }
 
 /** Builds the model again from the data already loaded, keeping camera, time, mood and weather. */
@@ -897,24 +906,32 @@ async function rebuildInStyle() {
   const c = city;
   if (!c?.data || busy) return;
   busy = true;
-  const btn = $<HTMLButtonElement>('btn-style');
-  btn.disabled = true;
+  const buttons = ['btn-style', 'btn-build', 'btn-demo'].map((id) => $<HTMLButtonElement>(id));
+  for (const b of buttons) b.disabled = true;
   closeBuildingInfo();
   const view = c.saveView();
+  let ok = false;
   try {
     await c.build(c.data, () => {}, style);
     c.restoreView(view);
     c.setTrafficOverlay(trafficOn);
     applyWeather();
     applyTime();
+    ok = true;
   } catch (e) {
+    // The scene was cleared: say so, as a failed build does.
     console.error(e);
+    resetProgress('Đổi kiểu mô hình');
+    showMap();
+    $('p-error').hidden = false;
+    $('p-error').textContent = `Không dựng lại được mô hình: ${(e as Error).message}. Thử lại, hoặc bấm “Dựng 3D”.`;
   } finally {
     busy = false;
-    btn.disabled = false;
+    for (const b of buttons) b.disabled = false;
+    onBBox(mapView.bbox);
   }
   // Picked again while building.
-  if (c.style !== style) void rebuildInStyle();
+  if (ok) applyStyleIfShown();
 }
 
 document.querySelectorAll<HTMLButtonElement>('#style-picker button').forEach((b) => b.addEventListener('click', () => setStyle(b.dataset.style as Style)));

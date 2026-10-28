@@ -197,7 +197,7 @@ export class CityScene {
     this.tiltBase = { h: 2 / w, v: 2 / h };
   }
 
-  /** The style of the model on screen (the last build's). */
+  /** The style of the model on screen (the last successful build's). */
   get style(): Style {
     return this.builtStyle;
   }
@@ -208,7 +208,6 @@ export class CityScene {
     this.clear();
     this.mainThreadSlices = {};
     this.data = data;
-    this.builtStyle = style;
     const pastel = toyParamsFor(style).pastel;
     const proj = (this.proj = new LocalProjection(data.bbox));
     this.size = bboxSizeMeters(data.bbox);
@@ -294,6 +293,7 @@ export class CityScene {
     this.resetView();
 
     onProgress('build', 1, 'Xong');
+    this.builtStyle = style;
     return {
       buildings: built.buildings,
       trees: built.trees,
