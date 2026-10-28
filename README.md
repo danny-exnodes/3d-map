@@ -34,14 +34,18 @@
 - **Bấm vào một nhà** để xem tên, loại, số tầng, chiều cao, nguồn dữ liệu, kèm link sửa hoặc vẽ thêm trên OpenStreetMap.
 
 **Hiển thị**
-- Một phong cách duy nhất: **đồ chơi** (toy, #32). Nhà bo tròn, mập mạp trong bảng màu pastel, cửa sổ tròn có khung, cây tròn phình, bụi cây ở công viên, đèn đường có đầu tròn, xe màu kẹo, bóng đổ mềm và viền mờ kiểu tilt-shift ở mép khung hình. Phong cách này thay cho ba chế độ cũ Có màu / Đơn sắc / Siêu thực (#7, #19).
+- Ba **phong cách**, đổi bằng nút trên thanh 3D (hoặc chọn trước khi dựng, hoặc `?style=toy|block|real`): **Đồ chơi** (mặc định), **Khối** (khối màu thật của nhà, góc vuông) và **Siêu thực** (vật liệu PBR, trời khí quyển, đường ướt khi mưa; nặng hơn). Đổi phong cách dựng lại từ dữ liệu đã tải, không gọi mạng.
+- **Đồ chơi** (toy, #32): nhà bo tròn, mập mạp trong bảng màu pastel, cửa sổ tròn có khung, cây tròn phình, bụi cây ở công viên, đèn đường có đầu tròn, xe màu kẹo, bóng đổ mềm và viền mờ kiểu tilt-shift ở mép khung hình. Chế độ Đơn sắc cũ không quay lại.
 - Bốn **tâm trạng** gắn với vòng ngày/đêm, pha trộn mượt theo vị trí mặt trời: **Buổi sáng** (trong, mát), **Nắng trưa** (ấm, trời xanh nhạt), **Hoàng hôn** (nắng cam thấp, bóng dài), **Đêm ấm** (trời tím, cửa sổ và đèn sáng ấm).
   - Trước khi dựng có bốn thẻ chọn tâm trạng phía trên nút **Dựng 3D**. Trang vẫn mở ở giờ thật của khu vực, thẻ của tâm trạng đang diễn ra được tô sáng. Bấm một thẻ thì đồng hồ nhảy tới giờ hợp với tâm trạng đó, và thành phố được dựng trong ánh sáng ấy.
   - Sau khi dựng, bốn lựa chọn này nằm ở thanh công cụ 3D (thay cho nút Có màu). Thanh thời gian vẫn kéo tự do; thẻ tô sáng chạy theo tâm trạng mạnh nhất.
 - Chế độ pixel.
 - Thanh thời gian 24h + chọn ngày. Mặt trời đặt đúng vị trí thiên văn theo toạ độ. Ban đêm có ánh trăng, cửa sổ và đèn xe sáng, bloom.
 - **Giao thông (mô phỏng)**: xe máy, ô tô, xe buýt chạy theo làn bên phải, mật độ đổi theo giờ cao điểm. Lớp 🚦 tô màu tốc độ. Có tàu chạy trên ray.
-- **Thời tiết thực** từ Open‑Meteo: nhiệt độ, mây, mưa.
+- **Bầu trời**: vòm trời gradient theo tâm trạng, quầng sáng mặt trời, sao ban đêm và mây low-poly trôi quanh mô hình (số mây theo độ phủ mây). Mây ở gần camera tự mờ đi.
+- **Thời tiết**: nút trên thanh 3D chọn **Tự động** (thời tiết thực từ Open‑Meteo: nhiệt độ, mây, mưa), **Nắng**, **Nhiều mây**, **Mưa**, **Dông** (mưa nặng, chớp), **Sương mù**; hoặc `?weather=auto|clear|cloudy|rain|storm|fog`. Lựa chọn được lưu.
+- **Tàu thuyền**: thuyền nhỏ, thuyền đạp thiên nga và sà lan chạy trên sông, kênh, hồ, không ra khỏi mặt nước.
+- **Máy bay thật**: nút ✈ hiện máy bay đang bay quanh khu vực (dữ liệu adsb.fi, 15 giây một lần), có nhãn callsign, bấm để xem loại, độ cao, tốc độ. Vị trí trên màn hình **bị nén** cho vừa mô hình (không phải vị trí thật). Cần một relay CORS: `npm run dev` có sẵn, còn trang đã đăng cần triển khai Cloudflare Worker ([`proxy/README.md`](proxy/README.md)) rồi đặt `DEFAULT_FLIGHTS_RELAY` trong `src/data/flights.ts`, hoặc dùng `?flights=<url>`. Không có relay thì không có máy bay.
 
 **Hiệu năng**
 - Dữ liệu tải và mô hình dựng trong Web Worker, main thread không bị đơ.
@@ -50,8 +54,13 @@
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
 
+**Mới trong v0.0.7**
+- Nút phong cách trở lại: Đồ chơi, Khối, Siêu thực (`?style=`).
+- Bầu trời, mây, chọn thời tiết (`?weather=`), tàu thuyền và máy bay thật qua relay (`?flights=`).
+- Bóng đèn đêm nhẹ hơn, ca xấu nhất 17:30 còn khoảng 569k tam giác.
+
 **Mới trong v0.0.6**
-- Phong cách đồ chơi duy nhất cho bản OSM, bốn tâm trạng theo vòng ngày/đêm và thẻ chọn tâm trạng trước khi dựng. Các chế độ Có màu / Đơn sắc / Siêu thực và tham số `?style=` đã bỏ.
+- Phong cách đồ chơi cho bản OSM, bốn tâm trạng theo vòng ngày/đêm và thẻ chọn tâm trạng trước khi dựng (các chế độ cũ khi đó bị bỏ; Khối và Siêu thực quay lại ở v0.0.7).
 - Ngân sách tam giác của benchmark nâng lên 500k.
 
 **Mới trong v0.0.5**
@@ -192,11 +201,18 @@ src/
   scene/toyGeometry.ts    # nhà bo tròn (đặt đỉnh theo footprint), bake cho xuất GLB
   scene/moods.ts          # bốn tâm trạng pha trộn theo mặt trời, giờ cho từng thẻ
   scene/tiltShift.ts      # viền mờ tilt-shift theo góc nhìn
+  scene/style.ts          # ba phong cách Đồ chơi / Khối / Siêu thực
+  scene/sky.ts            # vòm trời và mây
+  scene/weather.ts        # sáu kiểu thời tiết, chớp
+  scene/boats.ts          # tàu thuyền trên nước
+  scene/aircraft.ts       # máy bay thật (nén vị trí, nhãn, bấm chọn)
+  data/flights.ts         # adsb.fi qua relay
   scene/prototypes.ts     # nhà mẫu dùng chung (instancing)
   scene/trafficModel.ts   # mô hình lưu lượng, tỉ lệ phương tiện
   scene/nightLights.ts    # tỉ lệ cửa sổ sáng, vũng đèn đường
   ui/SpaceView.ts         # Space view (globe)
   scene/roads.ts …        # đường, cầu, ray; landscape.ts; traffic.ts; sun.ts
+proxy/                    # relay máy bay (Cloudflare Worker)
 tools/
   gob-heights.mjs         # CLI trích lưới chiều cao
   height-tiles.mjs        # ô chiều cao z14 cho các phường (CI)
@@ -209,6 +225,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.7](docs/releases/v0.0.7.md) (2026-10-28): nút phong cách (Đồ chơi / Khối / Siêu thực), bầu trời và mây, chọn thời tiết, tàu thuyền, máy bay thật qua relay.
 - [v0.0.6](docs/releases/v0.0.6.md) (2026-10-27): phong cách đồ chơi duy nhất (nhà bo tròn, pastel), bốn tâm trạng và thẻ chọn trước khi dựng; bỏ Có màu / Đơn sắc / Siêu thực.
 - [v0.0.5](docs/releases/v0.0.5.md) (2026-10-27): bản Google 3D ở `/`, bản OSM ở `/openstreetmap/`; hết nhà chồng lấn, bó vỉa, xe vào ở nút giao, chọn vùng, ghim vị trí.
 - [v0.0.4](docs/releases/v0.0.4.md) (2026-10-27): địa chỉ toà nhà, vật liệu bớt nhựa, xe thật hơn, giao thông Google, Space view liền mạch.
