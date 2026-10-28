@@ -870,8 +870,9 @@ function storedStyle(): Style | null {
     return null;
   }
 }
-/** `?style=` wins over storage; the bench always measures Đồ chơi. */
-let style: Style = BENCH ? 'toy' : (parseStyle(new URLSearchParams(location.search).get('style')) ?? storedStyle() ?? 'toy');
+/** `?style=` wins over storage; the bench measures Đồ chơi unless `?style=` asks for another. */
+const urlStyle = parseStyle(new URLSearchParams(location.search).get('style'));
+let style: Style = urlStyle ?? (BENCH ? 'toy' : storedStyle()) ?? 'toy';
 
 function showStyle() {
   document.querySelectorAll<HTMLButtonElement>('#style-picker button').forEach((b) => {

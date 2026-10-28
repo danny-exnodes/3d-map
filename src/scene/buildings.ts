@@ -288,64 +288,7 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
     shader.uniforms.uSourceView = uniforms.uSourceView;
     shader.uniforms.uSelected = uniforms.uSelected;
     shader.uniforms.uLit = uniforms.uLit;
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-        attribute float aSeed;
-        attribute float aBid;
-        uniform float uSelected;
-        varying float vSelected;
-        varying vec3 vWPos;
-        varying vec3 vWNormal;
-        // Flat: interpolating a per-building constant adds noise that speckles the window hashes.
-        flat varying float vSeed;
-        varying float vRoof;
-        #ifdef TOY_PROTO
-        ${toyGlsl(toyParamsFor(style))}
-        attribute float aFront;
-        ${TOY_FACADE_VARYINGS}
-        #endif`,
-      )
-      .replace(
-        '#include <beginnormal_vertex>',
-        `#include <beginnormal_vertex>
-        #ifdef TOY_PROTO
-          objectNormal *= toyNormalScale(toyScale());
-        #endif`,
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        #ifdef TOY_PROTO
-          transformed = toyTransformed();
-          vToyLocal = transformed * toyScale();
-        #endif`,
-      )
-      .replace(
-        '#include <project_vertex>',
-        `#include <project_vertex>
-        {
-          vec4 bp = vec4(transformed, 1.0);
-          vec3 bn = objectNormal;
-          #ifdef USE_INSTANCING
-            bp = instanceMatrix * bp;
-            bn = mat3(instanceMatrix) * bn;
-          #endif
-          vWPos = (modelMatrix * bp).xyz;
-          vWNormal = normalize(mat3(modelMatrix) * bn);
-        }
-        vSeed = aSeed;
-        // Toy roof units never get windows; the exact mesh has no aRoof attribute.
-        #ifdef TOY_PROTO
-          vRoof = aRoof;
-          vToyDir = aBevel.xy;
-          vToyFace = vec4(toyFlatWidths(toyScale()), toyScale().y, aFront);
-        #else
-          vRoof = 0.0;
-        #endif
-        vSelected = abs(aBid - uSelected) < 0.5 ? 1.0 : 0.0;`,
-      );
+    shader.vertexShader = buildingVertexShader(shader.vertexShader, style);
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
@@ -506,6 +449,72 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
       );
   };
   return mat;
+}
+
+/**
+ * Vertex side of the building materials, shared with the Siêu thực material (realistic.ts): world
+ * position and normal, seed, roof flag and selection for the fragment shader, and, under TOY_PROTO,
+ * the placement of instanced prototype vertices for each house's real size.
+ */
+export function buildingVertexShader(vertexShader: string, style: Style): string {
+  return vertexShader
+    .replace(
+      '#include <common>',
+      `#include <common>
+      attribute float aSeed;
+      attribute float aBid;
+      uniform float uSelected;
+      varying float vSelected;
+      varying vec3 vWPos;
+      varying vec3 vWNormal;
+      // Flat: interpolating a per-building constant adds noise that speckles the window hashes.
+      flat varying float vSeed;
+      varying float vRoof;
+      #ifdef TOY_PROTO
+      ${toyGlsl(toyParamsFor(style))}
+      attribute float aFront;
+      ${TOY_FACADE_VARYINGS}
+      #endif`,
+    )
+    .replace(
+      '#include <beginnormal_vertex>',
+      `#include <beginnormal_vertex>
+      #ifdef TOY_PROTO
+        objectNormal *= toyNormalScale(toyScale());
+      #endif`,
+    )
+    .replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      #ifdef TOY_PROTO
+        transformed = toyTransformed();
+        vToyLocal = transformed * toyScale();
+      #endif`,
+    )
+    .replace(
+      '#include <project_vertex>',
+      `#include <project_vertex>
+      {
+        vec4 bp = vec4(transformed, 1.0);
+        vec3 bn = objectNormal;
+        #ifdef USE_INSTANCING
+          bp = instanceMatrix * bp;
+          bn = mat3(instanceMatrix) * bn;
+        #endif
+        vWPos = (modelMatrix * bp).xyz;
+        vWNormal = normalize(mat3(modelMatrix) * bn);
+      }
+      vSeed = aSeed;
+      // Toy roof units never get windows; the exact mesh has no aRoof attribute.
+      #ifdef TOY_PROTO
+        vRoof = aRoof;
+        vToyDir = aBevel.xy;
+        vToyFace = vec4(toyFlatWidths(toyScale()), toyScale().y, aFront);
+      #else
+        vRoof = 0.0;
+      #endif
+      vSelected = abs(aBid - uSelected) < 0.5 ? 1.0 : 0.0;`,
+    );
 }
 
 /** Varyings of the toy facade: local position (m), plan direction of the vertex (aBevel.xy) and, per house, the flat widths of the ends and sides, the wall height and aFront. */

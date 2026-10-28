@@ -3,6 +3,7 @@ import { LocationPin } from './locationPin';
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -20,6 +21,7 @@ import { armLightning, idleLightning, isFlashing, type LightningState, nextLight
 import { dominantMood, isRising, moodLighting, type Mood } from './moods';
 import { sunState, type SunState } from './sun';
 import { CloudLayer, SkyDome } from './sky';
+import { Realism, realUniforms, wetness } from './realistic';
 import { type Style, toyParamsFor } from './style';
 import { bakeToyInstances } from './toyGeometry';
 import { tiltShiftStrength } from './tiltShift';
@@ -46,6 +48,13 @@ export class CityScene {
   readonly controls: MapControls;
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
+  /** Ambient occlusion, only in Siêu thực (#19). */
+  private gtao: GTAOPass;
+  private realism: Realism;
+  /** The mood lighting of the last setTime, for the Siêu thực sky and environment light. */
+  private light: ReturnType<typeof moodLighting> | null = null;
+  /** Where uWet is heading (wetness of the weather's rain). */
+  private wet = 0;
   private sunDir = new THREE.Vector3(0, 1, 0);
   private night = 0;
   private lightDirty = false;
@@ -162,6 +171,12 @@ export class CityScene {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.gtao = new GTAOPass(this.scene, this.camera, 512, 512);
+    this.gtao.updateGtaoMaterial({ radius: 6, distanceExponent: 1.5, thickness: 4, scale: 1.2, samples: 12 });
+    this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6 });
+    this.gtao.blendIntensity = 0.9;
+    this.gtao.enabled = false;
+    this.composer.addPass(this.gtao);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.2, 0.5, 0.92);
     this.composer.addPass(this.bloom);
     this.tiltH = new ShaderPass(HorizontalTiltShiftShader);
@@ -170,6 +185,8 @@ export class CityScene {
     this.composer.addPass(this.tiltH);
     this.composer.addPass(this.tiltV);
     this.composer.addPass(new OutputPass());
+    this.realism = new Realism(this.renderer);
+    this.scene.add(this.realism.sky);
 
     new ResizeObserver(() => this.resize()).observe(container);
     // Click (not drag) on the model picks a building.
@@ -195,6 +212,11 @@ export class CityScene {
     this.composer.setPixelRatio(pr);
     this.composer.setSize(w, h);
     this.tiltBase = { h: 2 / w, v: 2 / h };
+  }
+
+  /** Ambient occlusion is the most expensive part of Siêu thực; drop it on slow devices. */
+  private adaptRealism() {
+    if (this.builtStyle === 'real' && this.fps < 30 && this.gtao.enabled && this.pixelRatio <= 1) this.gtao.enabled = false;
   }
 
   /** The style of the model on screen (the last successful build's). */
@@ -291,6 +313,15 @@ export class CityScene {
     this.controls.maxDistance = ext * 3;
     this.controls.minDistance = 20;
     this.resetView();
+    // Siêu thực is the Khối model with realistic materials, under three's sky instead of the dome.
+    const real = style === 'real';
+    if (real) this.realism.apply(this.city, this.traffic.group);
+    this.dome.mesh.visible = !real;
+    this.gtao.enabled = real;
+    if (!real) {
+      this.realism.sky.visible = false;
+      this.scene.environment = null;
+    }
 
     onProgress('build', 1, 'Xong');
     this.builtStyle = style;
@@ -312,6 +343,7 @@ export class CityScene {
         if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
         else mat?.dispose();
       });
+    this.realism.reset();
     dispose(this.city);
     this.city.clear();
     this.buildingsMesh = null;
@@ -344,7 +376,9 @@ export class CityScene {
     this.lastTime = { date, hour: localHour };
     const s = (this.sunInfo = sunState(date, this.proj.lat0, this.proj.lon0));
     const rising = isRising(date, this.proj.lat0, this.proj.lon0);
-    const L = moodLighting(s, rising, this.cloud);
+    const L = (this.light = moodLighting(s, rising, this.cloud));
+    // Siêu thực gets its ambient light from the sky (environment map), so the other lights are dimmer.
+    const real = this.builtStyle === 'real';
     this.mood = dominantMood(s, rising);
     this.renderer.toneMappingExposure = L.exposure * this.weather.exposure;
     const ext = Math.max(this.size.width, this.size.depth);
@@ -358,9 +392,9 @@ export class CityScene {
       // It fades in from zero as the sun sinks, so the switch of light direction is invisible (#22).
       this.sun.position.set(-0.4, 0.8, -0.45).normalize().multiplyScalar(ext * 1.5);
       this.sun.color.set('#8fa2ff');
-      this.sun.intensity = 0.55 * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25) * (1 - this.weather.dim);
+      this.sun.intensity = (real ? 0.3 : 0.55) * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25) * (1 - this.weather.dim);
     }
-    this.hemiBase = L.hemiIntensity * (1 - this.weather.hemiDim);
+    this.hemiBase = L.hemiIntensity * (1 - this.weather.hemiDim) * (real ? 0.15 : 1);
     this.hemi.intensity = this.hemiBase;
     this.sunDir.copy(s.direction);
     this.night = s.night;
@@ -380,7 +414,7 @@ export class CityScene {
     if (this.lampBulbs) this.lampBulbs.visible = s.night > 0.35;
     if (this.lampPools) {
       this.lampPools.visible = s.night > 0.3;
-      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * 0.45;
+      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * (real ? 0.75 : 0.45);
     }
     if (this.buildingUniforms) this.buildingUniforms.uLit.value = litShare(localHour);
     this.traffic?.setHour(localHour);
@@ -395,10 +429,10 @@ export class CityScene {
     this.dome.update(this.lastSky, this.sunDir, this.night, this.camera.position);
   }
 
-  /** Warm sodium glow on streets after dark. */
+  /** Warm sodium glow on streets after dark (dimmer in Siêu thực, which has less ambient light). */
   private applyStreetGlow() {
     // Lamp pools carry most of the street light now; keep only a faint overall tint.
-    const k = this.night * 0.35;
+    const k = this.night * (this.builtStyle === 'real' ? 0.1 : 0.35);
     this.city.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
       if (!Array.isArray(m) && m?.userData?.streetGlow) m.emissive.setRGB(0.32, 0.17, 0.06).multiplyScalar(k * m.userData.streetGlow);
@@ -439,6 +473,7 @@ export class CityScene {
   /** Apply a weather look: clouds, rain, fog distance, light dimming, lightning. */
   setWeather(p: WeatherPreset) {
     this.weather = p;
+    this.wet = wetness(p.rain);
     this.setCloud(p.cloud);
     this.setRain(p.rain);
     const fog = this.scene.fog as THREE.Fog;
@@ -696,6 +731,12 @@ export class CityScene {
       this.lightDirty = false;
       this.lastLightUpdate = now;
       this.renderer.shadowMap.needsUpdate = true;
+      if (this.builtStyle === 'real' && this.light) this.realism.update(this.scene, this.sunDir, this.night, this.cloud, this.light, this.lastSky, this.weather.grey);
+    }
+    if (this.builtStyle === 'real') {
+      realUniforms.uTime.value = this.timer.getElapsed();
+      realUniforms.uWet.value += (this.wet - realUniforms.uWet.value) * Math.min(1, dt * 0.5);
+      this.realism.sky.position.copy(this.camera.position);
     }
     if (this.details.length) {
       const near = this.camera.position.distanceTo(this.controls.target) < 700;
@@ -740,6 +781,7 @@ export class CityScene {
     this.fps = (w.frames * 1000) / (now - w.start);
     w.start = now;
     w.frames = 0;
+    this.adaptRealism();
     if (this.pixelMode || !this.data) return;
     if (this.fps < 40 && this.pixelRatio > 1) {
       this.pixelRatio = Math.max(1, this.pixelRatio - 0.25);
@@ -777,8 +819,10 @@ export class CityScene {
   dispose() {
     cancelAnimationFrame(this.raf);
     this.clear();
-    this.scene.remove(this.dome.mesh);
+    this.scene.remove(this.dome.mesh, this.realism.sky);
     this.dome.dispose();
+    this.realism.dispose();
+    this.gtao.dispose();
     this.renderer.dispose();
   }
 }
