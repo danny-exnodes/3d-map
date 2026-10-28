@@ -105,7 +105,7 @@ export class CityScene {
   private viewOff = new THREE.Vector3();
   private mood: Mood = 'noon';
   private lastSky = new THREE.Color('#9fd3f2');
-  private dome = new SkyDome();
+  private dome = new SkyDome(this.lastSky);
   private white = new THREE.Color('#ffffff');
   private cloudLight = new THREE.Color('#ffffff');
   private clouds: CloudLayer | null = null;

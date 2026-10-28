@@ -14,6 +14,13 @@ describe('sky', () => {
     }
   });
 
+  it('a golden horizon gets a bluish zenith, not a green one', () => {
+    const { top } = skyGradient(new THREE.Color('#f8cfab'), 0);
+    const h = top.getHSL({ h: 0, s: 0, l: 0 }).h;
+    expect(h < 0.2 || h > 0.45).toBe(true);
+    expect(h).toBeGreaterThan(0.45);
+  });
+
   it('cloudCount maps cover to a monotonic integer count', () => {
     expect(cloudCount(0)).toBe(0);
     expect(cloudCount(1)).toBe(48);

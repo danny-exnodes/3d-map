@@ -4,14 +4,13 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 const MAX_CLOUDS = 48;
 const DOME_RADIUS = 9000;
 
-/** Horizon stays the mood colour (fog blends into it); the zenith is a deeper, bluer tint of it. */
+const ZENITH_DAY = new THREE.Color('#3f7fe0');
+const ZENITH_NIGHT = new THREE.Color('#04061a');
+
+/** Horizon stays the mood colour (fog blends into it); the zenith is the horizon pulled towards blue (RGB, so warm horizons never turn green). */
 export function skyGradient(horizon: THREE.Color, night: number): { top: THREE.Color; horizon: THREE.Color } {
-  const hsl = horizon.getHSL({ h: 0, s: 0, l: 0 });
-  const top = new THREE.Color().setHSL(
-    hsl.h + (0.62 - hsl.h) * 0.35,
-    Math.min(1, hsl.s * 1.15 + 0.05 * (1 - night)),
-    hsl.l * (0.78 - 0.3 * night),
-  );
+  const target = ZENITH_DAY.clone().lerp(ZENITH_NIGHT, night);
+  const top = horizon.clone().lerp(target, 0.78 - 0.18 * night);
   return { top, horizon: horizon.clone() };
 }
 
@@ -41,7 +40,7 @@ float hash(vec3 p) {
 void main() {
   vec3 d = normalize(vDir);
   float e = max(d.y, 0.0);
-  vec3 col = mix(uHorizon, uTop, smoothstep(0.0, 1.0, pow(e, 0.55)));
+  vec3 col = mix(uHorizon, uTop, smoothstep(0.0, 1.0, pow(e, 0.35)));
   float s = max(dot(d, normalize(uSunDir)), 0.0);
   float glow = (pow(s, 6.0) * 0.18 + pow(s, 90.0) * 0.5) * (1.0 - uNight);
   col += mix(uHorizon, vec3(1.0, 0.95, 0.85), 0.5) * glow;
@@ -61,7 +60,9 @@ export class SkyDome {
     uNight: { value: 0 },
   };
 
-  constructor() {
+  constructor(horizon = new THREE.Color('#9fd3f2')) {
+    this.uniforms.uHorizon.value.copy(horizon);
+    this.uniforms.uTop.value.copy(skyGradient(horizon, 0).top);
     const mat = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
       vertexShader: VERT,
@@ -102,7 +103,8 @@ export class CloudLayer {
   private readonly q = new THREE.Quaternion();
 
   constructor(extent: number) {
-    this.span = extent * 3;
+    this.span = extent * 4;
+    const k = Math.min(2.5, Math.max(0.7, extent / 800));
     let seed = 12345;
     const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
     const puffs: THREE.BufferGeometry[] = [];
@@ -113,16 +115,22 @@ export class CloudLayer {
     }
     const geo = mergeGeometries(puffs)!;
     puffs.forEach((g) => g.dispose());
-    const mat = new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true, fog: false });
+    const mat = new THREE.MeshLambertMaterial({ color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 0.4, flatShading: true, fog: false });
     this.mesh = new THREE.InstancedMesh(geo, mat, MAX_CLOUDS);
     this.mesh.name = 'clouds';
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = false;
     for (let i = 0; i < MAX_CLOUDS; i++) {
-      this.pos.push(new THREE.Vector3((rnd() * 2 - 1) * this.span, 250 + rnd() * 200, (rnd() * 2 - 1) * this.span));
-      const s = 45 + rnd() * 55;
-      this.scl.push(new THREE.Vector3(s, s * 0.45, s * 0.8));
+      // A ring from 1.2x to 4x the extent; every twelfth cloud floats over the back half of the model
+      // (away from the default camera, which sits front-right), so it shows in top-down views without
+      // blocking the usual one.
+      const over = i % 12 === 0;
+      const a = over ? Math.PI * (1 + rnd() * 0.5) : rnd() * Math.PI * 2;
+      const r = (over ? 0.1 + rnd() * 0.8 : 1.2 + rnd() * 2.8) * extent;
+      this.pos.push(new THREE.Vector3(Math.cos(a) * r, (120 + rnd() * 140) * k, Math.sin(a) * r));
+      const s = (110 + rnd() * 120) * k * (over ? 0.6 : 1);
+      this.scl.push(new THREE.Vector3(s, s * 0.4, s * 0.75));
     }
     this.setCover(0);
   }
@@ -134,7 +142,9 @@ export class CloudLayer {
   }
 
   setLight(color: THREE.Color) {
-    (this.mesh.material as THREE.MeshLambertMaterial).color.copy(color);
+    const m = this.mesh.material as THREE.MeshLambertMaterial;
+    m.color.copy(color);
+    m.emissive.copy(color);
   }
 
   update(dt: number) {
