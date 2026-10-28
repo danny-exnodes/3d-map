@@ -38,7 +38,7 @@
 - **Đồ chơi** (toy, #32): nhà bo tròn, mập mạp trong bảng màu pastel, cửa sổ tròn có khung, cây tròn phình, bụi cây ở công viên, đèn đường có đầu tròn, xe màu kẹo, bóng đổ mềm và viền mờ kiểu tilt-shift ở mép khung hình. Chế độ Đơn sắc cũ không quay lại.
 - Bốn **tâm trạng** gắn với vòng ngày/đêm, pha trộn mượt theo vị trí mặt trời: **Buổi sáng** (trong, mát), **Nắng trưa** (ấm, trời xanh nhạt), **Hoàng hôn** (nắng cam thấp, bóng dài), **Đêm ấm** (trời tím, cửa sổ và đèn sáng ấm).
   - Trước khi dựng có bốn thẻ chọn tâm trạng phía trên nút **Dựng 3D**. Trang vẫn mở ở giờ thật của khu vực, thẻ của tâm trạng đang diễn ra được tô sáng. Bấm một thẻ thì đồng hồ nhảy tới giờ hợp với tâm trạng đó, và thành phố được dựng trong ánh sáng ấy.
-  - Sau khi dựng, bốn lựa chọn này nằm ở thanh công cụ 3D (thay cho nút Có màu). Thanh thời gian vẫn kéo tự do; thẻ tô sáng chạy theo tâm trạng mạnh nhất.
+  - Sau khi dựng, bốn lựa chọn này nằm ở thanh công cụ 3D (cạnh nút chọn phong cách và thời tiết). Thanh thời gian vẫn kéo tự do; thẻ tô sáng chạy theo tâm trạng mạnh nhất.
 - Chế độ pixel.
 - Thanh thời gian 24h + chọn ngày. Mặt trời đặt đúng vị trí thiên văn theo toạ độ. Ban đêm có ánh trăng, cửa sổ và đèn xe sáng, bloom.
 - **Giao thông (mô phỏng)**: xe máy, ô tô, xe buýt chạy theo làn bên phải, mật độ đổi theo giờ cao điểm. Lớp 🚦 tô màu tốc độ. Có tàu chạy trên ray.
