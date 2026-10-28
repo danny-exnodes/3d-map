@@ -1,6 +1,6 @@
 # Tiny Map: hướng dẫn cho agent
 
-Trước khi làm gì, đọc **checkpoint mới nhất** trong `docs/releases/` (hiện là [`docs/releases/v0.0.6.md`](docs/releases/v0.0.6.md)). Sau đó xem [issue #1 (Roadmap)](https://github.com/danny-exnodes/3d-map/issues/1) trên GitHub để biết trạng thái hiện tại.
+Trước khi làm gì, đọc **checkpoint mới nhất** trong `docs/releases/` (hiện là [`docs/releases/v0.0.7.md`](docs/releases/v0.0.7.md)). Sau đó xem [issue #1 (Roadmap)](https://github.com/danny-exnodes/3d-map/issues/1) trên GitHub để biết trạng thái hiện tại.
 
 Bộ skill của dự án ở `.claude/skills/`. Bắt đầu từ `tinymap-workflow` (điều phối). Các vai trò: `product-owner`, `tech-lead`, `developer`, `qa-visual`, `steward` (GitHub/PR/CI), `release-checkpoint`.
 

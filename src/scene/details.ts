@@ -7,6 +7,7 @@ import { toyDeckContains } from './toyGeometry';
  * Procedural, deterministic street-level detail for Vietnamese archetypes (#5): balconies on
  * tube-house fronts, stair huts ("tum thang") and stainless water tanks on flat roofs.
  * Everything is instanced (a handful of draw calls) and hidden when the camera is far away.
+ * `pastel` picks the toy colours (Đồ chơi), otherwise the plain ones (Khối).
  */
 export class DetailCollector {
   private slabs: THREE.Matrix4[] = [];
@@ -17,6 +18,8 @@ export class DetailCollector {
   private tanks: THREE.Matrix4[] = [];
   private q = new THREE.Quaternion();
   private up = new THREE.Vector3(0, 1, 0);
+
+  constructor(private readonly pastel = true) {}
 
   private place(list: THREE.Matrix4[], x: number, y: number, z: number, yaw: number, sx: number, sy: number, sz: number) {
     this.q.setFromAxisAngle(this.up, yaw);
@@ -40,8 +43,9 @@ export class DetailCollector {
     const depth = 0.9 + r() * 0.4;
     const back = toy?.inset ?? 0;
     const mx = (a[0] + b[0]) / 2 - nx * back, mz = (a[1] + b[1]) / 2 - nz * back;
-    // Light warm toy railings: cream, peach or sand.
-    const railColor = new THREE.Color(r() < 0.5 ? '#f6efe3' : r() < 0.5 ? '#f3c9b5' : '#ecd2b4');
+    // Toy railings are light and warm (cream, peach or sand); plain ones dark steel, white or wood.
+    const [c0, c1, c2] = this.pastel ? ['#f6efe3', '#f3c9b5', '#ecd2b4'] : ['#3b3f46', '#f2efe8', '#7a5236'];
+    const railColor = new THREE.Color(r() < 0.5 ? c0 : r() < 0.5 ? c1 : c2);
     for (let f = 1; f < Math.floor(levels); f++) {
       if (r() < 0.12) continue; // some storeys enclosed
       const y = f * floorH;
@@ -106,12 +110,12 @@ export class DetailCollector {
       inst.name = name;
       g.add(inst);
     };
-    add('detail-balconies', box, new THREE.MeshLambertMaterial({ color: '#f4ead6' }), this.slabs);
+    add('detail-balconies', box, new THREE.MeshLambertMaterial({ color: this.pastel ? '#f4ead6' : '#c9c4ba' }), this.slabs);
     add('detail-railings', box.clone(), new THREE.MeshLambertMaterial(), this.rails, this.railColors);
     add('detail-huts', box.clone(), new THREE.MeshLambertMaterial(), this.huts, this.hutColors);
     // Horizontal stainless tank (bồn nước inox), matte toy grey-white: metal looks dark without an env map.
     const tank = new THREE.CylinderGeometry(0.55, 0.55, 1.7, 10).rotateZ(Math.PI / 2);
-    add('detail-tanks', tank, new THREE.MeshLambertMaterial({ color: '#e9edf0' }), this.tanks);
+    add('detail-tanks', tank, new THREE.MeshLambertMaterial({ color: this.pastel ? '#e9edf0' : '#dfe3e8' }), this.tanks);
     return g;
   }
 }

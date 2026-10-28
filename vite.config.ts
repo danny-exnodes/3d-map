@@ -53,6 +53,8 @@ function precacheManifest(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [heightsApi(), precacheManifest()],
+  // Dev relay for live flights; the published site uses the Cloudflare Worker in proxy/.
+  server: { proxy: { '/flights-api': { target: 'https://opendata.adsb.fi/api', changeOrigin: true, rewrite: (p) => p.replace(/^\/flights-api/, ''), bypass: (req) => (/^\/flights-api\/v2\/lat\/-?[\d.]+\/lon\/-?[\d.]+\/dist\/\d{1,3}(\?|$)/.test(req.url ?? '') ? undefined : false) } } },
   build: {
     chunkSizeWarningLimit: 2000,
     // Google Photorealistic 3D at the root, the OpenStreetMap builder at /openstreetmap/ (v0.0.5).

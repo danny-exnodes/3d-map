@@ -8,12 +8,15 @@ import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressS
 import { bboxAreaKm2, pointInRing } from './geo/projection';
 import { CityScene } from './scene/CityScene';
 import { dominantMood, isRising, minuteForMood, MOOD_KEYS, MOOD_LABEL, MOODS, type Mood } from './scene/moods';
+import { parseStyle, type Style, STYLE_LABEL, STYLES } from './scene/style';
 import { compassLabel, sunState } from './scene/sun';
 import { TOY_ROOFS, TOY_WALLS } from './scene/toyPalette';
 import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { googleKey, setGoogleKey } from './data/googleTraffic';
-import { fetchWeather } from './services/weather';
+import { kindFromLive, parseWeatherKind, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL, type WeatherKind, weatherPreset } from './scene/weather';
+import { fetchWeather, type Weather } from './services/weather';
 import { cityWorker } from './worker/client';
+import { DEFAULT_FLIGHTS_RELAY, fetchFlights, type Flight, flightsRelay, STALE_MS } from './data/flights';
 import { APP_ROOT, DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
 import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
 import { bboxAround, MapView } from './ui/MapView';
@@ -256,13 +259,18 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     setLayout(layout);
     city.onFrame = updateHud;
     city.onPick = showBuildingInfo;
+    city.onPickPlane = showPlaneInfo;
+    // A new area: the old planes and their poll belong to the previous one.
+    resetFlights();
+    liveWeather = null;
     const bench = /[?&]bench\b/.test(location.search) ? startBench(city) : null;
     if (bench) {
       // Pin the clock so the benchmark does not depend on when it runs (dusk and night cost more).
-      slider.value = '720';
+      slider.value = String(benchMinute());
     }
-    const stats = await city.build(data, progress);
+    const stats = await city.build(data, progress, style);
     bench?.(stats.seconds, data);
+    applyWeather();
     applyTime();
     const km2 = bboxAreaKm2(b);
     $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
@@ -275,7 +283,12 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
       document.querySelector('.w-icon')!.textContent = '🌡️';
       $('w-label').textContent = 'Không có thời tiết trong bản xem thử';
       $('w-time').textContent = snapshot ? `Dữ liệu chụp ngày ${snapshot.created}` : '';
-    } else loadWeather(b);
+      autoCard = { icon: '🌡️', label: 'Không có thời tiết trong bản xem thử' };
+      showWeatherCard();
+    } else if (!BENCH) {
+      weatherBox = b;
+      loadWeather(b);
+    }
   } catch (e) {
     if (!PREVIEW) showMap();
     if ((e as Error).name === 'AbortError') {
@@ -289,7 +302,10 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     loadAbort = null;
     busy = false;
     $('btn-build').textContent = 'Dựng 3D';
+    syncFlights();
     onBBox(mapView.bbox);
+    // The style was changed while building (or loading, aborted or not).
+    applyStyleIfShown();
   }
 }
 
@@ -462,6 +478,8 @@ function setLayout(l: Layout) {
   }
   if (l === 'map') playing = false;
   highlightMood();
+  applyStyleIfShown();
+  onViewChange();
 }
 function showCity() {
   // The preview build has no map pane.
@@ -727,38 +745,401 @@ async function updatePin() {
 
 function closeBuildingInfo() {
   $('building-info').hidden = true;
+  closePlaneInfo();
   city?.select(-1);
 }
 $('bi-close').addEventListener('click', closeBuildingInfo);
-document.addEventListener('keydown', (e) => e.key === 'Escape' && closeBuildingInfo());
+document.addEventListener('keydown', (e) => e.key === 'Escape' && !weatherMenuOpen() && closeBuildingInfo());
 
 // ---------- Weather ----------
 
-let weatherRain = false;
+/** The bench pins the weather to clear and never touches the network. */
+const BENCH = /[?&]bench\b/.test(location.search);
+const WEATHER_KEY = 'tinymap:weather';
+function storedWeather(): WeatherKind | null {
+  try {
+    return parseWeatherKind(localStorage.getItem(WEATHER_KEY));
+  } catch {
+    return null;
+  }
+}
+let weatherKind: WeatherKind = parseWeatherKind(new URLSearchParams(location.search).get('weather')) ?? storedWeather() ?? 'auto';
+let liveWeather: Weather | null = null;
+let weatherBox: BBox | null = null;
+/** What the weather card shows in Tự động when there is no live reading. */
+let autoCard = { icon: '☀️', label: 'Thời tiết' };
+
+/** Bench only: `&benchTime=HH:MM` picks the pinned clock (default 12:00) so scratch scripts can measure other hours. */
+function benchMinute(): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(new URLSearchParams(location.search).get('benchTime') ?? '');
+  const mins = m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+  return Number.isFinite(mins) && mins < 1440 && Number(m![2]) < 60 ? mins : 720;
+}
+/** Bench only: forced clear unless `&weather=` is passed explicitly. */
+const benchWeather = (): WeatherKind => parseWeatherKind(new URLSearchParams(location.search).get('weather')) ?? 'clear';
+const effectiveKind = (): WeatherKind => (BENCH ? benchWeather() : weatherKind);
+
+function showWeatherCard() {
+  const kind = effectiveKind();
+  const manual = kind !== 'auto';
+  document.querySelector('.w-icon')!.textContent = manual ? WEATHER_ICON[kind] : autoCard.icon;
+  $('w-label').textContent = manual ? `${WEATHER_LABEL[kind]} (chọn tay)` : autoCard.label;
+  $('btn-weather').textContent = WEATHER_ICON[kind];
+  $('btn-weather').title = `Thời tiết: ${WEATHER_LABEL[kind]}`;
+  document.querySelectorAll<HTMLButtonElement>('#weather-menu button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === kind)));
+}
+
+function applyWeather() {
+  showWeatherCard();
+  if (!city) return;
+  const kind = effectiveKind();
+  if (kind !== 'auto') return city.setWeather(weatherPreset(kind));
+  if (!liveWeather) return city.setWeather(weatherPreset('clear'));
+  const k = kindFromLive(liveWeather);
+  const p = weatherPreset(k);
+  // Plain clear and cloudy skies follow the measured cloud cover, as before.
+  if (k === 'clear' || k === 'cloudy') p.cloud = liveWeather.cloudCover * 0.7;
+  city.setWeather(p);
+}
+
 async function loadWeather(b: BBox) {
   try {
     const w = await fetchWeather((b.south + b.north) / 2, (b.west + b.east) / 2);
+    liveWeather = w;
     $('w-temp').textContent = `${Math.round(w.temperature)}°`;
-    $('w-label').textContent = w.label;
-    document.querySelector('.w-icon')!.textContent = w.icon;
     $('w-time').textContent = `Lúc ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · Open-Meteo`;
-    city?.setCloud(w.cloudCover * 0.7);
-    weatherRain = w.rain;
-    setRain(w.rain);
-    applyTime();
+    autoCard = { icon: w.icon, label: w.label };
   } catch {
-    document.querySelector('.w-icon')!.textContent = '🌡️';
-    $('w-label').textContent = 'Không có dữ liệu thời tiết';
+    liveWeather = null;
+    autoCard = { icon: '🌡️', label: 'Không có dữ liệu thời tiết' };
+  }
+  applyWeather();
+}
+
+const weatherMenu = $('weather-menu');
+function weatherMenuOpen() {
+  return !weatherMenu.hidden;
+}
+const weatherBtn = $('btn-weather');
+for (const kind of WEATHER_KINDS) {
+  const item = document.createElement('button');
+  item.setAttribute('role', 'menuitemradio');
+  item.dataset.kind = kind;
+  item.textContent = `${WEATHER_ICON[kind]} ${WEATHER_LABEL[kind]}`;
+  item.addEventListener('click', () => {
+    weatherKind = kind;
+    try {
+      localStorage.setItem(WEATHER_KEY, kind);
+    } catch {
+      /* storage blocked */
+    }
+    closeWeatherMenu();
+    applyWeather();
+    applyTime();
+    if (kind === 'auto' && !liveWeather && weatherBox && !PREVIEW) void loadWeather(weatherBox).then(applyTime);
+  });
+  weatherMenu.append(item);
+}
+function openWeatherMenu() {
+  const r = weatherBtn.getBoundingClientRect();
+  weatherMenu.hidden = false;
+  const w = weatherMenu.offsetWidth;
+  weatherMenu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+  weatherMenu.style.top = `${Math.min(r.bottom + 6, innerHeight - weatherMenu.offsetHeight - 8)}px`;
+  weatherBtn.setAttribute('aria-expanded', 'true');
+  weatherMenu.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+}
+function closeWeatherMenu(refocus = true) {
+  if (weatherMenu.hidden) return;
+  weatherMenu.hidden = true;
+  weatherBtn.setAttribute('aria-expanded', 'false');
+  if (refocus) weatherBtn.focus();
+}
+weatherBtn.addEventListener('click', () => (weatherMenu.hidden ? openWeatherMenu() : closeWeatherMenu()));
+document.addEventListener('keydown', (e) => {
+  if (!weatherMenuOpen()) return;
+  if (e.key === 'Escape') closeWeatherMenu();
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const items = [...weatherMenu.querySelectorAll<HTMLButtonElement>('button')];
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+  }
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!weatherMenu.hidden && !weatherMenu.contains(e.target as Node) && !weatherBtn.contains(e.target as Node)) closeWeatherMenu(false);
+});
+showWeatherCard();
+
+// ---------- Style: Đồ chơi / Khối / Siêu thực ----------
+
+const STYLE_KEY = 'tinymap:style';
+/** The stored style; master's `tinymap:colorMode` is read once and becomes it. */
+function storedStyle(): Style | null {
+  try {
+    const s = parseStyle(localStorage.getItem(STYLE_KEY));
+    if (s) return s;
+    const old = parseStyle(localStorage.getItem('tinymap:colorMode'));
+    localStorage.removeItem('tinymap:colorMode');
+    if (old) localStorage.setItem(STYLE_KEY, old);
+    return old;
+  } catch {
+    return null;
   }
 }
-function setRain(on: boolean) {
-  city?.setRain(on);
-  $('btn-rain').classList.toggle('on', on);
+/** `?style=` wins over storage; the bench measures Đồ chơi unless `?style=` asks for another. */
+const urlStyle = parseStyle(new URLSearchParams(location.search).get('style'));
+let style: Style = urlStyle ?? (BENCH ? 'toy' : storedStyle()) ?? 'toy';
+
+function showStyle() {
+  document.querySelectorAll<HTMLButtonElement>('#style-picker button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.style === style);
+    b.setAttribute('aria-pressed', String(b.dataset.style === style));
+  });
+  $('btn-style').textContent = STYLE_LABEL[style];
+  $('btn-style').title = `Kiểu mô hình: ${STYLE_LABEL[style]} (bấm để đổi)`;
 }
-$('btn-rain').addEventListener('click', () => {
-  weatherRain = !weatherRain;
-  setRain(weatherRain);
+
+function setStyle(s: Style) {
+  style = s;
+  try {
+    localStorage.setItem(STYLE_KEY, s);
+  } catch {
+    /* storage blocked */
+  }
+  showStyle();
+  applyStyleIfShown();
+}
+
+/**
+ * Rebuilds when the 3D view shows a model in another style than the chosen one. While the 3D view is
+ * hidden the choice is only remembered: it applies to the next build, or when the 3D view is shown again.
+ */
+function applyStyleIfShown() {
+  if (city?.data && !$('city-view').hidden && city.style !== style) void rebuildInStyle();
+}
+
+/** Builds the model again from the data already loaded, keeping camera, time, mood and weather. */
+async function rebuildInStyle() {
+  const c = city;
+  if (!c?.data || busy) return;
+  busy = true;
+  const buttons = ['btn-style', 'btn-build', 'btn-demo', 'btn-glb', 'btn-flights'].map((id) => $<HTMLButtonElement>(id));
+  for (const b of buttons) b.disabled = true;
+  closeBuildingInfo();
+  stopFlights();
+  const view = c.saveView();
+  let ok = false;
+  try {
+    await c.build(c.data, () => {}, style);
+    c.restoreView(view);
+    c.setTrafficOverlay(trafficOn);
+    applyWeather();
+    applyTime();
+    ok = true;
+  } catch (e) {
+    // The scene was cleared: say so, as a failed build does.
+    console.error(e);
+    resetProgress('Đổi kiểu mô hình');
+    if (!PREVIEW) showMap();
+    $('p-error').hidden = false;
+    $('p-error').textContent = `Không dựng lại được mô hình: ${(e as Error).message}. Thử lại, hoặc bấm “Dựng 3D”.`;
+  } finally {
+    busy = false;
+    for (const b of buttons) b.disabled = false;
+    showFlightsLine();
+    syncFlights();
+    onBBox(mapView.bbox);
+  }
+  // Picked again while building.
+  if (ok) applyStyleIfShown();
+}
+
+document.querySelectorAll<HTMLButtonElement>('#style-picker button').forEach((b) => b.addEventListener('click', () => setStyle(b.dataset.style as Style)));
+$('btn-style').addEventListener('click', () => setStyle(STYLES[(STYLES.indexOf(style) + 1) % STYLES.length]));
+showStyle();
+
+// ---------- Live planes ----------
+
+const FLIGHTS_KEY = 'tinymap:flights';
+/** adsb.fi radius around the area centre (nm) and the poll period. */
+const FLIGHTS_NM = 40;
+const FLIGHTS_POLL_MS = 15_000;
+const FLIGHTS_SOURCE = 'adsb.fi';
+const flightsSource = (() => {
+  try {
+    return flightsRelay(location.search, localStorage, import.meta.env.DEV);
+  } catch {
+    return flightsRelay(location.search, null, import.meta.env.DEV);
+  }
+})();
+function storedFlights(): boolean | null {
+  try {
+    const v = localStorage.getItem(FLIGHTS_KEY);
+    return v === null ? null : v === '1';
+  } catch {
+    return null;
+  }
+}
+/** The default relay and the dev proxy are adsb.fi; a relay chosen with ?flights= or from storage shows its own host. */
+const flightsLabel = (() => {
+  if (!flightsSource || flightsSource === DEFAULT_FLIGHTS_RELAY || flightsSource === '/flights-api') return FLIGHTS_SOURCE;
+  try {
+    return new URL(flightsSource, location.origin).host || FLIGHTS_SOURCE;
+  } catch {
+    return FLIGHTS_SOURCE;
+  }
+})();
+let flightsOn = !BENCH && !!flightsSource && (storedFlights() ?? true);
+let flightList: Flight[] = [];
+let flightsTimer = 0;
+let flightsAbort: AbortController | null = null;
+let flightsLine = '';
+
+function showFlightsLine() {
+  const el = $('i-flights');
+  const btn = $<HTMLButtonElement>('btn-flights');
+  btn.hidden = BENCH;
+  btn.disabled = !flightsSource || busy;
+  btn.classList.toggle('on', flightsOn);
+  btn.setAttribute('aria-pressed', String(flightsOn));
+  btn.title = flightsSource ? `Máy bay thật (${flightsLabel}): ${flightsOn ? 'đang bật' : 'đang tắt'}` : 'Chưa cấu hình nguồn chuyến bay';
+  const text = BENCH ? '' : !flightsSource ? '✈ Chưa cấu hình nguồn chuyến bay' : flightsOn ? flightsLine : '';
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+function stopFlights() {
+  clearTimeout(flightsTimer);
+  flightsAbort?.abort();
+  flightsAbort = null;
+}
+
+/** A new area: the old planes belong to somewhere else. */
+function resetFlights() {
+  stopFlights();
+  flightList = [];
+  flightsLine = '';
+  city?.setFlights([]);
+  closePlaneInfo();
+}
+
+/** Starts or stops planes and polling to match the toggle, the visible view and the tab. */
+function syncFlights() {
+  const c = city;
+  if (!c?.data || busy) return;
+  flightsViewKey = viewKey();
+  stopFlights();
+  showFlightsLine();
+  if (!flightsOn || !flightsSource || BENCH) {
+    void c.setPlanes(false);
+    closePlaneInfo();
+    return;
+  }
+  void c.setPlanes(true).catch(console.error);
+  if ($('city-view').hidden || document.visibilityState !== 'visible') return;
+  void pollFlights();
+}
+
+/** A relay that does not answer must not stop the polling. */
+const FLIGHTS_TIMEOUT_MS = 10_000;
+
+async function pollFlights() {
+  const c = city;
+  const relay = flightsSource;
+  if (!c?.data || !relay) return;
+  // `ac` is stopFlights' switch; `fc` is what fetch sees, also aborted by the timeout.
+  const ac = (flightsAbort = new AbortController());
+  const fc = new AbortController();
+  ac.signal.addEventListener('abort', () => fc.abort());
+  const timer = setTimeout(() => fc.abort(), FLIGHTS_TIMEOUT_MS);
+  const b = c.data.bbox;
+  try {
+    await c.setPlanes(true);
+    const fs = await fetchFlights(relay, (b.south + b.north) / 2, (b.west + b.east) / 2, FLIGHTS_NM, fc.signal);
+    if (ac.signal.aborted) return;
+    flightList = fs;
+    c.setFlights(fs);
+    flightsLine = `✈ ${fmt(c.planeCount)} máy bay · ${flightsLabel} · cập nhật ${new Date().toLocaleTimeString('vi-VN', { hour12: false })}`;
+  } catch (e) {
+    if (ac.signal.aborted) return;
+    console.warn('flights poll failed', e);
+    // The planes already shown stay until they go stale (60 s).
+    flightsLine = '✈ Không lấy được dữ liệu chuyến bay';
+  } finally {
+    clearTimeout(timer);
+  }
+  showFlightsLine();
+  refreshPlaneInfo();
+  flightsTimer = window.setTimeout(() => void pollFlights(), FLIGHTS_POLL_MS);
+}
+
+$('btn-flights').addEventListener('click', () => {
+  if (!flightsSource || busy) return;
+  flightsOn = !flightsOn;
+  try {
+    localStorage.setItem(FLIGHTS_KEY, flightsOn ? '1' : '0');
+  } catch {
+    /* storage blocked */
+  }
+  if (flightsOn) {
+    flightsLine = '';
+    city?.setFlights(flightList);
+  }
+  syncFlights();
 });
+/** The 3D view was shown or hidden, or the tab changed: pause or resume polling, not while a build runs. */
+let flightsViewKey = '';
+const viewKey = () => `${$('city-view').hidden}|${document.visibilityState}`;
+function onViewChange() {
+  if (!city?.data || busy || viewKey() === flightsViewKey) return;
+  syncFlights();
+}
+document.addEventListener('visibilitychange', onViewChange);
+showFlightsLine();
+
+/** hex of the plane whose card is open. */
+let openPlane: string | null = null;
+
+/** After a poll: the open card shows the plane's new values, or closes when the plane is gone or stale. */
+function refreshPlaneInfo() {
+  if (openPlane === null) return;
+  const f = flightList.find((x) => x.hex === openPlane);
+  if (f && Date.now() - f.seenAt <= STALE_MS) showPlaneInfo(f);
+  else closePlaneInfo();
+}
+
+function showPlaneInfo(f: Flight | null) {
+  const panel = $('plane-info');
+  if (!f) {
+    openPlane = null;
+    panel.hidden = true;
+    return;
+  }
+  openPlane = f.hex;
+  $('building-info').hidden = true;
+  $('pi-title').textContent = f.callsign || f.hex.toUpperCase();
+  $('pi-kind').textContent = f.type ? `Loại ${f.type}` : 'Không rõ loại máy bay';
+  const dl = $('pi-facts');
+  dl.innerHTML = '';
+  for (const [k, v] of [
+    ['Độ cao', `${fmt(f.altM)} m`],
+    ['Tốc độ', `${fmt(f.gsMs * 3.6)} km/h`],
+    ['Hướng', `${fmt(f.trackDeg)}°`],
+  ]) {
+    const dt = document.createElement('dt');
+    dt.textContent = k;
+    const dd = document.createElement('dd');
+    dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  panel.hidden = false;
+}
+function closePlaneInfo() {
+  openPlane = null;
+  $('plane-info').hidden = true;
+}
+$('pi-close').addEventListener('click', closePlaneInfo);
 
 // ---------- Time of day ----------
 
@@ -907,7 +1288,7 @@ function download(href: string, name: string) {
 }
 $('btn-shot').addEventListener('click', () => city && download(city.screenshot(), 'tiny-map.png'));
 $('btn-glb').addEventListener('click', async () => {
-  if (!city) return;
+  if (!city || busy) return;
   const url = URL.createObjectURL(await city.exportGLB());
   download(url, 'tiny-map.glb');
   setTimeout(() => URL.revokeObjectURL(url), 5000);

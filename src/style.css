@@ -54,6 +54,13 @@ button.primary { background: var(--accent); border-color: transparent; color: #1
 button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
 button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); border-color: var(--accent); }
 
+/* Weather menu: fixed so the scrolling toolbar on phones cannot clip it */
+.menu { position: fixed; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 150px; }
+.menu[hidden] { display: none; }
+.menu button { display: flex; align-items: center; gap: 8px; text-align: left; padding: 8px 10px; min-height: 36px; font-size: 13px; border: 1px solid transparent; border-radius: 8px; background: none; }
+.menu button:hover { background: rgba(255, 255, 255, 0.1); }
+.menu button[aria-checked="true"] { background: rgba(255, 122, 69, 0.25); border-color: var(--accent); }
+
 /* Map view */
 .search { position: absolute; top: 12px; left: 12px; width: min(380px, calc(100% - 24px)); display: flex; align-items: center; gap: 8px; padding: 6px 10px; z-index: 2; }
 .search input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-size: 14px; }
@@ -70,6 +77,14 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 .moods button.on { background: rgba(255, 122, 69, 0.25); border-color: var(--accent); }
 .moods i { display: block; width: 44px; height: 26px; border-radius: 6px; background: linear-gradient(to bottom, var(--sky) 0%, var(--wall) 55%, var(--roof) 100%); }
 @media (max-width: 480px) { .moods { grid-template-columns: repeat(2, minmax(0, 1fr)); } .moods i { width: 100%; } }
+.pickers { display: grid; gap: 6px; }
+/* Style picker: three across at every width; the swatch hints at each look. */
+.moods.styles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.styles [data-style="toy"] i { --sky: #9fd3f2; --wall: #f6e3c6; --roof: #e08a70; border-radius: 10px; }
+.styles [data-style="block"] i { --sky: #9fd3f2; --wall: #e8dcc0; --roof: #b5533c; border-radius: 2px; }
+.styles [data-style="real"] i { --sky: #5f8fbf; --wall: #a9a39a; --roof: #4a4e57; border-radius: 2px; }
+/* Phones: names only, so the map keeps its room. */
+@media (max-width: 480px) { .styles i { display: none; } }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .progress { position: absolute; right: 12px; top: 64px; width: 260px; padding: 14px; z-index: 2; }
 .progress .big { font-size: 40px; font-weight: 300; display: flex; align-items: baseline; gap: 4px; }
@@ -91,6 +106,8 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .poi-label { position: absolute; left: 0; top: 0; background: #e8553a; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 10px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); }
 .poi-label::before { content: '● '; font-size: 8px; vertical-align: middle; }
+.plane-label { background: #2f6fb5; }
+.plane-label::before { content: '✈ '; font-size: 10px; }
 .info { position: absolute; top: 12px; left: 12px; padding: 10px 12px; max-width: min(360px, calc(100% - 24px)); font-size: 13px; }
 .info .small { margin-top: 2px; }
 .weather { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
@@ -177,6 +194,10 @@ main[data-layout="split"] #city-view { left: calc(var(--split) + 6px); }
 #splitter:hover, #splitter.drag { background: var(--accent); }
 main[data-layout="split"] .toolbar { flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 24px); }
 main[data-layout="split"] .map-bottom { flex-wrap: wrap; }
+/* The info card sits under the toolbar row (two rows when the pane is narrow) instead of behind it. */
+main[data-layout="split"] #city-view { container-type: inline-size; }
+main[data-layout="split"] .info { top: 64px; }
+@container (max-width: 700px) { main[data-layout="split"] .info { top: 108px; } }
 #canvas { touch-action: none; }
 
 /* Selection handles (#23) */
