@@ -27,6 +27,10 @@ describe('displayRadius', () => {
     expect(displayRadius(74_080, half)).toBeLessThanOrEqual(3 * half);
     expect(displayRadius(1000, half)).toBeGreaterThan(displayRadius(700, half));
   });
+  it('never returns NaN for a zero half-size or a negative distance', () => {
+    expect(displayRadius(5, 0)).toBe(5);
+    expect(displayRadius(-5, 600)).toBe(-5);
+  });
 });
 
 describe('displayAltitude', () => {

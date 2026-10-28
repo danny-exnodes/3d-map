@@ -16,7 +16,7 @@ import { googleKey, setGoogleKey } from './data/googleTraffic';
 import { kindFromLive, parseWeatherKind, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL, type WeatherKind, weatherPreset } from './scene/weather';
 import { fetchWeather, type Weather } from './services/weather';
 import { cityWorker } from './worker/client';
-import { fetchFlights, type Flight, flightsRelay } from './data/flights';
+import { fetchFlights, type Flight, flightsRelay, STALE_MS } from './data/flights';
 import { APP_ROOT, DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
 import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
 import { bboxAround, MapView } from './ui/MapView';
@@ -1080,13 +1080,12 @@ showFlightsLine();
 
 /** hex of the plane whose card is open. */
 let openPlane: string | null = null;
-const PLANE_STALE_MS = 60_000;
 
 /** After a poll: the open card shows the plane's new values, or closes when the plane is gone or stale. */
 function refreshPlaneInfo() {
   if (openPlane === null) return;
   const f = flightList.find((x) => x.hex === openPlane);
-  if (f && Date.now() - f.seenAt <= PLANE_STALE_MS) showPlaneInfo(f);
+  if (f && Date.now() - f.seenAt <= STALE_MS) showPlaneInfo(f);
   else closePlaneInfo();
 }
 

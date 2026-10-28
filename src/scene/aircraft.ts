@@ -1,12 +1,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { Flight } from '../data/flights';
+import { type Flight, STALE_MS } from '../data/flights';
 import type { LocalProjection } from '../geo/projection';
 
 /** Planes are drawn about 4x their real size; a ~40 m airliner would be a speck over a 1-2 km model. */
 const SCALE = 4;
-/** A plane with no report for this long is gone. */
-const STALE_MS = 60_000;
 /** One instanced mesh, 60 triangles a plane: 100 planes stay far below 10,000 triangles. */
 const MAX_PLANES = 100;
 const MAX_LABELS = 6;
@@ -20,7 +18,7 @@ const MAX_D = 74_080;
 
 /** Horizontal distance from the model centre: true inside the model, then a log curve that lands MAX_D at 3x the half-size. */
 export function displayRadius(d: number, half: number): number {
-  if (d <= half) return d;
+  if (d <= half || !(half > 0)) return d;
   const span = Math.log(1 + Math.max(1e-9, (MAX_D - half) / half));
   return half + 2 * half * Math.min(1, Math.log(1 + (d - half) / half) / span);
 }

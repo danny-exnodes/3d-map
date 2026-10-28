@@ -14,6 +14,9 @@ export interface Flight {
 }
 
 /** URL of the deployed Cloudflare Worker (proxy/flights-worker.js); empty until the owner deploys it. */
+/** A plane with no report for this long is gone. */
+export const STALE_MS = 60_000;
+
 export const DEFAULT_FLIGHTS_RELAY = '';
 
 const FT_M = 0.3048;
