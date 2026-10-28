@@ -66,3 +66,22 @@ describe('prototype instancing (#22)', () => {
     expect([...seen].sort()).toEqual(['n', 's']);
   });
 });
+
+describe('prototype boxes have the footprint area', () => {
+  it('scales a trapezoid house (fill ~0.9) to its footprint area', () => {
+    // 10 m long, 6 m wide at one end and 4.4 m at the other: area 52, rectangle 60 (fill 0.87+).
+    const lon = 106.665, lat = 10.735, dx = 1 / 109000, dy = 1 / 110574;
+    const poly: [number, number][] = [[lon, lat], [lon + 6 * dx, lat], [lon + 5.3 * dx, lat + 10 * dy], [lon + 0.7 * dx, lat + 10 * dy]];
+    const b = makeBuilding({ id: 't', polygon: [poly], kind: 'house', levels: 3, tags: {}, footprintSource: 'overture' });
+    const r = buildBuildings([b], proj);
+    const walls = r.instanced.find((m) => m.name === 'buildings-walls')!;
+    expect(walls.count).toBe(1);
+    const m = walls.instanceMatrix.array;
+    const sx = Math.hypot(m[0], m[1], m[2]), sz = Math.hypot(m[8], m[9], m[10]);
+    const ring = poly.map((p) => proj.project(p));
+    let a = 0;
+    for (let i = 0; i < ring.length; i++) { const [x1, z1] = ring[i], [x2, z2] = ring[(i + 1) % ring.length]; a += x1 * z2 - x2 * z1; }
+    const footprint = Math.abs(a / 2);
+    expect(Math.abs((sx * sz) / footprint - 1)).toBeLessThan(0.01);
+  });
+});

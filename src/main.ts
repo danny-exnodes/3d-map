@@ -3,6 +3,7 @@ import { generateDemoCity } from './data/demo';
 import { cacheClearUnpinned, cacheUsage } from './data/cache';
 import { type CityId, deletePackage, downloadPackage, listPackages, loadWards, packageSize, registerServiceWorker, searchWards, type Ward, wardAreaKm2 } from './data/offline';
 import { loadCity } from './data/loader';
+import { removeOverlaps } from './data/overlap';
 import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressStep } from './data/types';
 import { bboxAreaKm2, pointInRing } from './geo/projection';
 import { CityScene } from './scene/CityScene';
@@ -245,6 +246,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
       const res = await fetch(new URL(`snapshots/${snapshot.id}.json`, APP_ROOT));
       if (!res.ok) throw new Error(`snapshot ${snapshot.id}: HTTP ${res.status}`);
       data = (await res.json()) as CityData;
+      removeOverlaps(data);
     } else {
       loadAbort = new AbortController();
       data = await loadData(b, loadAbort.signal);

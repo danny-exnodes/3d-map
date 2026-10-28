@@ -116,6 +116,18 @@ function streetEnd(rect: ReturnType<typeof minAreaRect>, roadDistance?: (x: numb
   return { front, rear, sign };
 }
 
+/** The rectangle scaled by `k` about its centre, same axis. */
+export function shrinkRect(rect: ReturnType<typeof minAreaRect>, k: number): ReturnType<typeof minAreaRect> {
+  const [cx, cz] = rect.centre;
+  return {
+    ...rect,
+    corners: rect.corners.map(([x, z]) => [cx + (x - cx) * k, cz + (z - cz) * k] as XZ),
+    long: rect.long * k,
+    short: rect.short * k,
+    area: rect.area * k * k,
+  };
+}
+
 /** Simple enough to be a scaled box with a standard roof. */
 function isPrototypeCandidate(b: Building, rings: XZ[][], fill: number, short: number): boolean {
   if (b.isPart || rings.length !== 1 || b.minHeight > 0.5 || fill < 0.88 || short < 2.5) return false;
@@ -153,11 +165,14 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
     footprints.insert(rings[0], rings[0]);
 
     const arch = b.archetype ?? 'generic';
-    const rect = minAreaRect(rings[0]);
-    const fill = area / Math.max(rect.area, 1e-6);
+    const fullRect = minAreaRect(rings[0]);
+    const fill = area / Math.max(fullRect.area, 1e-6);
 
     // Ordinary boxy houses share prototypes; landmarks and complex shapes are modelled exactly (#22).
-    const proto = !opts.exactOnly && isPrototypeCandidate(b, rings, fill, rect.short) && !isLandmark(b, area);
+    const proto = !opts.exactOnly && isPrototypeCandidate(b, rings, fill, fullRect.short) && !isLandmark(b, area);
+    // A prototype box has the footprint's area, not its rectangle's, so its corners do not land on neighbours;
+    // doors, windows and balconies below use this same box.
+    const rect = proto ? shrinkRect(fullRect, Math.sqrt(Math.min(1, fill))) : fullRect;
     const tubeDetail = (arch === 'tube' || arch === 'shophouse') && !b.isPart && y1 < 30 && rect.short > 2.5;
     // The door side of toy houses and the balcony side of tube houses.
     const ends = proto || tubeDetail ? streetEnd(rect, opts.roadDistance) : null;

@@ -14,7 +14,7 @@ type XZ = [number, number];
  * centre, and dropped when even the shrunk outline still overlaps. Building parts may stack on
  * their own outline, so they only mark the mask.
  */
-export function removeOverlaps(data: CityData, maxShare = 0.03): { dropped: number; shrunk: number } {
+export function removeOverlaps(data: CityData, maxShare = 0.01): { dropped: number; shrunk: number } {
   const proj = new LocalProjection(data.bbox);
   const rings = data.buildings.map((b) => b.polygon[0].map((p) => proj.project(p)) as XZ[]);
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
