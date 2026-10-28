@@ -315,7 +315,11 @@ export class CityScene {
     this.resetView();
     // Siêu thực is the Khối model with realistic materials, under three's sky instead of the dome.
     const real = style === 'real';
-    if (real) this.realism.apply(this.city, this.traffic.group);
+    if (real) {
+      const t = performance.now();
+      this.realism.apply(this.city, this.traffic.group);
+      this.mainThreadSlices.realism = performance.now() - t;
+    }
     this.dome.mesh.visible = !real;
     this.gtao.enabled = real;
     if (!real) {

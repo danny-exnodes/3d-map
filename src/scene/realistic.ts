@@ -369,7 +369,7 @@ function buildingMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
             rH += seam * 0.01;
           }
           if (vRoof > 0.5) {
-            // Gable end of a prototype roof: plaster, no windows.
+            // Gable end of a prototype roof: wall finish only, no windows.
           } else if (glassWall) {
             // Curtain wall: spandrel band at each slab, aluminium mullions, mirror-like glass.
             float mull = 1.0 - box(vec2(fract(u / 1.6), f.y), vec2(0.03, 0.0), vec2(0.97, 1.0), aa * 2.0);
