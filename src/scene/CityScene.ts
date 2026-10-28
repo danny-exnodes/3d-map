@@ -18,6 +18,7 @@ import { deserializeObjects } from './serialize';
 import { createLampPools, litShare } from './nightLights';
 import { dominantMood, isRising, moodLighting, type Mood } from './moods';
 import { sunState, type SunState } from './sun';
+import { CloudLayer, SkyDome } from './sky';
 import { bakeToyInstances } from './toyGeometry';
 import { tiltShiftStrength } from './tiltShift';
 import { Traffic } from './traffic';
@@ -104,6 +105,10 @@ export class CityScene {
   private viewOff = new THREE.Vector3();
   private mood: Mood = 'noon';
   private lastSky = new THREE.Color('#9fd3f2');
+  private dome = new SkyDome();
+  private white = new THREE.Color('#ffffff');
+  private cloudLight = new THREE.Color('#ffffff');
+  private clouds: CloudLayer | null = null;
   data: CityData | null = null;
   sunInfo: SunState | null = null;
   onFrame?: () => void;
@@ -132,7 +137,7 @@ export class CityScene {
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.6;
     this.sun.shadow.radius = 3;
-    this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group);
+    this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group, this.dome.mesh);
     this.scene.fog = new THREE.Fog('#9fd3f2', 2000, 6000);
 
     this.composer = new EffectComposer(this.renderer);
@@ -249,6 +254,10 @@ export class CityScene {
     cam.far = ext * 4;
     cam.updateProjectionMatrix();
     this.scene.fog = new THREE.Fog('#9fd3f2', ext * 1.6, ext * 5);
+    this.clouds = new CloudLayer(ext);
+    this.clouds.setCover(this.cloud);
+    this.clouds.setLight(this.cloudLight);
+    this.scene.add(this.clouds.mesh);
     this.controls.maxDistance = ext * 3;
     this.controls.minDistance = 20;
     this.resetView();
@@ -285,6 +294,11 @@ export class CityScene {
     }
     for (const l of this.labels) l.el.remove();
     this.labels = [];
+    if (this.clouds) {
+      this.scene.remove(this.clouds.mesh);
+      this.clouds.dispose();
+      this.clouds = null;
+    }
     this.setRain(false);
   }
 
@@ -336,6 +350,9 @@ export class CityScene {
   private applySky() {
     this.scene.background = this.lastSky;
     (this.scene.fog as THREE.Fog).color.copy(this.lastSky);
+    this.cloudLight.copy(this.lastSky).lerp(this.white, 0.55);
+    this.clouds?.setLight(this.cloudLight);
+    this.dome.update(this.lastSky, this.sunDir, this.night, this.camera.position);
   }
 
   /** Warm sodium glow on streets after dark. */
@@ -376,6 +393,7 @@ export class CityScene {
 
   setCloud(c: number) {
     this.cloud = Math.min(1, Math.max(0, c));
+    this.clouds?.setCover(this.cloud);
   }
 
   setRain(on: boolean) {
@@ -596,6 +614,8 @@ export class CityScene {
     const dt = Math.min(this.timer.getDelta(), 0.1);
     this.controls.update();
     this.traffic?.update(dt);
+    this.clouds?.update(dt);
+    this.dome.mesh.position.copy(this.camera.position);
     this.pin.update(dt, this.camera);
     const now = performance.now();
     if (this.lightDirty && now - this.lastLightUpdate > 120) {
@@ -677,6 +697,8 @@ export class CityScene {
   dispose() {
     cancelAnimationFrame(this.raf);
     this.clear();
+    this.scene.remove(this.dome.mesh);
+    this.dome.dispose();
     this.renderer.dispose();
   }
 }
