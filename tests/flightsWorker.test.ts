@@ -39,7 +39,7 @@ describe('fetch', () => {
     const r = await run('https://danny-exnodes.github.io');
     expect(r.status).toBe(200);
     expect(r.headers.get('Access-Control-Allow-Origin')).toBe('https://danny-exnodes.github.io');
-    expect((up.mock.calls[0] as unknown[])[0]).toBe('https://opendata.adsb.fi/api/v2/lat/21/lon/105/dist/40');
+    expect((up.mock.calls[0] as unknown[])[0]).toBe('https://opendata.adsb.fi/api/v2/lat/21.00/lon/105.00/dist/40');
   });
 
   it('404s other paths, with CORS for an allowed origin', async () => {
