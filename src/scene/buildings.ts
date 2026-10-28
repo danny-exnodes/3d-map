@@ -362,9 +362,9 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(${hexToVec('#fffaf0')}), frameMask);
           diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 1.0));
         }
-        // Plinth band on the exact mesh; prototypes have a real plinth.
+        // Plinth band on the exact mesh; prototypes have a real plinth. The 📏 view keeps its colours.
         #ifndef TOY_PROTO
-        if (abs(bN.y) < 0.3 && vWPos.y < ${TOY.plinthH.toFixed(2)}) diffuseColor.rgb *= ${PLINTH_SHADE.toFixed(2)};
+        if (abs(bN.y) < 0.3 && vWPos.y < ${TOY.plinthH.toFixed(2)} && uSourceView < 0.5) diffuseColor.rgb *= ${PLINTH_SHADE.toFixed(2)};
         #endif
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.32, 0.08), vSelected * 0.85);`,
       )
