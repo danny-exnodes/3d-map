@@ -101,6 +101,7 @@ export class CityScene {
   private tiltH: ShaderPass;
   private tiltV: ShaderPass;
   private tiltBase = { h: 2 / 512, v: 2 / 512 };
+  private viewOff = new THREE.Vector3();
   private mood: Mood = 'noon';
   private lastSky = new THREE.Color('#9fd3f2');
   data: CityData | null = null;
@@ -555,10 +556,18 @@ export class CityScene {
 
   /** Camera bearing (deg from north, clockwise) and tilt from vertical (deg). */
   get view() {
-    const off = this.camera.position.clone().sub(this.controls.target);
+    const off = this.viewOffset();
     const bearing = ((Math.atan2(-off.x, off.z) * 180) / Math.PI + 360) % 360;
-    const tilt = (Math.acos(off.y / off.length()) * 180) / Math.PI;
-    return { bearing, tilt };
+    return { bearing, tilt: this.tiltDeg(off) };
+  }
+
+  /** Camera minus target, in a scratch vector (read every frame). */
+  private viewOffset() {
+    return this.viewOff.subVectors(this.camera.position, this.controls.target);
+  }
+
+  private tiltDeg(off = this.viewOffset()) {
+    return (Math.acos(off.y / off.length()) * 180) / Math.PI;
   }
 
   async exportGLB(): Promise<Blob> {
@@ -611,7 +620,8 @@ export class CityScene {
       p.needsUpdate = true;
     }
     if (this.paused) return;
-    const tilt = tiltShiftStrength(this.view.tilt);
+    // Pixel mode stays as it was: no tilt-shift blur.
+    const tilt = this.pixelMode ? 0 : tiltShiftStrength(this.tiltDeg());
     this.tiltH.enabled = this.tiltV.enabled = tilt > 0;
     this.tiltH.uniforms.h.value = this.tiltBase.h * tilt;
     this.tiltV.uniforms.v.value = this.tiltBase.v * tilt;
