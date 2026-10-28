@@ -165,7 +165,7 @@ export function buildLandscape(
       new THREE.CylinderGeometry(0.1, 0.1, 1.2, 4, 1, true).rotateZ(Math.PI / 2).translate(0.6, 6, 0),
       new THREE.SphereGeometry(0.45, 6, 4).translate(1.2, 6, 0),
     ])!;
-    const bulb = new THREE.SphereGeometry(0.5, 8, 6);
+    const bulb = new THREE.SphereGeometry(0.5, 6, 4);
     lamps = new THREE.InstancedMesh(post, new THREE.MeshLambertMaterial({ color: '#55585f' }), lampList.length);
     lampBulbs = new THREE.InstancedMesh(bulb, new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 2.8, 1.4), toneMapped: false }), lampList.length);
     const m = new THREE.Matrix4();

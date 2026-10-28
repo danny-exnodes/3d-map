@@ -265,7 +265,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     const bench = /[?&]bench\b/.test(location.search) ? startBench(city) : null;
     if (bench) {
       // Pin the clock so the benchmark does not depend on when it runs (dusk and night cost more).
-      slider.value = '720';
+      slider.value = String(benchMinute());
     }
     const stats = await city.build(data, progress, style);
     bench?.(stats.seconds, data);
@@ -768,7 +768,15 @@ let weatherBox: BBox | null = null;
 /** What the weather card shows in Tự động when there is no live reading. */
 let autoCard = { icon: '☀️', label: 'Thời tiết' };
 
-const effectiveKind = (): WeatherKind => (BENCH ? 'clear' : weatherKind);
+/** Bench only: `&benchTime=HH:MM` picks the pinned clock (default 12:00) so scratch scripts can measure other hours. */
+function benchMinute(): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(new URLSearchParams(location.search).get('benchTime') ?? '');
+  const mins = m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+  return Number.isFinite(mins) && mins < 1440 && Number(m![2]) < 60 ? mins : 720;
+}
+/** Bench only: forced clear unless `&weather=` is passed explicitly. */
+const benchWeather = (): WeatherKind => parseWeatherKind(new URLSearchParams(location.search).get('weather')) ?? 'clear';
+const effectiveKind = (): WeatherKind => (BENCH ? benchWeather() : weatherKind);
 
 function showWeatherCard() {
   const kind = effectiveKind();
