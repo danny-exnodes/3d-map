@@ -813,7 +813,7 @@ export class CityScene {
     this.controls.update();
     this.traffic?.update(dt);
     if (this.boats) this.boats.update(dt, (this.boatTime += dt));
-    this.clouds?.update(dt);
+    this.clouds?.update(dt, this.camera.position);
     try {
       this.aircraft?.update(Date.now(), this.camera);
     } catch (e) {

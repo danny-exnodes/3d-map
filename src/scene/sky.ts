@@ -93,6 +93,18 @@ export class SkyDome {
   }
 }
 
+/**
+ * Scale factor 0..1 for a cloud by its distance to the camera: full beyond its ring radius,
+ * gone below half of it, so a cloud the camera passes close to never fills the screen as a white wedge.
+ */
+export function cloudFade(dist: number, ringRadius: number): number {
+  const far = ringRadius;
+  const near = 0.5 * ringRadius;
+  if (!(far > near)) return 1;
+  const t = Math.min(1, Math.max(0, (dist - near) / (far - near)));
+  return t * t * (3 - 2 * t);
+}
+
 /** Low-poly clouds: one InstancedMesh of merged puffs, orbiting the model on a ring. */
 export class CloudLayer {
   readonly mesh: THREE.InstancedMesh;
@@ -102,6 +114,8 @@ export class CloudLayer {
   private readonly scl: THREE.Vector3[] = [];
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
+  private readonly cam = new THREE.Vector3(Infinity, Infinity, Infinity);
+  private readonly s = new THREE.Vector3();
 
   constructor(extent: number) {
     const k = Math.min(2.5, Math.max(0.7, extent / 800));
@@ -144,8 +158,9 @@ export class CloudLayer {
     m.emissive.copy(color);
   }
 
-  update(dt: number) {
+  update(dt: number, cameraPos?: THREE.Vector3) {
     if (this.mesh.count === 0) return;
+    if (cameraPos) this.cam.copy(cameraPos);
     for (let i = 0; i < MAX_CLOUDS; i++) this.ang[i] += (dt * (4 + this.scl[i].x * 0.05)) / this.rad[i];
     this.write();
   }
@@ -154,7 +169,8 @@ export class CloudLayer {
     for (let i = 0; i < this.mesh.count; i++) {
       this.pos[i].x = Math.cos(this.ang[i]) * this.rad[i];
       this.pos[i].z = Math.sin(this.ang[i]) * this.rad[i];
-      this.m.compose(this.pos[i], this.q, this.scl[i]);
+      const f = cloudFade(this.pos[i].distanceTo(this.cam), this.rad[i]);
+      this.m.compose(this.pos[i], this.q, f === 1 ? this.scl[i] : this.s.copy(this.scl[i]).multiplyScalar(f));
       this.mesh.setMatrixAt(i, this.m);
     }
     this.mesh.instanceMatrix.needsUpdate = true;
