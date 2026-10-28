@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { generateDemoCity } from '../src/data/demo';
 import { buildCity } from '../src/scene/buildCity';
 
+const bbox = { south: 20.9992, west: 105.8152, north: 21.0068, east: 105.8238 };
+
 describe('toy landscape', () => {
   it('draws bushes as extra crowns without new meshes and keeps crowns smooth', () => {
-    const bbox = { south: 20.9992, west: 105.8152, north: 21.0068, east: 105.8238 };
     const city = generateDemoCity(bbox);
     // The demo has no parks, so add one covering the north-west quarter.
     const { south, west, north, east } = bbox;
@@ -20,5 +21,13 @@ describe('toy landscape', () => {
     expect((crowns.material as THREE.MeshLambertMaterial).flatShading).toBe(false);
     const g = crowns.geometry;
     expect((g.index ? g.index.count : g.getAttribute('position').count) / 3).toBeLessThanOrEqual(20);
+  });
+
+  it('keeps night bulbs cheap', () => {
+    const { group } = buildCity(generateDemoCity(bbox));
+    const bulbs = group.getObjectByName('lampBulbs') as THREE.InstancedMesh;
+    const g = bulbs.geometry;
+    // Hundreds of lamps: 80 triangles per bulb (8 × 6 sphere) instead of 168.
+    expect((g.index ? g.index.count : g.getAttribute('position').count) / 3).toBeLessThanOrEqual(80);
   });
 });
