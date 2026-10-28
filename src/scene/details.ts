@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { rng } from '../data/rand';
 import type { XZ } from './geometry';
+import { toyDeckContains } from './toyGeometry';
 
 /**
  * Procedural, deterministic street-level detail for Vietnamese archetypes (#5): balconies on
@@ -50,17 +51,40 @@ export class DetailCollector {
     }
   }
 
-  /** Stair hut + water tank on a flat roof; `back` is a point towards the rear of the plot. */
-  rooftop(centre: XZ, back: XZ, axisYaw: number, roofY: number, facade: THREE.Color, seed: number) {
+  /**
+   * Stair hut + water tank on a flat roof; `back` is a point towards the rear of the plot. Toy prototypes pass
+   * `deck`, their roof's usable area (toyRoofDeck of the shrunk box, long axis `axis`): a cube is pulled in
+   * from the rear towards the middle and then scaled down until it lies inside it, or dropped.
+   */
+  rooftop(centre: XZ, back: XZ, axisYaw: number, roofY: number, facade: THREE.Color, seed: number, deck?: { axis: XZ; hx: number; hz: number; r: number }) {
     const r = rng(seed ^ 0x5bd1e995);
     const bx = back[0] - centre[0], bz = back[1] - centre[1];
+    // Position and scale of a box of half-sizes (ax along the long axis, az across) wanted at `frac` of the way to the rear.
+    const fit = (frac: number, ax: number, az: number): { x: number; z: number; s: number } | null => {
+      if (!deck) return { x: centre[0] + bx * frac, z: centre[1] + bz * frac, s: 1 };
+      for (const s of [1, 0.85, 0.7, 0.55]) {
+        for (const t of [1, 0.5, 0]) {
+          const u = bx * frac * t, v = bz * frac * t; // world offset from the centre
+          const along = u * deck.axis[0] + v * deck.axis[1], across = -u * deck.axis[1] + v * deck.axis[0];
+          // The deck's x is the short side (across), z the long side (along).
+          if (toyDeckContains({ hx: deck.hx, hz: deck.hz, r: deck.r }, across, along, az * s, ax * s)) return { x: centre[0] + u, z: centre[1] + v, s };
+        }
+      }
+      return null;
+    };
     if (r() < 0.75) {
-      const hx = centre[0] + bx * 0.45, hz = centre[1] + bz * 0.45;
-      this.place(this.huts, hx, roofY, hz, axisYaw, 2.6, 2.7, 2.8);
-      this.hutColors.push(facade.clone().multiplyScalar(0.92));
-      if (r() < 0.85) this.place(this.tanks, hx, roofY + 2.7 + 0.55, hz, axisYaw, 1, 1, 1);
+      const p = fit(0.45, 1.3, 1.4);
+      if (p) {
+        this.place(this.huts, p.x, roofY, p.z, axisYaw, 2.6 * p.s, 2.7 * p.s, 2.8 * p.s);
+        this.hutColors.push(facade.clone().multiplyScalar(0.92));
+        if (r() < 0.85) {
+          const ts = Math.min(1, (2.6 * p.s) / 1.7);
+          this.place(this.tanks, p.x, roofY + 2.7 * p.s + 0.55 * ts, p.z, axisYaw, ts, ts, ts);
+        }
+      }
     } else if (r() < 0.8) {
-      this.place(this.tanks, centre[0] + bx * 0.3, roofY + 0.55, centre[1] + bz * 0.3, axisYaw, 1, 1, 1);
+      const p = fit(0.3, 0.85, 0.55);
+      if (p) this.place(this.tanks, p.x, roofY + 0.55 * p.s, p.z, axisYaw, p.s, p.s, p.s);
     }
   }
 

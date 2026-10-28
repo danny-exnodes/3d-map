@@ -62,6 +62,30 @@ export function toyRadius(sx: number, sz: number): number {
 }
 
 /**
+ * The flat roof's usable deck for a prototype of footprint sx × sz, in the house's own frame (x: sx, z: sz),
+ * centred on the footprint: a rounded rectangle of half-extents (hx, hz) and corner radius r. The slab top is
+ * the wall top (y offset 0 from the roof instance, see toyFlatRoofUnit). The slab is flat out to LIP_INSET, but
+ * its edge shades round, so objects keep to the wall line: the outline inset by TOY.inset, bevels included.
+ */
+export function toyRoofDeck(sx: number, sz: number): { hx: number; hz: number; r: number } {
+  return { hx: Math.max(0, sx / 2 - TOY.inset), hz: Math.max(0, sz / 2 - TOY.inset), r: toyRadius(sx, sz) };
+}
+
+/** True when the axis-aligned box centred (cx, cz) with half-sizes (ax, az) lies inside the deck (rounded corners included). */
+export function toyDeckContains(deck: { hx: number; hz: number; r: number }, cx: number, cz: number, ax: number, az: number): boolean {
+  const eps = 1e-6;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const x = Math.abs(cx + sx * ax), z = Math.abs(cz + sz * az);
+      if (x > deck.hx + eps || z > deck.hz + eps) return false;
+      const px = x - (deck.hx - deck.r), pz = z - (deck.hz - deck.r);
+      if (px > 0 && pz > 0 && Math.hypot(px, pz) > deck.r + eps) return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Places a toy vertex for a house of the given size (m): per horizontal axis
  * `corner × (size/2 − r) + r × dir + offset`, vertically `corner.y × size.y + offset.y`.
  * `dir` is the vertex's aBevel.xy and defaults to the corner itself (a sharp vertex).

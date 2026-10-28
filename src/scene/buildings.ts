@@ -8,7 +8,7 @@ import { MeshBuilder, type XZ } from './geometry';
 import { PrototypeCollector } from './prototypes';
 import { buildRoof, flatCap, minAreaRect } from './roofs';
 import { SpatialGrid } from './spatial';
-import { TOY, TOY_FACADE, TOY_GLSL, toyFlatWidths } from './toyGeometry';
+import { TOY, TOY_FACADE, TOY_GLSL, toyFlatWidths, toyRoofDeck } from './toyGeometry';
 import { PLINTH_SHADE, toyColor } from './toyPalette';
 
 /** Integer codes of HeightSource stored in aSeed (see the "theo nguồn chiều cao" view, #3). */
@@ -216,16 +216,17 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
       for (const [a, c, d] of tris) mb.triDown(V(contour[a], y0), V(contour[c], y0), V(contour[d], y0));
     }
 
-    // Street-level detail for houses (#5).
+    // Street-level detail for houses (#5). Rooftop cubes of prototypes stay on the toy slab's deck.
+    const protoDeck = proto ? { axis: rect.axis, ...toyRoofDeck(rect.short, rect.long) } : undefined;
     if (tubeDetail && ends) {
       const levels = Math.max(1, Math.round(y1 / LEVEL_H));
       const [a, c] = ends.front;
       // Toy houses: against the inset wall, between the bevels.
       const toy = proto ? { inset: TOY.inset, maxWidth: toyFlatWidths(rect.short, rect.long)[0] } : undefined;
       details.balconies(a, c, levels, LEVEL_H, h, toy);
-      if (b.roof === 'flat') details.rooftop(rect.centre, mid(ends.rear), Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h);
+      if (b.roof === 'flat') details.rooftop(rect.centre, mid(ends.rear), Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h, protoDeck);
     } else if (arch === 'generic' && b.roof === 'flat' && y1 < 25 && area < 400 && rect.short > 3) {
-      details.rooftop(rect.centre, rect.corners[2], Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h);
+      details.rooftop(rect.centre, rect.corners[2], Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h, protoDeck);
     }
   });
 
