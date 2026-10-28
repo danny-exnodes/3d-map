@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import fixture from './fixtures/adsbfi-hanoi.json';
-import { DEFAULT_FLIGHTS_RELAY, fetchFlights, flightsRelay, flightsUrl, parseFlights } from '../src/data/flights';
+import { DEFAULT_FLIGHTS_RELAY, fetchFlights, flightsRelay, flightsUrl, parseFlights, validRelay } from '../src/data/flights';
 
 const NOW = 1_000_000;
 const store = (v: string | null) => ({ getItem: () => v }) as unknown as Storage;
@@ -63,6 +63,20 @@ describe('flightsRelay', () => {
       expect(flightsRelay('?flights=' + encodeURIComponent(bad), store(bad), false)).toBeNull();
     }
     expect(flightsRelay('?flights=/relay', null, false)).toBe('/relay');
+  });
+});
+
+describe('validRelay', () => {
+  const base = 'http://localhost:5173';
+  it('refuses paths a browser resolves off-origin (backslash, tab, newline, space, control)', () => {
+    for (const bad of ['/\\evil.test', '/\t/evil.test', '/\n/evil.test', '/\r/evil.test', '/ /evil.test', '/\u0001/x', '//evil.test', '/\\/evil.test', 'https:///evil', 'http://a.test', 'javascript:alert(1)', 'flights', 'https://a b.test']) {
+      expect(validRelay(bad, base), JSON.stringify(bad)).toBe(false);
+    }
+  });
+  it('accepts https URLs and same-origin paths', () => {
+    expect(validRelay('https://relay.example.workers.dev', base)).toBe(true);
+    expect(validRelay('/flights-api', base)).toBe(true);
+    expect(validRelay('/a/b?c=d', 'https://tinymap.test')).toBe(true);
   });
 });
 

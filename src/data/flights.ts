@@ -49,9 +49,19 @@ export function parseFlights(json: unknown, now: number): Flight[] {
   return out;
 }
 
-/** https URLs, or a same-origin path (not protocol-relative). */
-function validRelay(v: string): boolean {
-  return /^https:\/\/[^\s/]/.test(v) || (v.startsWith('/') && !v.startsWith('//'));
+/**
+ * https URLs, or a path on the page's own origin. The value is parsed the way fetch will parse it, so
+ * `/\evil.test` or `/<TAB>/evil.test` (which browsers read as off-origin) are refused up front.
+ */
+export function validRelay(v: string, base: string = typeof location === 'undefined' ? 'https://localhost' : location.origin): boolean {
+  if (/[\\\s\u0000-\u001f]/.test(v)) return false;
+  try {
+    if (/^https:\/\/[^/]/i.test(v)) return new URL(v).protocol === 'https:';
+    if (!v.startsWith('/') || v.startsWith('//')) return false;
+    return new URL(v, base).origin === new URL(base).origin;
+  } catch {
+    return false;
+  }
 }
 
 /** `?flights=<url>` > `tinymap:flightsRelay` > DEFAULT_FLIGHTS_RELAY > the Vite dev proxy > none. */

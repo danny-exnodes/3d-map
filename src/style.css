@@ -106,6 +106,8 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .poi-label { position: absolute; left: 0; top: 0; background: #e8553a; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 10px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); }
 .poi-label::before { content: '● '; font-size: 8px; vertical-align: middle; }
+.plane-label { background: #2f6fb5; }
+.plane-label::before { content: '✈ '; font-size: 10px; }
 .info { position: absolute; top: 12px; left: 12px; padding: 10px 12px; max-width: min(360px, calc(100% - 24px)); font-size: 13px; }
 .info .small { margin-top: 2px; }
 .weather { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }

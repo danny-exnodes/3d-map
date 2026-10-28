@@ -106,6 +106,7 @@
           <div class="strong" id="i-title">Vùng mới</div>
           <div class="muted small" id="i-stats"></div>
           <div class="muted small" id="i-traffic"></div>
+          <div class="muted small" id="i-flights" hidden></div>
           <div class="small"><a href="#" id="btn-gtraffic" title="Dùng Google Routes API với API key của bạn (có tính phí)">🚦 Lấy giao thông thực từ Google…</a> <span class="muted" id="g-status"></span></div>
           <div class="muted small" id="i-sources"></div>
           <div class="weather" id="i-weather"><span class="w-icon">☀️</span><b id="w-temp">--°</b><span><span id="w-label">Thời tiết</span><br /><small class="muted" id="w-time"></small></span></div>
@@ -118,12 +119,20 @@
           <button id="btn-mood" class="toggle" title="Đổi khung cảnh trong ngày">Nắng trưa</button>
           <button id="btn-style" class="toggle" title="Đổi kiểu mô hình: Đồ chơi → Khối → Siêu thực">Đồ chơi</button>
           <button id="btn-weather" class="toggle" title="Chọn thời tiết" aria-haspopup="menu" aria-expanded="false" aria-controls="weather-menu">🔄</button>
+          <button id="btn-flights" class="toggle" title="Máy bay thật trên bầu trời (adsb.fi)" aria-pressed="false">✈</button>
           <button id="btn-space" class="toggle" title="Space view: bay lên vũ trụ nhìn trái đất">🌍</button>
           <button id="btn-shot" title="Chụp ảnh PNG">📷</button>
           <button id="btn-glb" title="Tải mô hình .glb">⭳</button>
           <button id="btn-back" title="Hiện / ẩn bản đồ">⇆</button>
         </div>
         <div id="weather-menu" class="menu card" role="menu" aria-label="Thời tiết" hidden></div>
+        <div id="plane-info" class="building-info card" hidden>
+          <button id="pi-close" class="bi-close" title="Đóng (Esc)">✕</button>
+          <div class="strong bi-title" id="pi-title"></div>
+          <div class="muted small" id="pi-kind"></div>
+          <dl id="pi-facts"></dl>
+          <div class="muted small">Vị trí vẽ chỉ gần đúng: khoảng cách và độ cao đã được nén.</div>
+        </div>
         <div id="building-info" class="building-info card" hidden>
           <button id="bi-close" class="bi-close" title="Đóng (Esc)">✕</button>
           <div class="strong bi-title" id="bi-title"></div>

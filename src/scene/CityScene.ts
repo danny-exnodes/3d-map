@@ -27,6 +27,8 @@ import { bakeToyInstances } from './toyGeometry';
 import { tiltShiftStrength } from './tiltShift';
 import { Boats, boatRoutes } from './boats';
 import { Traffic } from './traffic';
+import type { Aircraft } from './aircraft';
+import type { Flight } from '../data/flights';
 
 export interface BuildStats {
   buildings: number;
@@ -81,6 +83,10 @@ export class CityScene {
   private city = new THREE.Group();
   private traffic: Traffic | null = null;
   private boats: Boats | null = null;
+  private aircraft: Aircraft | null = null;
+  /** Latest planes, kept so a lazily loaded or rebuilt `Aircraft` starts with them. */
+  private flights: Flight[] = [];
+  private wantPlanes = false;
   private boatTime = 0;
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
@@ -94,6 +100,8 @@ export class CityScene {
   private raycaster = new THREE.Raycaster();
   /** Called with the picked building (or null) when the user clicks the model (#10). */
   onPick?: (b: Building | null) => void;
+  /** A plane was clicked (or, with null, something else was). */
+  onPickPlane?: (f: Flight | null) => void;
   private sourceView = false;
   private rain: THREE.Points | null = null;
   private rainLevel: 0 | 1 | 2 = 0;
@@ -401,6 +409,7 @@ export class CityScene {
     }
     for (const l of this.labels) l.el.remove();
     this.labels = [];
+    this.dropAircraft();
     if (this.clouds) {
       this.scene.remove(this.clouds.mesh);
       this.clouds.dispose();
@@ -481,10 +490,19 @@ export class CityScene {
 
   /** Raycasts the buildings mesh at a screen point and selects the building under it. */
   pick(clientX: number, clientY: number): Building | null {
-    if (!this.buildingsMesh) return null;
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
+    // A plane in front of the buildings wins.
+    const plane = this.aircraft?.pick(this.raycaster) ?? null;
+    if (plane) {
+      this.select(-1);
+      this.onPick?.(null);
+      this.onPickPlane?.(plane);
+      return null;
+    }
+    this.onPickPlane?.(null);
+    if (!this.buildingsMesh) return null;
     // Exact buildings carry the id per vertex, prototype instances per instance (#22).
     const hit = this.raycaster.intersectObjects([this.buildingsMesh, ...this.protoMeshes], false)[0];
     const bidAttr = (hit?.object as THREE.Mesh | undefined)?.geometry.getAttribute('aBid');
@@ -493,6 +511,38 @@ export class CityScene {
     this.select(b ? bid : -1);
     this.onPick?.(b);
     return b;
+  }
+
+  /** Planes on or off. The module loads on first use; it is not part of the bench or of a page without planes. */
+  async setPlanes(on: boolean): Promise<void> {
+    this.wantPlanes = on;
+    if (!on) return this.dropAircraft();
+    if (this.aircraft || !this.proj) return;
+    const proj = this.proj;
+    const { Aircraft } = await import('./aircraft');
+    // Off again, or another model built, while the module loaded.
+    if (!this.wantPlanes || this.aircraft || this.proj !== proj) return;
+    const half = Math.max(this.size.width, this.size.depth) / 2;
+    this.aircraft = new Aircraft(proj, half, { toy: this.builtStyle === 'toy', labelLayer: this.labelLayer });
+    this.scene.add(this.aircraft.group);
+    this.aircraft.setFlights(this.flights, Date.now());
+  }
+
+  setFlights(fs: Flight[]) {
+    this.flights = fs;
+    this.aircraft?.setFlights(fs, Date.now());
+  }
+
+  /** How many planes are being drawn from the last poll. */
+  get planeCount(): number {
+    return this.aircraft?.count ?? 0;
+  }
+
+  private dropAircraft() {
+    if (!this.aircraft) return;
+    this.scene.remove(this.aircraft.group);
+    this.aircraft.dispose();
+    this.aircraft = null;
   }
 
   select(bid: number) {
@@ -764,6 +814,11 @@ export class CityScene {
     this.traffic?.update(dt);
     if (this.boats) this.boats.update(dt, (this.boatTime += dt));
     this.clouds?.update(dt);
+    try {
+      this.aircraft?.update(Date.now(), this.camera);
+    } catch (e) {
+      console.error(e);
+    }
     this.dome.mesh.position.copy(this.camera.position);
     this.pin.update(dt, this.camera);
     const now = performance.now();
