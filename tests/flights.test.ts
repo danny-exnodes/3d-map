@@ -1,0 +1,66 @@
+import { describe, expect, it, vi } from 'vitest';
+import fixture from './fixtures/adsbfi-hanoi.json';
+import { DEFAULT_FLIGHTS_RELAY, fetchFlights, flightsRelay, flightsUrl, parseFlights } from '../src/data/flights';
+
+const NOW = 1_000_000;
+const store = (v: string | null) => ({ getItem: () => v }) as unknown as Storage;
+
+describe('parseFlights', () => {
+  const flights = parseFlights(fixture, NOW);
+
+  it('keeps only rows with a numeric position', () => {
+    expect(flights).toHaveLength(12);
+    expect(flights.find((f) => f.callsign === 'NOPOS')).toBeUndefined();
+  });
+
+  it('converts ground to 0 m, feet to metres and knots to m/s', () => {
+    expect(flights.find((f) => f.callsign === 'VJC939')!.altM).toBe(0);
+    const lao = flights.find((f) => f.callsign === 'LAO924')!;
+    expect(lao.altM).toBeCloseTo(11582.4, 0);
+    expect(lao.gsMs).toBeCloseTo(244.5, 1);
+  });
+
+  it('trims the callsign and fills type, heading and the time of the last position', () => {
+    const f = flights[0];
+    expect(f.callsign).toBe('CKS9602');
+    expect(f.type).toBe('B744');
+    expect(f.trackDeg).toBeCloseTo(104.2);
+    expect(f.seenAt).toBeCloseTo(NOW - 324, 5);
+  });
+
+  it('accepts the adsb.lol "ac" key and tolerates junk', () => {
+    expect(parseFlights({ ac: (fixture as any).aircraft.slice(0, 2) }, NOW)).toHaveLength(2);
+    expect(parseFlights({}, NOW)).toEqual([]);
+    expect(parseFlights(null, NOW)).toEqual([]);
+  });
+});
+
+describe('flightsRelay', () => {
+  it('prefers ?flights=, then storage, then the default, then the dev proxy', () => {
+    expect(flightsRelay('?flights=https://a.test', store('https://b.test'), true)).toBe('https://a.test');
+    expect(flightsRelay('', store('https://b.test'), true)).toBe('https://b.test');
+    expect(DEFAULT_FLIGHTS_RELAY).toBe('');
+    expect(flightsRelay('', store(null), true)).toBe('/flights-api');
+    expect(flightsRelay('', null, false)).toBeNull();
+  });
+});
+
+describe('flightsUrl', () => {
+  it('builds the readsb path with 4 decimals', () => {
+    expect(flightsUrl('/flights-api', 21.03, 105.85, 40)).toBe('/flights-api/v2/lat/21.0300/lon/105.8500/dist/40');
+  });
+});
+
+describe('fetchFlights', () => {
+  it('rejects on a non-2xx response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('slow down', { status: 429 })));
+    await expect(fetchFlights('/flights-api', 21, 105, 40)).rejects.toThrow();
+    vi.unstubAllGlobals();
+  });
+
+  it('parses a good response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(fixture))));
+    expect(await fetchFlights('/flights-api', 21, 105, 40)).toHaveLength(12);
+    vi.unstubAllGlobals();
+  });
+});
