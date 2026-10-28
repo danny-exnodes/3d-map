@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { armLightning, FLASH_MS, GAP_MAX_MS, GAP_MIN_MS, idleLightning, kindFromLive, nextLightning, parseWeatherKind, weatherPreset, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL } from '../src/scene/weather';
+import { armLightning, FLASH_MS, flashHemi, GAP_MAX_MS, GAP_MIN_MS, idleLightning, kindFromLive, nextLightning, parseWeatherKind, weatherPreset, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL } from '../src/scene/weather';
 import { describeWeather, type Weather } from '../src/services/weather';
 
 const live = (code: number, cloudCover = 0.2): Weather => ({ temperature: 30, code, cloudCover, precipitation: 0, ...describeWeather(code) });
@@ -111,6 +111,16 @@ describe('lightning edge cases', () => {
     const off = armLightning(st, false, 4050);
     expect(off.lastEnd).toBe(4050);
     expect(armLightning(off, true, 4060).flashAt).toBeGreaterThanOrEqual(4050 + GAP_MIN_MS);
+  });
+});
+
+describe('lightning brightness', () => {
+  it('adds a fixed boost on the stylised look and stays within 3.5× the base in Siêu thực', () => {
+    expect(flashHemi(1.02, false)).toBeCloseTo(3.52, 6);
+    for (const base of [0.05, 0.15, 0.25]) {
+      expect(flashHemi(base, true)).toBeGreaterThanOrEqual(3 * base);
+      expect(flashHemi(base, true)).toBeLessThanOrEqual(3.5 * base);
+    }
   });
 });
 

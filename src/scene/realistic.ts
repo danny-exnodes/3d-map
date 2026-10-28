@@ -228,7 +228,8 @@ const FADE = /* glsl */ `float rFade() { return clamp(1.0 - length(vViewPosition
  */
 function waterMaterial(orig: THREE.Material): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
-    color: '#ffffff',
+    // The shader sets the colour; this is its average, for exports (GLB) that only see the base colour.
+    color: new THREE.Color().setRGB(0.05, 0.18, 0.23),
     vertexColors: false,
     roughness: 0.04,
     metalness: 0,
@@ -634,14 +635,21 @@ export class Realism {
     this.saved = [];
   }
 
-  /** Forget saved state of meshes that were disposed with the city (new build). */
+  /** Forget saved state of meshes that are disposed with the city (new build): free both looks' materials and the replaced geometries. */
   reset() {
     for (const s of this.saved) {
       const now = s.mesh.material;
       (Array.isArray(now) ? now : [now]).forEach((m) => m.dispose());
       (Array.isArray(s.material) ? s.material : [s.material]).forEach((m) => m.dispose());
+      s.geometry?.dispose();
     }
     this.saved = [];
+  }
+
+  /** Frees the environment map when the model is no longer Siêu thực; update() makes a new one. */
+  releaseEnvironment() {
+    this.envRT?.dispose();
+    this.envRT = null;
   }
 
   private replacementFor(mesh: THREE.Mesh): { material: THREE.Material | THREE.Material[]; geometry?: THREE.BufferGeometry } | null {
@@ -739,9 +747,12 @@ export class Realism {
 
   dispose() {
     this.reset();
-    this.envRT?.dispose();
+    this.releaseEnvironment();
     this.pmrem.dispose();
     this.envDome.dispose();
+    (this.envScene.children[0] as THREE.Mesh).geometry.dispose();
+    this.sky.geometry.dispose();
+    this.sky.material.dispose();
     this.crown?.dispose();
   }
 }

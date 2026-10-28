@@ -68,7 +68,9 @@ describe('Siêu thực (#19)', () => {
       const mat = r.material as THREE.MeshStandardMaterial;
       expect(mat.isMeshStandardMaterial, name).toBe(true);
       expect(mat.defines, name).toHaveProperty('TOY_PROTO');
-      // Without the toy placement every vertex would sit on the unit box: houses collapse.
+      // With the Khối params each unit's `position` is already the exact unit box, so the shape alone does not
+      // show a missing placement. What this guards: the realistic material keeps the Khối material's vertex
+      // side (TOY_PROTO, the same placement and normal code with the Khối params) and the toy depth material.
       const { vertexShader } = compiled(mat);
       expect(vertexShader).toContain(toyGlsl(toyParamsFor('block')));
       expect(vertexShader).toMatch(/#include <begin_vertex>\s*#ifdef TOY_PROTO\s*transformed = toyTransformed\(\);/);
@@ -89,6 +91,45 @@ describe('Siêu thực (#19)', () => {
     // Exactly modelled buildings keep their geometry.
     const exact = (g: THREE.Group) => box((g.getObjectByName('buildings') as THREE.Mesh).geometry);
     expect(near(exact(real), exact(block))).toBe(true);
+  });
+
+  it('reset() disposes the realistic materials and the original materials and geometries it replaced', () => {
+    const { group } = buildCity(generateDemoCity(bbox), () => {}, 'real');
+    const disposed = new Set<object>();
+    const watch = (x: THREE.Material | THREE.BufferGeometry) => x.addEventListener('dispose', () => disposed.add(x));
+    const originals: (THREE.Material | THREE.BufferGeometry)[] = [];
+    group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) originals.push(mat);
+      if (m.name === 'crowns') originals.push(m.geometry);
+    });
+    originals.forEach(watch);
+    const realism = new Realism({} as THREE.WebGLRenderer);
+    realism.apply(group);
+    const swapped: THREE.Material[] = [];
+    group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) swapped.push(...(Array.isArray(m.material) ? m.material : [m.material]));
+    });
+    swapped.forEach(watch);
+    realism.reset();
+    for (const x of [...originals, ...swapped]) expect(disposed.has(x), (x as THREE.Material).type).toBe(true);
+    // Nothing is left to restore.
+    const crowns = group.getObjectByName('crowns') as THREE.Mesh;
+    realism.restore();
+    expect((crowns.material as THREE.Material).type).toBe('MeshStandardMaterial');
+  });
+
+  it('gives exported water its shaded colour, not white', () => {
+    const { group } = buildCity(generateDemoCity(bbox), () => {}, 'real');
+    new Realism({} as THREE.WebGLRenderer).apply(group);
+    const water = (group.getObjectByName('water') as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    expect(water.color.getHexString()).not.toBe('ffffff');
+    // Deep blue-green, as the shader draws it.
+    expect(water.color.b).toBeGreaterThan(water.color.r);
+    expect(water.color.g).toBeGreaterThan(water.color.r);
+    expect(Math.max(water.color.r, water.color.g, water.color.b)).toBeLessThan(0.4);
   });
 
   it('keeps painted vehicles and plain pedestrians in separate programs', () => {

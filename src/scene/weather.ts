@@ -100,3 +100,9 @@ export function nextLightning(st: LightningState, now: number, rand: number): Li
 }
 
 export const isFlashing = (st: LightningState) => st.flashEnd > 0;
+
+/**
+ * Hemisphere intensity during a flash: a fixed boost on the stylised looks (about 3.5× a storm's base);
+ * in Siêu thực, whose hemisphere light is only a small part of the ambient, 3.5× its base.
+ */
+export const flashHemi = (base: number, real: boolean) => (real ? base * 3.5 : base + 2.5);
