@@ -3,7 +3,6 @@ import { LocationPin } from './locationPin';
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -43,8 +42,6 @@ export class CityScene {
   readonly controls: MapControls;
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
-  /** Ambient occlusion pass; constructed but disabled. */
-  private gtao: GTAOPass;
   private sunDir = new THREE.Vector3(0, 1, 0);
   private night = 0;
   private lightDirty = false;
@@ -139,12 +136,6 @@ export class CityScene {
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.gtao = new GTAOPass(this.scene, this.camera, 512, 512);
-    this.gtao.updateGtaoMaterial({ radius: 6, distanceExponent: 1.5, thickness: 4, scale: 1.2, samples: 12 });
-    this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6 });
-    this.gtao.blendIntensity = 0.9;
-    this.gtao.enabled = false;
-    this.composer.addPass(this.gtao);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.2, 0.5, 0.92);
     this.composer.addPass(this.bloom);
     this.tiltH = new ShaderPass(HorizontalTiltShiftShader);
