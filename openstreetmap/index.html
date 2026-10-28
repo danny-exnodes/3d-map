@@ -73,6 +73,12 @@
           <button id="btn-cancel" class="ghost small">Huỷ</button>
         </div>
         <footer class="map-bottom card">
+          <div id="mood-picker" class="moods" title="Chọn khung cảnh trong ngày cho mô hình 3D">
+            <button data-mood="morning"><i></i>Buổi sáng</button>
+            <button data-mood="noon"><i></i>Nắng trưa</button>
+            <button data-mood="golden"><i></i>Hoàng hôn</button>
+            <button data-mood="night"><i></i>Đêm ấm</button>
+          </div>
           <div>
             <div><span class="dot accent"></span> <span id="area-label">Chưa chọn vùng</span></div>
             <div class="muted small" id="area-hint">Bấm ▭ rồi kéo (hoặc Shift + kéo) để vẽ một khu, tối đa ~4 km². Kéo góc hoặc tâm để chỉnh.</div>
@@ -101,12 +107,12 @@
           <span class="compass" id="t-view">0° B<br /><small>nghiêng 0°</small></span>
           <button id="btn-traffic" class="toggle" title="Lớp giao thông">🚦</button>
           <button id="btn-sources" class="toggle" title="Tô màu nhà theo nguồn chiều cao">📏</button>
-          <button id="btn-mono" class="toggle" title="Chế độ xem: Có màu → Đơn sắc (mô hình kiến trúc) → Siêu thực">◑ Có màu</button>
           <button id="btn-pixel" class="toggle" title="Chế độ pixel">▦ Pixel</button>
+          <button id="btn-mood" class="toggle" title="Đổi khung cảnh trong ngày">Nắng trưa</button>
           <button id="btn-rain" class="toggle" title="Bật/tắt mưa">🌧</button>
           <button id="btn-space" class="toggle" title="Space view: bay lên vũ trụ nhìn trái đất">🌍</button>
           <button id="btn-shot" title="Chụp ảnh PNG">📷</button>
-          <button id="btn-glb" title="Tải mô hình .glb (theo chế độ màu đang chọn)">⭳</button>
+          <button id="btn-glb" title="Tải mô hình .glb">⭳</button>
           <button id="btn-back" title="Hiện / ẩn bản đồ">⇆</button>
         </div>
         <div id="building-info" class="building-info card" hidden>

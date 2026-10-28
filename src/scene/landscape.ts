@@ -2,19 +2,21 @@ import * as THREE from 'three';
 import { rng } from '../data/rand';
 import type { AreaFeature, CityData } from '../data/types';
 import { bboxSizeMeters, pointInRing, type LocalProjection } from '../geo/projection';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { flatPolygon, merge, MeshBuilder, ribbon, sampleAlong, type XZ } from './geometry';
 import type { RoadPath } from './roads';
 import type { SpatialGrid } from './spatial';
+import { TOY_GRASS, TOY_GROUND, TOY_TREES, TOY_WATER } from './toyPalette';
 
 const AREA_COLORS: Record<AreaFeature['kind'], string> = {
-  water: '#5fa8d8',
-  park: '#8cc66b',
-  grass: '#9fd07a',
-  forest: '#6aa752',
+  water: TOY_WATER,
+  park: TOY_GRASS,
+  grass: TOY_GRASS,
+  forest: TOY_TREES[2],
   plaza: '#e2d8c2',
   parking: '#b9b4aa',
 };
-export const GROUND_COLOR = '#e8dcc0';
+export const GROUND_COLOR = TOY_GROUND;
 
 export interface LandscapeResult {
   group: THREE.Group;
@@ -80,7 +82,7 @@ export function buildLandscape(
   if (waterGeo) {
     water = new THREE.Mesh(
       waterGeo,
-      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.15, metalness: 0.1, depthWrite: false }),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1, depthWrite: false }),
     );
     water.renderOrder = -8;
     water.receiveShadow = true;
@@ -112,6 +114,7 @@ export function buildLandscape(
       }
     });
   }
+  const bushSpots: [number, number, number][] = [];
   for (const ring of parkRings) {
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (const [x, z] of ring) {
@@ -123,8 +126,18 @@ export function buildLandscape(
       const z = minZ + r() * (maxZ - minZ);
       if (pointInRing(x, z, ring) && free(x, z) && !onRoad(x, z)) spots.push([x, z, 0.8 + r() * 0.7]);
     }
+    // One bush per 60 m² of park, 300 at most in all.
+    const nb = Math.min(BUSH_CAP - bushSpots.length, Math.floor(ringArea(ring) / 60));
+    for (let i = 0, tries = 0; i < nb && tries < nb * 4; tries++) {
+      const x = minX + r() * (maxX - minX);
+      const z = minZ + r() * (maxZ - minZ);
+      if (pointInRing(x, z, ring) && free(x, z) && !onRoad(x, z)) {
+        bushSpots.push([x, z, 0.35 + r() * 0.15]);
+        i++;
+      }
+    }
   }
-  const trees = buildTrees(spots, r);
+  const trees = buildTrees(spots, bushSpots, r);
   if (trees) group.add(trees);
 
   // Street lamps: thin posts plus emissive bulbs that only show at night.
@@ -132,14 +145,19 @@ export function buildLandscape(
   let lampBulbs: THREE.InstancedMesh | null = null;
   const lampList = lampSpots.filter(([x, , z]) => Math.abs(x) < width / 2 && Math.abs(z) < depth / 2 && !footprints.contains(x, z, 0));
   if (lampList.length) {
-    const post = new THREE.CylinderGeometry(0.08, 0.1, 6, 5).translate(0, 3, 0);
-    const bulb = new THREE.SphereGeometry(0.35, 6, 4);
+    // Post, arm and head in one geometry; the arm points along +x and each lamp is turned towards the carriageway.
+    const post = mergeGeometries([
+      new THREE.CylinderGeometry(0.2, 0.26, 6, 6, 1, true).translate(0, 3, 0),
+      new THREE.CylinderGeometry(0.1, 0.1, 1.2, 4, 1, true).rotateZ(Math.PI / 2).translate(0.6, 6, 0),
+      new THREE.SphereGeometry(0.45, 6, 4).translate(1.2, 6, 0),
+    ])!;
+    const bulb = new THREE.SphereGeometry(0.5, 8, 6);
     lamps = new THREE.InstancedMesh(post, new THREE.MeshLambertMaterial({ color: '#55585f' }), lampList.length);
     lampBulbs = new THREE.InstancedMesh(bulb, new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 2.8, 1.4), toneMapped: false }), lampList.length);
     const m = new THREE.Matrix4();
     // Spots store travel direction × side; (oz, -ox) points back towards the carriageway.
     lampList.forEach(([x, y, z, ox, oz], i) => {
-      lamps!.setMatrixAt(i, m.makeTranslation(x, y, z));
+      lamps!.setMatrixAt(i, m.makeRotationY(Math.atan2(ox, oz)).setPosition(x, y, z));
       lampBulbs!.setMatrixAt(i, m.makeTranslation(x + oz * 1.2, y + 6, z - ox * 1.2));
     });
     lamps.name = 'lamps';
@@ -167,19 +185,41 @@ function roadMask(roads: RoadPath[]): (x: number, z: number) => boolean {
   return (x, z) => set.has(`${Math.round(x / cell)},${Math.round(z / cell)}`);
 }
 
-function buildTrees(spots: [number, number, number][], r: () => number): THREE.Group | null {
+const BUSH_CAP = 300;
+
+function ringArea(ring: XZ[]): number {
+  let a = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const [x1, z1] = ring[i];
+    const [x2, z2] = ring[(i + 1) % ring.length];
+    a += x1 * z2 - x2 * z1;
+  }
+  return Math.abs(a) / 2;
+}
+
+/** Smooth-shaded 20-triangle blob: merged vertices let vertex normals round the icosahedron. */
+function toyCrown(): THREE.BufferGeometry {
+  const ico = new THREE.IcosahedronGeometry(2.2, 0);
+  ico.deleteAttribute('normal');
+  ico.deleteAttribute('uv');
+  const g = mergeVertices(ico);
+  g.computeVertexNormals();
+  return g.translate(0, 3.4, 0);
+}
+
+function buildTrees(spots: [number, number, number][], bushes: [number, number, number][], r: () => number): THREE.Group | null {
   if (!spots.length) return null;
   const g = new THREE.Group();
   g.name = 'trees';
-  const crown = new THREE.IcosahedronGeometry(1.9, 0).translate(0, 4.2, 0);
-  const trunk = new THREE.CylinderGeometry(0.18, 0.25, 2.8, 5).translate(0, 1.4, 0);
-  const crowns = new THREE.InstancedMesh(crown, new THREE.MeshLambertMaterial({ flatShading: true }), spots.length);
+  const crown = toyCrown();
+  const trunk = new THREE.CylinderGeometry(0.4, 0.5, 1.6, 6, 1, true).translate(0, 0.8, 0);
+  const crowns = new THREE.InstancedMesh(crown, new THREE.MeshLambertMaterial(), spots.length + bushes.length);
   const trunks = new THREE.InstancedMesh(trunk, new THREE.MeshLambertMaterial({ color: '#7a5a3c' }), spots.length);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const s = new THREE.Vector3();
   const p = new THREE.Vector3();
-  const greens = ['#4f9d3a', '#5cae45', '#69b84d', '#3f8a35', '#78c25a'].map((c) => new THREE.Color(c));
+  const greens = TOY_TREES.map((c) => new THREE.Color(c));
   spots.forEach(([x, z, k], i) => {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * Math.PI * 2);
     s.set(k, k * (0.9 + r() * 0.3), k);
@@ -188,6 +228,15 @@ function buildTrees(spots: [number, number, number][], r: () => number): THREE.G
     crowns.setMatrixAt(i, m);
     trunks.setMatrixAt(i, m);
     crowns.setColorAt(i, greens[Math.floor(r() * greens.length)]);
+  });
+  // Bushes: small crowns sitting on the ground, no trunk.
+  bushes.forEach(([x, z, k], j) => {
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * Math.PI * 2);
+    s.set(k, k, k);
+    p.set(x, 0.4 - 1.53 * k, z);
+    m.compose(p, q, s);
+    crowns.setMatrixAt(spots.length + j, m);
+    crowns.setColorAt(spots.length + j, greens[Math.floor(r() * greens.length)]);
   });
   crowns.name = 'crowns';
   trunks.name = 'trunks';

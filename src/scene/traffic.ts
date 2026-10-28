@@ -123,13 +123,13 @@ function vehicleGeometry(kind: VehicleKind): THREE.BufferGeometry {
 }
 
 const PALETTE: Record<VehicleKind, string[]> = {
-  moto: ['#e9e9e9', '#1f2024', '#c0392b', '#2e86de', '#8e44ad', '#d35400', '#7f8c8d', '#e84393'],
-  bicycle: ['#2d3436', '#0984e3', '#00b894', '#fdcb6e', '#d63031'],
-  car: ['#f2f2f2', '#2b2d33', '#bdc3c7', '#c0392b', '#2e86de', '#7f8c8d', '#ffffff', '#1e3799'],
-  bus: ['#27ae60', '#2e86de', '#16a085', '#e67e22'],
-  truck: ['#f0f0f0', '#2980b9', '#c0392b', '#f39c12'],
+  moto: ['#ffffff', '#f6e3c6', '#f4c7b8', '#cfe5d0', '#f7d9e3', '#fbeec1', '#d6e2f2', '#e08a70', '#9fb5d4'],
+  bicycle: ['#f4c7b8', '#d6e2f2', '#cfe5d0', '#fbeec1', '#e08a70'],
+  car: ['#ffffff', '#f6e3c6', '#f4c7b8', '#cfe5d0', '#f7d9e3', '#fbeec1', '#d6e2f2', '#e08a70', '#d47560', '#eba37c', '#9fb5d4'],
+  bus: ['#cfe5d0', '#d6e2f2', '#eba37c', '#fbeec1'],
+  truck: ['#ffffff', '#9fb5d4', '#e08a70', '#fbeec1'],
 };
-const CLOTHES = ['#2d3436', '#0984e3', '#d63031', '#fdcb6e', '#00b894', '#e17055', '#f5f6fa', '#6c5ce7'];
+const CLOTHES = ['#f4c7b8', '#d6e2f2', '#e08a70', '#fbeec1', '#cfe5d0', '#eba37c', '#ffffff', '#9fb5d4'];
 
 /** Free-flow speed for the kind on a road class, m/s. */
 const speedOf = (kind: VehicleKind, cls: RoadClass) => (kind === 'bicycle' ? 4 : FREE_SPEED[cls] * PACE[kind]);

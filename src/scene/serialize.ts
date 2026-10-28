@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { type BuildingUniforms, createBuildingMaterial } from './buildings';
+import { toyDepthMaterial } from './toyGeometry';
 
 /**
  * Plain-data description of the meshes built in the worker. Typed arrays are transferred,
@@ -48,6 +49,8 @@ function describeMaterial(m: THREE.Material): MaterialDesc {
     const v = (m as unknown as Record<string, unknown>)[k];
     if (typeof v === 'number' || typeof v === 'boolean') params[k] = v;
   }
+  // Toy prototypes place their vertices in the shader (#32).
+  if (m.userData.toyProto) params.toyProto = true;
   const userData: Record<string, number> = {};
   for (const [k, v] of Object.entries(m.userData)) if (typeof v === 'number') userData[k] = v;
   const c = (m as THREE.MeshLambertMaterial).color;
@@ -100,15 +103,16 @@ export function serializeObject(root: THREE.Object3D): { objects: ObjectDesc[]; 
 }
 
 function createMaterial(d: MaterialDesc, shared: { buildings?: BuildingUniforms }): THREE.Material {
+  const { toyProto, ...params } = d.params;
   const m =
     d.kind === 'buildings'
-      ? createBuildingMaterial(shared.buildings, !!d.params.flatShading)
+      ? createBuildingMaterial(shared.buildings, !!toyProto)
       : d.kind === 'standard'
         ? new THREE.MeshStandardMaterial()
         : d.kind === 'basic'
           ? new THREE.MeshBasicMaterial()
           : new THREE.MeshLambertMaterial();
-  m.setValues(d.params as THREE.MaterialParameters);
+  m.setValues(params as THREE.MaterialParameters);
   (m as THREE.MeshLambertMaterial).color?.setRGB(d.color[0], d.color[1], d.color[2]);
   Object.assign(m.userData, d.userData);
   // Exact and prototype buildings share one set of uniforms (night, selection…).
@@ -132,6 +136,7 @@ export function deserializeObjects(objects: ObjectDesc[]): THREE.Group {
       const inst = new THREE.InstancedMesh(g, material, d.count ?? 0);
       inst.instanceMatrix = new THREE.InstancedBufferAttribute(d.instanceMatrix!, 16);
       if (d.instanceColor) inst.instanceColor = new THREE.InstancedBufferAttribute(d.instanceColor, 3);
+      if (mats[0].userData.toyProto) inst.customDepthMaterial = toyDepthMaterial();
       inst.computeBoundingSphere();
       obj = inst;
     } else {

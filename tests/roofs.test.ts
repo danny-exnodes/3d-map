@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { buildingFromOsm } from '../src/data/buildings';
 import { LocalProjection } from '../src/geo/projection';
 import { buildBuildings } from '../src/scene/buildings';
+import { DetailCollector } from '../src/scene/details';
+import { TOY, toyFlatWidths } from '../src/scene/toyGeometry';
 import { MeshBuilder, type XZ } from '../src/scene/geometry';
 import { buildRoof, minAreaRect } from '../src/scene/roofs';
 
@@ -66,5 +68,44 @@ describe('procedural detail', () => {
     balconies.getMatrixAt(0, m);
     expect(new THREE.Vector3().setFromMatrixPosition(m).z).toBeGreaterThan(8);
     expect(res.ids).toEqual(['way/42']);
+  });
+
+  it('sets toy-house balconies against the inset wall, no wider than the flat front', () => {
+    const bbox = { south: 21, west: 105.8, north: 21.001, east: 105.801 };
+    const proj = new LocalProjection(bbox);
+    const ring = rotated(4, 16, 0).map(([x, z]) => proj.unproject(x, z));
+    const b = buildingFromOsm('way/43', [ring], { building: 'yes', 'building:levels': '5' });
+    const res = buildBuildings([b], proj, { roadDistance: (_x, z) => Math.abs(z - 20) });
+    expect(res.instanced.length).toBeGreaterThan(0); // drawn from the toy prototypes
+    const slabs = res.details.getObjectByName('detail-balconies') as THREE.InstancedMesh;
+    const rails = res.details.getObjectByName('detail-railings') as THREE.InstancedMesh;
+    expect(slabs.count).toBeGreaterThanOrEqual(2);
+    const flat = toyFlatWidths(4, 16)[0];
+    const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+    for (let i = 0; i < slabs.count; i++) {
+      slabs.getMatrixAt(i, m);
+      m.decompose(p, q, s);
+      expect(s.x).toBeLessThanOrEqual(flat + 1e-6);
+      // The slab starts at the inset wall (z = 8 − inset) and reaches out by its depth.
+      expect(p.z - s.z / 2).toBeCloseTo(8 - TOY.inset, 3);
+      rails.getMatrixAt(i, m);
+      expect(new THREE.Vector3().setFromMatrixPosition(m).z).toBeCloseTo(8 - TOY.inset + s.z, 3);
+    }
+  });
+
+  it('tints balconies and roof tanks in toy colours (#32)', () => {
+    const c = new DetailCollector();
+    for (let i = 0; i < 12; i++) c.balconies([i * 10, 0], [i * 10 + 5, 0], 4, 3.3, i * 7919);
+    c.rooftop([0, 0], [0, 5], 0, 10, new THREE.Color('#f6e3c6'), 1);
+    const g = c.build();
+    const light = (col: THREE.Color) => col.getHSL({ h: 0, s: 0, l: 0 }, THREE.SRGBColorSpace).l;
+    const slabs = g.getObjectByName('detail-balconies') as THREE.InstancedMesh;
+    expect(light((slabs.material as THREE.MeshLambertMaterial).color)).toBeGreaterThan(0.8);
+    const rails = g.getObjectByName('detail-railings') as THREE.InstancedMesh;
+    const col = new THREE.Color();
+    for (let i = 0; i < rails.count; i++) expect(light(rails.getColorAt(i, col))).toBeGreaterThan(0.6);
+    const tanks = g.getObjectByName('detail-tanks') as THREE.InstancedMesh;
+    expect((tanks.material as THREE.Material).type).toBe('MeshLambertMaterial');
+    expect((tanks.material as THREE.MeshLambertMaterial).color.getHexString()).toBe('e9edf0');
   });
 });

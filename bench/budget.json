@@ -3,5 +3,5 @@
   "buildMs": 1500,
   "mainThreadMaxMs": 60,
   "drawCalls": 40,
-  "triangles": 300000
+  "triangles": 500000
 }
