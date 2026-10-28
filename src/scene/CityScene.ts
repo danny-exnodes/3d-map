@@ -149,7 +149,10 @@ export class CityScene {
     this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group, this.dome.mesh);
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     this.reduceMotion = motion.matches;
-    motion.addEventListener('change', (e) => (this.reduceMotion = e.matches));
+    motion.addEventListener('change', (e) => {
+      this.reduceMotion = e.matches;
+      if (e.matches) this.endFlash();
+    });
     this.scene.fog = new THREE.Fog('#9fd3f2', 2000, 6000);
 
     this.composer = new EffectComposer(this.renderer);
@@ -436,8 +439,8 @@ export class CityScene {
 
   private setRain(level: 0 | 1 | 2) {
     if (level === this.rainLevel && (this.rain !== null) === (level > 0)) return;
-    this.rainLevel = level;
     this.disposeRain();
+    this.rainLevel = level;
     if (level === 0) return;
     const n = level === 2 ? 12000 : 6000;
     const pos = new Float32Array(n * 3);
@@ -452,6 +455,14 @@ export class CityScene {
     this.rain = new THREE.Points(g, new THREE.PointsMaterial({ color: '#cfe3ff', size: 1.2, transparent: true, opacity: 0.6 }));
     this.rain.name = 'rain';
     this.scene.add(this.rain);
+  }
+
+  /** Stop a running flash right away and put the lights back. */
+  private endFlash() {
+    if (!isFlashing(this.lightning)) return;
+    this.lightning = { ...this.lightning, flashEnd: 0, lastEnd: performance.now(), flashAt: performance.now() + 4000 };
+    this.hemi.intensity = this.hemiBase;
+    this.clouds?.setLight(this.cloudLight);
   }
 
   private updateLightning(now: number) {

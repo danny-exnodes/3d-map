@@ -81,6 +81,39 @@ describe('lightning timing', () => {
   });
 });
 
+describe('lightning edge cases', () => {
+  const run = (rand: number) => {
+    let st = armLightning(idleLightning(), true, 0);
+    let now = 0;
+    let lastEnd = -1;
+    let gaps = 0;
+    for (let i = 0; i < 5000; i++) {
+      now += 16;
+      const was = st.flashEnd;
+      st = nextLightning(st, now, rand);
+      if (!was && st.flashEnd && lastEnd >= 0) {
+        expect(now - lastEnd).toBeGreaterThanOrEqual(GAP_MIN_MS);
+        expect(now - lastEnd).toBeLessThanOrEqual(GAP_MAX_MS + 16);
+        gaps++;
+      }
+      if (was && !st.flashEnd) lastEnd = now;
+    }
+    expect(gaps).toBeGreaterThan(3);
+  };
+  it('holds the gap bounds at the random extremes', () => {
+    run(0);
+    run(0.9999);
+  });
+  it('turning off mid-flash remembers when it ended, so off then on still waits', () => {
+    let st = armLightning(idleLightning(), true, 0);
+    st = nextLightning(st, st.flashAt, 0.5);
+    expect(st.flashEnd).toBeGreaterThan(0);
+    const off = armLightning(st, false, 4050);
+    expect(off.lastEnd).toBe(4050);
+    expect(armLightning(off, true, 4060).flashAt).toBeGreaterThanOrEqual(4050 + GAP_MIN_MS);
+  });
+});
+
 describe('parseWeatherKind', () => {
   it('accepts known kinds only', () => {
     expect(parseWeatherKind('storm')).toBe('storm');

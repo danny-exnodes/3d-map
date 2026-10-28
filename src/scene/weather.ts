@@ -84,7 +84,7 @@ export const idleLightning = (): LightningState => ({ flashAt: 0, flashEnd: 0, l
 
 /** Turn lightning on or off. Re-applying "on" keeps the running timer; a fresh start respects the last gap. */
 export function armLightning(st: LightningState, on: boolean, now: number): LightningState {
-  if (!on) return { ...st, flashAt: 0, flashEnd: 0 };
+  if (!on) return { flashAt: 0, flashEnd: 0, lastEnd: st.flashEnd ? now : st.lastEnd };
   if (st.flashAt) return st;
   return { ...st, flashAt: Math.max(now + 1500, st.lastEnd + GAP_MIN_MS), flashEnd: 0 };
 }
