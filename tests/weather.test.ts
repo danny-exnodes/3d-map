@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { kindFromLive, parseWeatherKind, weatherPreset, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL } from '../src/scene/weather';
+import { armLightning, FLASH_MS, GAP_MAX_MS, GAP_MIN_MS, idleLightning, kindFromLive, nextLightning, parseWeatherKind, weatherPreset, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL } from '../src/scene/weather';
 import { describeWeather, type Weather } from '../src/services/weather';
 
 const live = (code: number, cloudCover = 0.2): Weather => ({ temperature: 30, code, cloudCover, precipitation: 0, ...describeWeather(code) });
@@ -40,6 +40,44 @@ describe('kindFromLive', () => {
     expect(kindFromLive(live(45))).toBe('fog');
     expect(kindFromLive(live(61))).toBe('rain');
     expect(kindFromLive(live(95))).toBe('storm');
+  });
+});
+
+describe('lightning timing', () => {
+  it('flashes at most 150 ms with gaps of 4 to 12 s, whatever the random values', () => {
+    expect(FLASH_MS).toBeLessThanOrEqual(150);
+    let st = armLightning(idleLightning(), true, 0);
+    let now = 0;
+    let start = 0;
+    let lastEnd = -1;
+    let flashes = 0;
+    for (let i = 0; i < 20000; i++) {
+      now += 16;
+      const was = st.flashEnd;
+      st = nextLightning(st, now, Math.random());
+      if (!was && st.flashEnd) {
+        start = now;
+        if (lastEnd >= 0) {
+          expect(start - lastEnd).toBeGreaterThanOrEqual(GAP_MIN_MS);
+          expect(start - lastEnd).toBeLessThanOrEqual(GAP_MAX_MS + 16);
+        }
+      }
+      if (was && !st.flashEnd) {
+        lastEnd = now;
+        flashes++;
+        expect(now - start).toBeLessThanOrEqual(150 + 16);
+      }
+    }
+    expect(flashes).toBeGreaterThan(10);
+  });
+  it('re-applying storm keeps the timer, and a restart waits out the last gap', () => {
+    let st = armLightning(idleLightning(), true, 0);
+    st = nextLightning(st, 1500, 0.5);
+    st = nextLightning(st, 1500 + FLASH_MS, 0.5);
+    const gapAt = st.flashAt;
+    expect(armLightning(st, true, 1500 + FLASH_MS + 10).flashAt).toBe(gapAt);
+    const off = armLightning(st, false, 2000);
+    expect(armLightning(off, true, 2000).flashAt).toBeGreaterThanOrEqual(st.lastEnd + GAP_MIN_MS);
   });
 });
 

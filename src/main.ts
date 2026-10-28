@@ -737,7 +737,7 @@ function closeBuildingInfo() {
   city?.select(-1);
 }
 $('bi-close').addEventListener('click', closeBuildingInfo);
-document.addEventListener('keydown', (e) => e.key === 'Escape' && closeBuildingInfo());
+document.addEventListener('keydown', (e) => e.key === 'Escape' && !weatherMenuOpen() && closeBuildingInfo());
 
 // ---------- Weather ----------
 
@@ -757,19 +757,22 @@ let weatherBox: BBox | null = null;
 /** What the weather card shows in Tự động when there is no live reading. */
 let autoCard = { icon: '☀️', label: 'Thời tiết' };
 
+const effectiveKind = (): WeatherKind => (BENCH ? 'clear' : weatherKind);
+
 function showWeatherCard() {
-  const manual = weatherKind !== 'auto';
-  document.querySelector('.w-icon')!.textContent = manual ? WEATHER_ICON[weatherKind] : autoCard.icon;
-  $('w-label').textContent = manual ? `${WEATHER_LABEL[weatherKind]} (chọn tay)` : autoCard.label;
-  $('btn-weather').textContent = WEATHER_ICON[weatherKind];
-  $('btn-weather').title = `Thời tiết: ${WEATHER_LABEL[weatherKind]}`;
-  document.querySelectorAll<HTMLButtonElement>('#weather-menu button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === weatherKind)));
+  const kind = effectiveKind();
+  const manual = kind !== 'auto';
+  document.querySelector('.w-icon')!.textContent = manual ? WEATHER_ICON[kind] : autoCard.icon;
+  $('w-label').textContent = manual ? `${WEATHER_LABEL[kind]} (chọn tay)` : autoCard.label;
+  $('btn-weather').textContent = WEATHER_ICON[kind];
+  $('btn-weather').title = `Thời tiết: ${WEATHER_LABEL[kind]}`;
+  document.querySelectorAll<HTMLButtonElement>('#weather-menu button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === kind)));
 }
 
 function applyWeather() {
   showWeatherCard();
   if (!city) return;
-  const kind = BENCH ? 'clear' : weatherKind;
+  const kind = effectiveKind();
   if (kind !== 'auto') return city.setWeather(weatherPreset(kind));
   if (!liveWeather) return city.setWeather(weatherPreset('clear'));
   const k = kindFromLive(liveWeather);
@@ -793,6 +796,9 @@ async function loadWeather(b: BBox) {
 }
 
 const weatherMenu = $('weather-menu');
+function weatherMenuOpen() {
+  return !weatherMenu.hidden;
+}
 const weatherBtn = $('btn-weather');
 for (const kind of WEATHER_KINDS) {
   const item = document.createElement('button');
@@ -829,7 +835,16 @@ function closeWeatherMenu(refocus = true) {
   if (refocus) weatherBtn.focus();
 }
 weatherBtn.addEventListener('click', () => (weatherMenu.hidden ? openWeatherMenu() : closeWeatherMenu()));
-document.addEventListener('keydown', (e) => e.key === 'Escape' && closeWeatherMenu());
+document.addEventListener('keydown', (e) => {
+  if (!weatherMenuOpen()) return;
+  if (e.key === 'Escape') closeWeatherMenu();
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const items = [...weatherMenu.querySelectorAll<HTMLButtonElement>('button')];
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+  }
+});
 document.addEventListener('pointerdown', (e) => {
   if (!weatherMenu.hidden && !weatherMenu.contains(e.target as Node) && !weatherBtn.contains(e.target as Node)) closeWeatherMenu(false);
 });

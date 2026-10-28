@@ -16,7 +16,7 @@ import { buildCity } from './buildCity';
 import type { RailPath, RoadPath } from './roads';
 import { deserializeObjects } from './serialize';
 import { createLampPools, litShare } from './nightLights';
-import { type WeatherPreset, weatherPreset } from './weather';
+import { armLightning, idleLightning, isFlashing, type LightningState, nextLightning, type WeatherPreset, weatherPreset } from './weather';
 import { dominantMood, isRising, moodLighting, type Mood } from './moods';
 import { sunState, type SunState } from './sun';
 import { CloudLayer, SkyDome } from './sky';
@@ -71,9 +71,9 @@ export class CityScene {
   private fogBase = { near: 2000, far: 6000 };
   private hemiBase = 1.2;
   private lastTime: { date: Date; hour: number } | null = null;
-  /** Lightning: next flash start and end (performance.now ms); 0 when idle. */
-  private flashAt = 0;
-  private flashEnd = 0;
+  private lightning: LightningState = idleLightning();
+  private reduceMotion = false;
+  private slate = new THREE.Color('#6b7480');
   private timer = new THREE.Timer();
   private size = { width: 1000, depth: 1000 };
   private proj: LocalProjection | null = null;
@@ -147,6 +147,9 @@ export class CityScene {
     this.sun.shadow.normalBias = 0.6;
     this.sun.shadow.radius = 3;
     this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group, this.dome.mesh);
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this.reduceMotion = motion.matches;
+    motion.addEventListener('change', (e) => (this.reduceMotion = e.matches));
     this.scene.fog = new THREE.Fog('#9fd3f2', 2000, 6000);
 
     this.composer = new EffectComposer(this.renderer);
@@ -344,6 +347,8 @@ export class CityScene {
     // limited rate instead of on every slider event (#22).
     this.lightDirty = true;
     this.lastSky.copy(L.sky);
+    // Storm clouds grey the whole sky; at night the slate darkens with it.
+    this.lastSky.lerp(this.slate.clone().multiplyScalar(1 - 0.85 * s.night), this.weather.grey);
     this.applySky();
     this.bloom.strength = 0.06 + s.night * 0.4;
     this.bloom.threshold = s.night > 0.5 ? 0.8 : 0.95;
@@ -416,12 +421,12 @@ export class CityScene {
     const fog = this.scene.fog as THREE.Fog;
     fog.near = this.fogBase.near * p.fogScale;
     fog.far = this.fogBase.far * p.fogScale;
-    this.flashAt = p.lightning ? performance.now() + 1500 : 0;
-    this.flashEnd = 0;
+    this.lightning = armLightning(this.lightning, p.lightning, performance.now());
     if (this.lastTime) this.setTime(this.lastTime.date, this.lastTime.hour);
   }
 
   private disposeRain() {
+    this.rainLevel = 0;
     if (!this.rain) return;
     this.scene.remove(this.rain);
     this.rain.geometry.dispose();
@@ -449,19 +454,14 @@ export class CityScene {
     this.scene.add(this.rain);
   }
 
-  /** A flash is at most 150 ms, with 4 to 12 s of calm between flashes. */
   private updateLightning(now: number) {
-    if (this.flashEnd) {
-      if (now < this.flashEnd) return;
-      this.flashEnd = 0;
-      this.flashAt = now + 4000 + Math.random() * 8000;
-      this.hemi.intensity = this.hemiBase;
-      this.clouds?.setLight(this.cloudLight);
-    } else if (this.flashAt && now >= this.flashAt) {
-      this.flashEnd = now + 120;
-      this.hemi.intensity = this.hemiBase + 2.5;
-      this.clouds?.setLight(this.white);
-    }
+    if (this.reduceMotion) return;
+    const was = isFlashing(this.lightning);
+    this.lightning = nextLightning(this.lightning, now, Math.random());
+    const is = isFlashing(this.lightning);
+    if (is === was) return;
+    this.hemi.intensity = is ? this.hemiBase + 2.5 : this.hemiBase;
+    this.clouds?.setLight(is ? this.white : this.cloudLight);
   }
 
   /**

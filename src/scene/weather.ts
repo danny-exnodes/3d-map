@@ -34,14 +34,16 @@ export interface WeatherPreset {
   lightning: boolean;
   /** How much sun and hemisphere light are taken away, 0..1 (intensity x (1 - dim)). */
   dim: number;
+  /** How far the sky is pulled toward slate grey, 0..1. */
+  grey: number;
 }
 
 const PRESETS: Record<Exclude<WeatherKind, 'auto'>, WeatherPreset> = {
-  clear: { cloud: 0, rain: 0, slant: 0, fogScale: 1, lightning: false, dim: 0 },
-  cloudy: { cloud: 0.85, rain: 0, slant: 0, fogScale: 0.9, lightning: false, dim: 0.15 },
-  rain: { cloud: 0.9, rain: 1, slant: 0.15, fogScale: 0.6, lightning: false, dim: 0.3 },
-  storm: { cloud: 1, rain: 2, slant: 0.5, fogScale: 0.5, lightning: true, dim: 0.5 },
-  fog: { cloud: 0.5, rain: 0, slant: 0, fogScale: 0.3, lightning: false, dim: 0.2 },
+  clear: { cloud: 0, rain: 0, slant: 0, fogScale: 1, lightning: false, dim: 0, grey: 0 },
+  cloudy: { cloud: 0.85, rain: 0, slant: 0, fogScale: 0.9, lightning: false, dim: 0.15, grey: 0.25 },
+  rain: { cloud: 0.9, rain: 1, slant: 0.15, fogScale: 0.6, lightning: false, dim: 0.3, grey: 0.6 },
+  storm: { cloud: 1, rain: 2, slant: 0.5, fogScale: 0.5, lightning: true, dim: 0.5, grey: 0.9 },
+  fog: { cloud: 0.5, rain: 0, slant: 0, fogScale: 0.3, lightning: false, dim: 0.2, grey: 0.4 },
 };
 
 export function weatherPreset(kind: Exclude<WeatherKind, 'auto'>): WeatherPreset {
@@ -59,3 +61,38 @@ export function kindFromLive(w: Weather): Exclude<WeatherKind, 'auto'> {
 export function parseWeatherKind(s: string | null): WeatherKind | null {
   return WEATHER_KINDS.find((k) => k === s) ?? null;
 }
+
+/** Flash length, and the calm between flashes (photosensitivity: at most one flash per 4 s). */
+export const FLASH_MS = 120;
+export const GAP_MIN_MS = 4000;
+export const GAP_MAX_MS = 12000;
+
+export interface LightningState {
+  /** When the next flash starts (ms); 0 when lightning is off. */
+  flashAt: number;
+  /** When the running flash ends; 0 when no flash is running. */
+  flashEnd: number;
+  /** When the last flash ended; 0 if none yet. */
+  lastEnd: number;
+}
+
+export const idleLightning = (): LightningState => ({ flashAt: 0, flashEnd: 0, lastEnd: 0 });
+
+/** Turn lightning on or off. Re-applying "on" keeps the running timer; a fresh start respects the last gap. */
+export function armLightning(st: LightningState, on: boolean, now: number): LightningState {
+  if (!on) return { ...st, flashAt: 0, flashEnd: 0 };
+  if (st.flashAt) return st;
+  return { ...st, flashAt: Math.max(now + 1500, st.lastEnd + GAP_MIN_MS), flashEnd: 0 };
+}
+
+/** Advance the flash timer. `rand` is in [0, 1). */
+export function nextLightning(st: LightningState, now: number, rand: number): LightningState {
+  if (st.flashEnd) {
+    if (now < st.flashEnd) return st;
+    return { flashEnd: 0, lastEnd: now, flashAt: now + GAP_MIN_MS + rand * (GAP_MAX_MS - GAP_MIN_MS) };
+  }
+  if (st.flashAt && now >= st.flashAt) return { ...st, flashEnd: now + FLASH_MS };
+  return st;
+}
+
+export const isFlashing = (st: LightningState) => st.flashEnd > 0;
