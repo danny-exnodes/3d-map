@@ -12,6 +12,11 @@ describe('displayRadius', () => {
   it('is the identity inside the model', () => {
     for (const d of [0, 1, 300, 600]) expect(displayRadius(d, half)).toBe(d);
   });
+  it('keeps the relative distance readable (log curve): 5 km and 20 km land clearly apart', () => {
+    const r5 = displayRadius(5000, half), r20 = displayRadius(20_000, half);
+    expect(r20 - r5).toBeGreaterThan(0.3 * half);
+    expect(displayRadius(74_080, half)).toBeCloseTo(3 * half, 5);
+  });
   it('grows with distance and lands 40 nm within 3x the half-size', () => {
     let prev = -1;
     for (const d of [0, 200, 600, 601, 1000, 3000, 10_000, 40_000, 74_080]) {
@@ -102,10 +107,21 @@ describe('Aircraft', () => {
   it('keeps the nearest planes when there are more than it can draw', () => {
     const a = new Aircraft(proj, 600);
     const now = 1_000_000;
-    a.setFlights(Array.from({ length: 400 }, (_, i) => flight({ hex: String(i), lat: 21 + i * 0.01 })), now);
+    // 400 planes 104 m apart eastwards, the farthest listed first.
+    const fs = Array.from({ length: 400 }, (_, i) => flight({ hex: String(i), lon: 105.8 + i * 0.001, gsMs: 0 })).reverse();
+    a.setFlights(fs, now);
     a.update(now, new THREE.PerspectiveCamera());
-    expect(a.mesh.count).toBeLessThanOrEqual(100);
-    expect(a.mesh.count).toBeGreaterThan(0);
+    expect(a.mesh.count).toBe(100);
+    expect(a.count(now)).toBe(100);
+    const m = new THREE.Matrix4();
+    const v = new THREE.Vector3();
+    const radii = Array.from({ length: a.mesh.count }, (_, i) => {
+      a.mesh.getMatrixAt(i, m);
+      v.setFromMatrixPosition(m);
+      return Math.hypot(v.x, v.z);
+    });
+    expect(Math.min(...radii)).toBeLessThan(1);
+    expect(Math.max(...radii)).toBeLessThan(displayRadius(11_000, 600));
     a.dispose();
   });
 });

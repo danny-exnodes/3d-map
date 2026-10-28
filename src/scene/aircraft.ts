@@ -15,10 +15,14 @@ const PICK_RADIUS = 22 * SCALE;
 const M_PER_DEG_LAT = 110_574;
 const M_PER_DEG_LON_EQ = 111_320;
 
-/** Horizontal distance from the model centre: true inside the model, squeezed towards 3x its half-size outside. */
+/** 40 nm, the poll radius: the farthest a plane can be. */
+const MAX_D = 74_080;
+
+/** Horizontal distance from the model centre: true inside the model, then a log curve that lands MAX_D at 3x the half-size. */
 export function displayRadius(d: number, half: number): number {
   if (d <= half) return d;
-  return half + 2 * half * (1 - Math.exp(-(d - half) / (4 * half)));
+  const span = Math.log(1 + Math.max(1e-9, (MAX_D - half) / half));
+  return half + 2 * half * Math.min(1, Math.log(1 + (d - half) / half) / span);
 }
 
 /** 0 m -> 150 m, 12 km and up -> 900 m; low flights keep more of the spread. */
@@ -105,8 +109,9 @@ export class Aircraft {
     this.flights = fs.length <= MAX_PLANES ? fs.slice() : fs.map((f) => ({ f, k: d2(f) })).sort((a, b) => a.k - b.k).slice(0, MAX_PLANES).map((e) => e.f);
   }
 
-  get count(): number {
-    return this.flights.length;
+  /** Planes drawn at `now`: kept (nearest, capped) and not stale. */
+  count(now: number = Date.now()): number {
+    return this.flights.filter((f) => now - f.seenAt <= STALE_MS).length;
   }
 
   update(now: number, camera: THREE.Camera) {
@@ -159,8 +164,12 @@ export class Aircraft {
     });
   }
 
-  /** The plane nearest along the ray among those it passes within the pick radius of. */
   pick(ray: THREE.Raycaster): Flight | null {
+    return this.pickAt(ray)?.flight ?? null;
+  }
+
+  /** The plane nearest along the ray among those it passes within the pick radius of, with that distance. */
+  pickAt(ray: THREE.Raycaster): { flight: Flight; t: number } | null {
     let best: Flight | null = null;
     let bestT = Infinity;
     for (const { f, pos } of this.active) {
@@ -171,7 +180,7 @@ export class Aircraft {
         bestT = t;
       }
     }
-    return best;
+    return best ? { flight: best, t: bestT } : null;
   }
 
   dispose() {

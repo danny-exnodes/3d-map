@@ -493,18 +493,18 @@ export class CityScene {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
-    // A plane in front of the buildings wins.
-    const plane = this.aircraft?.pick(this.raycaster) ?? null;
-    if (plane) {
+    const plane = this.aircraft?.pickAt(this.raycaster) ?? null;
+    // Exact buildings carry the id per vertex, prototype instances per instance (#22).
+    const hit = this.buildingsMesh ? this.raycaster.intersectObjects([this.buildingsMesh, ...this.protoMeshes], false)[0] : undefined;
+    // Whichever the ray reaches first: a plane behind a tower does not take the click.
+    if (plane && (!hit || plane.t < hit.distance)) {
       this.select(-1);
       this.onPick?.(null);
-      this.onPickPlane?.(plane);
+      this.onPickPlane?.(plane.flight);
       return null;
     }
     this.onPickPlane?.(null);
     if (!this.buildingsMesh) return null;
-    // Exact buildings carry the id per vertex, prototype instances per instance (#22).
-    const hit = this.raycaster.intersectObjects([this.buildingsMesh, ...this.protoMeshes], false)[0];
     const bidAttr = (hit?.object as THREE.Mesh | undefined)?.geometry.getAttribute('aBid');
     const bid = !hit || !bidAttr ? -1 : hit.instanceId !== undefined ? Math.round(bidAttr.getX(hit.instanceId)) : hit.face ? Math.round(bidAttr.getX(hit.face.a)) : -1;
     const b = bid >= 0 ? (this.buildingById.get(this.buildingIds[bid]) ?? null) : null;
@@ -535,7 +535,7 @@ export class CityScene {
 
   /** How many planes are being drawn from the last poll. */
   get planeCount(): number {
-    return this.aircraft?.count ?? 0;
+    return this.aircraft?.count() ?? 0;
   }
 
   private dropAircraft() {

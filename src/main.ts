@@ -271,7 +271,6 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     bench?.(stats.seconds, data);
     applyWeather();
     applyTime();
-    syncFlights();
     const km2 = bboxAreaKm2(b);
     $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
     $('i-stats').textContent = `${fmt(km2, 2)} km² · dựng xong trong ${fmt(stats.seconds, 1)} s · ${fmt(stats.buildings)} nhà · ${fmt(stats.trees)} cây · ${data.source}`;
@@ -302,6 +301,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     loadAbort = null;
     busy = false;
     $('btn-build').textContent = 'Dựng 3D';
+    syncFlights();
     onBBox(mapView.bbox);
     // The style was changed while building (or loading, aborted or not).
     applyStyleIfShown();
@@ -926,7 +926,6 @@ async function rebuildInStyle() {
     c.setTrafficOverlay(trafficOn);
     applyWeather();
     applyTime();
-    syncFlights();
     ok = true;
   } catch (e) {
     // The scene was cleared: say so, as a failed build does.
@@ -938,6 +937,7 @@ async function rebuildInStyle() {
   } finally {
     busy = false;
     for (const b of buttons) b.disabled = false;
+    syncFlights();
     onBBox(mapView.bbox);
   }
   // Picked again while building.
@@ -1007,7 +1007,7 @@ function resetFlights() {
 /** Starts or stops planes and polling to match the toggle, the visible view and the tab. */
 function syncFlights() {
   const c = city;
-  if (!c?.data) return;
+  if (!c?.data || busy) return;
   flightsViewKey = viewKey();
   stopFlights();
   showFlightsLine();
@@ -1021,29 +1021,41 @@ function syncFlights() {
   void pollFlights();
 }
 
+/** A relay that does not answer must not stop the polling. */
+const FLIGHTS_TIMEOUT_MS = 10_000;
+
 async function pollFlights() {
   const c = city;
   const relay = flightsSource;
   if (!c?.data || !relay) return;
+  // `ac` is stopFlights' switch; `fc` is what fetch sees, also aborted by the timeout.
   const ac = (flightsAbort = new AbortController());
+  const fc = new AbortController();
+  ac.signal.addEventListener('abort', () => fc.abort());
+  const timer = setTimeout(() => fc.abort(), FLIGHTS_TIMEOUT_MS);
   const b = c.data.bbox;
   try {
-    const fs = await fetchFlights(relay, (b.south + b.north) / 2, (b.west + b.east) / 2, FLIGHTS_NM, ac.signal);
+    await c.setPlanes(true);
+    const fs = await fetchFlights(relay, (b.south + b.north) / 2, (b.west + b.east) / 2, FLIGHTS_NM, fc.signal);
     if (ac.signal.aborted) return;
     flightList = fs;
     c.setFlights(fs);
     flightsLine = `✈ ${fmt(c.planeCount)} máy bay · ${FLIGHTS_SOURCE} · cập nhật ${new Date().toLocaleTimeString('vi-VN', { hour12: false })}`;
-  } catch {
+  } catch (e) {
     if (ac.signal.aborted) return;
+    console.warn('flights poll failed', e);
     // The planes already shown stay until they go stale (60 s).
     flightsLine = '✈ Không lấy được dữ liệu chuyến bay';
+  } finally {
+    clearTimeout(timer);
   }
   showFlightsLine();
+  refreshPlaneInfo();
   flightsTimer = window.setTimeout(() => void pollFlights(), FLIGHTS_POLL_MS);
 }
 
 $('btn-flights').addEventListener('click', () => {
-  if (!flightsSource) return;
+  if (!flightsSource || busy) return;
   flightsOn = !flightsOn;
   try {
     localStorage.setItem(FLIGHTS_KEY, flightsOn ? '1' : '0');
@@ -1066,12 +1078,26 @@ function onViewChange() {
 document.addEventListener('visibilitychange', onViewChange);
 showFlightsLine();
 
+/** hex of the plane whose card is open. */
+let openPlane: string | null = null;
+const PLANE_STALE_MS = 60_000;
+
+/** After a poll: the open card shows the plane's new values, or closes when the plane is gone or stale. */
+function refreshPlaneInfo() {
+  if (openPlane === null) return;
+  const f = flightList.find((x) => x.hex === openPlane);
+  if (f && Date.now() - f.seenAt <= PLANE_STALE_MS) showPlaneInfo(f);
+  else closePlaneInfo();
+}
+
 function showPlaneInfo(f: Flight | null) {
   const panel = $('plane-info');
   if (!f) {
+    openPlane = null;
     panel.hidden = true;
     return;
   }
+  openPlane = f.hex;
   $('building-info').hidden = true;
   $('pi-title').textContent = f.callsign || f.hex.toUpperCase();
   $('pi-kind').textContent = f.type ? `Loại ${f.type}` : 'Không rõ loại máy bay';
@@ -1091,6 +1117,7 @@ function showPlaneInfo(f: Flight | null) {
   panel.hidden = false;
 }
 function closePlaneInfo() {
+  openPlane = null;
   $('plane-info').hidden = true;
 }
 $('pi-close').addEventListener('click', closePlaneInfo);
