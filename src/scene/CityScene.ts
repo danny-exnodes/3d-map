@@ -341,7 +341,7 @@ export class CityScene {
   /** Warm sodium glow on streets after dark. */
   private applyStreetGlow() {
     // Lamp pools carry most of the street light now; keep only a faint overall tint.
-    const k = this.night * (0.35);
+    const k = this.night * 0.35;
     this.city.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
       if (!Array.isArray(m) && m?.userData?.streetGlow) m.emissive.setRGB(0.32, 0.17, 0.06).multiplyScalar(k * m.userData.streetGlow);
