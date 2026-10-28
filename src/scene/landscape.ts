@@ -82,7 +82,7 @@ export function buildLandscape(
   if (waterGeo) {
     water = new THREE.Mesh(
       waterGeo,
-      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.15, metalness: 0.1, depthWrite: false }),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1, depthWrite: false }),
     );
     water.renderOrder = -8;
     water.receiveShadow = true;

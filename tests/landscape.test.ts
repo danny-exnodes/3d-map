@@ -30,4 +30,10 @@ describe('toy landscape', () => {
     // Hundreds of lamps: 80 triangles per bulb (8 × 6 sphere) instead of 168.
     expect((g.index ? g.index.count : g.getAttribute('position').count) / 3).toBeLessThanOrEqual(80);
   });
+
+  it('keeps the water matte so the moon does not bloom on it', () => {
+    const { group } = buildCity(generateDemoCity(bbox));
+    const water = group.getObjectByName('water') as THREE.Mesh;
+    expect((water.material as THREE.MeshStandardMaterial).roughness).toBeGreaterThanOrEqual(0.6);
+  });
 });
