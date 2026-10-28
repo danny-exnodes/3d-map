@@ -13,17 +13,29 @@ type XZ = [number, number];
  * first). A footprint whose area is already taken by more than `maxShare` is shrunk towards its
  * centre, and dropped when even the shrunk outline still overlaps. Building parts may stack on
  * their own outline, so they only mark the mask.
+ *
+ * Ground-level carriageways (layer 0, no bridge or tunnel) go into a second mask. The shapes we
+ * draw ourselves (inferred, lots) must stay within `maxShare` of it, shrunk or dropped like for
+ * buildings. Mapped outlines tolerate `roadTolerance` (street widths are estimates and real houses
+ * front onto the street): they are shrunk above it, and kept as they are when shrinking is not
+ * enough. `roadShrunk` / `roadDropped` count the changes made because of a street; they are
+ * included in `shrunk` / `dropped`.
  */
-export function removeOverlaps(data: CityData, maxShare = 0.01): { dropped: number; shrunk: number } {
+export function removeOverlaps(
+  data: CityData,
+  maxShare = 0.01,
+  roadTolerance = 0.15,
+): { dropped: number; shrunk: number; roadShrunk: number; roadDropped: number } {
   const proj = new LocalProjection(data.bbox);
   const rings = data.buildings.map((b) => b.polygon[0].map((p) => proj.project(p)) as XZ[]);
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
   for (const r of rings) for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-  if (!isFinite(x0)) return { dropped: 0, shrunk: 0 };
+  if (!isFinite(x0)) return { dropped: 0, shrunk: 0, roadShrunk: 0, roadDropped: 0 };
   // ≤ ~8 M cells whatever the area size.
   const cell = Math.max(0.5, Math.sqrt(((x1 - x0) * (z1 - z0)) / 8e6));
   const w = Math.ceil((x1 - x0) / cell) + 1, d = Math.ceil((z1 - z0) / cell) + 1;
   const mask = new Uint8Array(w * d);
+  const roadMask = new Uint8Array(w * d);
 
   /** Visits the cells whose centre lies inside the ring; stops early when `f` returns false. */
   const scan = (ring: XZ[], f: (k: number) => boolean | void) => {
@@ -42,15 +54,30 @@ export function removeOverlaps(data: CityData, maxShare = 0.01): { dropped: numb
           if (f(j * w + i) === false) return;
     }
   };
-  const share = (ring: XZ[]) => {
+  const shareOn = (m: Uint8Array, ring: XZ[]) => {
     let n = 0, hit = 0;
     scan(ring, (k) => {
       n++;
-      if (mask[k]) hit++;
+      if (m[k]) hit++;
     });
     return n ? hit / n : 0;
   };
+  const share = (ring: XZ[]) => shareOn(mask, ring);
+  const roadShare = (ring: XZ[]) => shareOn(roadMask, ring);
   const mark = (ring: XZ[]) => scan(ring, (k) => void (mask[k] = 1));
+  // One quad per polyline segment, half a street width to each side.
+  for (const r of data.roads ?? []) {
+    if (r.layer !== 0 || r.bridge || r.tunnel) continue;
+    const pts = r.line.map((p) => proj.project(p)) as XZ[];
+    const h = r.width / 2;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.01) continue;
+      const nx = (-(bz - az) / len) * h, nz = ((bx - ax) / len) * h;
+      scan([[ax + nx, az + nz], [bx + nx, bz + nz], [bx - nx, bz - nz], [ax - nx, az - nz]], (k) => void (roadMask[k] = 1));
+    }
+  }
   const shrink = (ring: XZ[], s: number): XZ[] => {
     let cx = 0, cz = 0;
     for (const [x, z] of ring) { cx += x; cz += z; }
@@ -63,7 +90,8 @@ export function removeOverlaps(data: CityData, maxShare = 0.01): { dropped: numb
   const order = data.buildings.map((_, i) => i).sort((a, b) => rank(data.buildings[a]) - rank(data.buildings[b]) || area(rings[b]) - area(rings[a]));
 
   const keep = new Uint8Array(data.buildings.length);
-  let dropped = 0, shrunk = 0;
+  let dropped = 0, shrunk = 0, roadShrunk = 0, roadDropped = 0;
+  const steps = [0.9, 0.8, 0.7, 0.6];
   for (const i of order) {
     const b = data.buildings[i];
     let ring = rings[i];
@@ -72,28 +100,33 @@ export function removeOverlaps(data: CityData, maxShare = 0.01): { dropped: numb
       mark(ring);
       continue;
     }
-    if (share(ring) > maxShare) {
-      let ok = false;
-      // Only the drawn-by-us shapes (inferred, lots) are worth shrinking; mapped outlines are dropped.
-      if (b.footprintSource === 'gob' || b.lot)
-        for (const s of [0.9, 0.8, 0.7, 0.6]) {
+    // Only the drawn-by-us shapes (inferred, lots) are worth shrinking for a building; mapped outlines are dropped.
+    const own = b.footprintSource === 'gob' || !!b.lot;
+    const bShare = share(ring), rShare = roadShare(ring);
+    const roadLimit = own ? maxShare : roadTolerance;
+    if (bShare > maxShare || rShare > roadLimit) {
+      const roadCaused = rShare > roadLimit;
+      let next: XZ[] | null = null;
+      if (own || bShare <= maxShare)
+        for (const s of steps) {
           const r = shrink(ring, s);
-          if (share(r) <= maxShare) {
-            ring = r;
-            b.polygon = [r.map(([x, z]) => proj.unproject(x, z))];
-            ok = true;
-            shrunk++;
-            break;
-          }
+          if (share(r) <= maxShare && roadShare(r) <= roadLimit) { next = r; break; }
         }
-      if (!ok) {
+      if (next) {
+        ring = next;
+        b.polygon = [ring.map(([x, z]) => proj.unproject(x, z))];
+        shrunk++;
+        if (roadCaused) roadShrunk++;
+      } else if (own || bShare > maxShare) {
         dropped++;
+        if (roadCaused && bShare <= maxShare) roadDropped++;
         continue;
       }
+      // A mapped outline that cannot be shrunk clear of a street is kept as it is.
     }
     keep[i] = 1;
     mark(ring);
   }
   data.buildings = data.buildings.filter((_, i) => keep[i]);
-  return { dropped, shrunk };
+  return { dropped, shrunk, roadShrunk, roadDropped };
 }
