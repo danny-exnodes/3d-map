@@ -93,17 +93,17 @@ export class SkyDome {
   }
 }
 
-/** Low-poly clouds: one InstancedMesh of merged puffs, drifting along +x and wrapping around. */
+/** Low-poly clouds: one InstancedMesh of merged puffs, orbiting the model on a ring. */
 export class CloudLayer {
   readonly mesh: THREE.InstancedMesh;
-  private readonly span: number;
+  private readonly ang: number[] = [];
+  private readonly rad: number[] = [];
   private readonly pos: THREE.Vector3[] = [];
   private readonly scl: THREE.Vector3[] = [];
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
 
   constructor(extent: number) {
-    this.span = extent * 4;
     const k = Math.min(2.5, Math.max(0.7, extent / 800));
     let seed = 12345;
     const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
@@ -122,14 +122,11 @@ export class CloudLayer {
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = false;
     for (let i = 0; i < MAX_CLOUDS; i++) {
-      // A ring from 1.2x to 4x the extent; every twelfth cloud floats over the back half of the model
-      // (away from the default camera, which sits front-right), so it shows in top-down views without
-      // blocking the usual one.
-      const over = i % 12 === 0;
-      const a = over ? Math.PI * (1 + rnd() * 0.5) : rnd() * Math.PI * 2;
-      const r = (over ? 0.1 + rnd() * 0.8 : 1.2 + rnd() * 2.8) * extent;
-      this.pos.push(new THREE.Vector3(Math.cos(a) * r, (120 + rnd() * 140) * k, Math.sin(a) * r));
-      const s = (110 + rnd() * 120) * k * (over ? 0.6 : 1);
+      // A ring from 1.2x to 4x the extent; clouds orbit it, so none ever drifts over the model.
+      this.ang.push(rnd() * Math.PI * 2);
+      this.rad.push((1.2 + rnd() * 2.8) * extent);
+      this.pos.push(new THREE.Vector3(0, (120 + rnd() * 140) * k, 0));
+      const s = (110 + rnd() * 120) * k;
       this.scl.push(new THREE.Vector3(s, s * 0.4, s * 0.75));
     }
     this.setCover(0);
@@ -149,16 +146,14 @@ export class CloudLayer {
 
   update(dt: number) {
     if (this.mesh.count === 0) return;
-    for (let i = 0; i < this.mesh.count; i++) {
-      const p = this.pos[i];
-      p.x += dt * (4 + this.scl[i].x * 0.05);
-      if (p.x > this.span) p.x -= this.span * 2;
-    }
+    for (let i = 0; i < MAX_CLOUDS; i++) this.ang[i] += (dt * (4 + this.scl[i].x * 0.05)) / this.rad[i];
     this.write();
   }
 
   private write() {
     for (let i = 0; i < this.mesh.count; i++) {
+      this.pos[i].x = Math.cos(this.ang[i]) * this.rad[i];
+      this.pos[i].z = Math.sin(this.ang[i]) * this.rad[i];
       this.m.compose(this.pos[i], this.q, this.scl[i]);
       this.mesh.setMatrixAt(i, this.m);
     }
