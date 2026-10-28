@@ -16,6 +16,7 @@ import { buildCity } from './buildCity';
 import type { RailPath, RoadPath } from './roads';
 import { deserializeObjects } from './serialize';
 import { createLampPools, litShare } from './nightLights';
+import { type WeatherPreset, weatherPreset } from './weather';
 import { dominantMood, isRising, moodLighting, type Mood } from './moods';
 import { sunState, type SunState } from './sun';
 import { CloudLayer, SkyDome } from './sky';
@@ -65,6 +66,14 @@ export class CityScene {
   onPick?: (b: Building | null) => void;
   private sourceView = false;
   private rain: THREE.Points | null = null;
+  private rainLevel: 0 | 1 | 2 = 0;
+  private weather: WeatherPreset = weatherPreset('clear');
+  private fogBase = { near: 2000, far: 6000 };
+  private hemiBase = 1.2;
+  private lastTime: { date: Date; hour: number } | null = null;
+  /** Lightning: next flash start and end (performance.now ms); 0 when idle. */
+  private flashAt = 0;
+  private flashEnd = 0;
   private timer = new THREE.Timer();
   private size = { width: 1000, depth: 1000 };
   private proj: LocalProjection | null = null;
@@ -253,7 +262,8 @@ export class CityScene {
     cam.near = 1;
     cam.far = ext * 4;
     cam.updateProjectionMatrix();
-    this.scene.fog = new THREE.Fog('#9fd3f2', ext * 1.6, ext * 5);
+    this.fogBase = { near: ext * 1.6, far: ext * 5 };
+    this.scene.fog = new THREE.Fog('#9fd3f2', this.fogBase.near * this.weather.fogScale, this.fogBase.far * this.weather.fogScale);
     this.clouds = new CloudLayer(ext);
     this.clouds.setCover(this.cloud);
     this.clouds.setLight(this.cloudLight);
@@ -299,12 +309,13 @@ export class CityScene {
       this.clouds.dispose();
       this.clouds = null;
     }
-    this.setRain(false);
+    this.disposeRain();
   }
 
   /** Apply time of day. `localHour` is the clock hour at the area (drives traffic density). */
   setTime(date: Date, localHour: number) {
     if (!this.proj) return;
+    this.lastTime = { date, hour: localHour };
     const s = (this.sunInfo = sunState(date, this.proj.lat0, this.proj.lon0));
     const rising = isRising(date, this.proj.lat0, this.proj.lon0);
     const L = moodLighting(s, rising, this.cloud);
@@ -315,15 +326,16 @@ export class CityScene {
     this.sun.target.position.set(0, 0, 0);
     if (s.direction.y > 0) {
       this.sun.color.copy(L.sunColor);
-      this.sun.intensity = L.sunIntensity;
+      this.sun.intensity = L.sunIntensity * (1 - this.weather.dim);
     } else {
       // Moonlight: a dim, cool key light from a fixed high angle so night scenes keep their shape.
       // It fades in from zero as the sun sinks, so the switch of light direction is invisible (#22).
       this.sun.position.set(-0.4, 0.8, -0.45).normalize().multiplyScalar(ext * 1.5);
       this.sun.color.set('#8fa2ff');
-      this.sun.intensity = 0.55 * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25);
+      this.sun.intensity = 0.55 * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25) * (1 - this.weather.dim);
     }
-    this.hemi.intensity = L.hemiIntensity;
+    this.hemiBase = L.hemiIntensity * (1 - this.weather.dim);
+    this.hemi.intensity = this.hemiBase;
     this.sunDir.copy(s.direction);
     this.night = s.night;
     this.hemi.color.copy(L.hemiSky);
@@ -396,18 +408,33 @@ export class CityScene {
     this.clouds?.setCover(this.cloud);
   }
 
-  setRain(on: boolean) {
-    if (!on) {
-      if (this.rain) {
-        this.scene.remove(this.rain);
-        this.rain.geometry.dispose();
-        (this.rain.material as THREE.Material).dispose();
-        this.rain = null;
-      }
-      return;
-    }
-    if (this.rain) return;
-    const n = 6000;
+  /** Apply a weather look: clouds, rain, fog distance, light dimming, lightning. */
+  setWeather(p: WeatherPreset) {
+    this.weather = p;
+    this.setCloud(p.cloud);
+    this.setRain(p.rain);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = this.fogBase.near * p.fogScale;
+    fog.far = this.fogBase.far * p.fogScale;
+    this.flashAt = p.lightning ? performance.now() + 1500 : 0;
+    this.flashEnd = 0;
+    if (this.lastTime) this.setTime(this.lastTime.date, this.lastTime.hour);
+  }
+
+  private disposeRain() {
+    if (!this.rain) return;
+    this.scene.remove(this.rain);
+    this.rain.geometry.dispose();
+    (this.rain.material as THREE.Material).dispose();
+    this.rain = null;
+  }
+
+  private setRain(level: 0 | 1 | 2) {
+    if (level === this.rainLevel && (this.rain !== null) === (level > 0)) return;
+    this.rainLevel = level;
+    this.disposeRain();
+    if (level === 0) return;
+    const n = level === 2 ? 12000 : 6000;
     const pos = new Float32Array(n * 3);
     const { width, depth } = this.size;
     for (let i = 0; i < n; i++) {
@@ -420,6 +447,21 @@ export class CityScene {
     this.rain = new THREE.Points(g, new THREE.PointsMaterial({ color: '#cfe3ff', size: 1.2, transparent: true, opacity: 0.6 }));
     this.rain.name = 'rain';
     this.scene.add(this.rain);
+  }
+
+  /** A flash is at most 150 ms, with 4 to 12 s of calm between flashes. */
+  private updateLightning(now: number) {
+    if (this.flashEnd) {
+      if (now < this.flashEnd) return;
+      this.flashEnd = 0;
+      this.flashAt = now + 4000 + Math.random() * 8000;
+      this.hemi.intensity = this.hemiBase;
+      this.clouds?.setLight(this.cloudLight);
+    } else if (this.flashAt && now >= this.flashAt) {
+      this.flashEnd = now + 120;
+      this.hemi.intensity = this.hemiBase + 2.5;
+      this.clouds?.setLight(this.white);
+    }
   }
 
   /**
@@ -630,11 +672,17 @@ export class CityScene {
         this.renderer.shadowMap.needsUpdate = true;
       }
     }
+    if (this.weather.lightning) this.updateLightning(now);
     if (this.rain) {
       const p = this.rain.geometry.attributes.position as THREE.BufferAttribute;
+      const half = this.size.width / 2;
+      const drift = dt * 60 * this.weather.slant;
       for (let i = 0; i < p.count; i++) {
         let y = p.getY(i) - dt * 60;
         if (y < 0) y += 220;
+        let x = p.getX(i) + drift;
+        if (x > half) x -= this.size.width;
+        p.setX(i, x);
         p.setY(i, y);
       }
       p.needsUpdate = true;

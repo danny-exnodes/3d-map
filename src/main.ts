@@ -12,7 +12,8 @@ import { compassLabel, sunState } from './scene/sun';
 import { TOY_ROOFS, TOY_WALLS } from './scene/toyPalette';
 import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { googleKey, setGoogleKey } from './data/googleTraffic';
-import { fetchWeather } from './services/weather';
+import { kindFromLive, parseWeatherKind, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL, type WeatherKind, weatherPreset } from './scene/weather';
+import { fetchWeather, type Weather } from './services/weather';
 import { cityWorker } from './worker/client';
 import { APP_ROOT, DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
 import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
@@ -263,6 +264,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     }
     const stats = await city.build(data, progress);
     bench?.(stats.seconds, data);
+    applyWeather();
     applyTime();
     const km2 = bboxAreaKm2(b);
     $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
@@ -275,7 +277,12 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
       document.querySelector('.w-icon')!.textContent = '🌡️';
       $('w-label').textContent = 'Không có thời tiết trong bản xem thử';
       $('w-time').textContent = snapshot ? `Dữ liệu chụp ngày ${snapshot.created}` : '';
-    } else loadWeather(b);
+      autoCard = { icon: '🌡️', label: 'Không có thời tiết trong bản xem thử' };
+      showWeatherCard();
+    } else if (!BENCH) {
+      weatherBox = b;
+      loadWeather(b);
+    }
   } catch (e) {
     if (!PREVIEW) showMap();
     if ((e as Error).name === 'AbortError') {
@@ -734,31 +741,99 @@ document.addEventListener('keydown', (e) => e.key === 'Escape' && closeBuildingI
 
 // ---------- Weather ----------
 
-let weatherRain = false;
+/** The bench pins the weather to clear and never touches the network. */
+const BENCH = /[?&]bench\b/.test(location.search);
+const WEATHER_KEY = 'tinymap:weather';
+function storedWeather(): WeatherKind | null {
+  try {
+    return parseWeatherKind(localStorage.getItem(WEATHER_KEY));
+  } catch {
+    return null;
+  }
+}
+let weatherKind: WeatherKind = parseWeatherKind(new URLSearchParams(location.search).get('weather')) ?? storedWeather() ?? 'auto';
+let liveWeather: Weather | null = null;
+let weatherBox: BBox | null = null;
+/** What the weather card shows in Tự động when there is no live reading. */
+let autoCard = { icon: '☀️', label: 'Thời tiết' };
+
+function showWeatherCard() {
+  const manual = weatherKind !== 'auto';
+  document.querySelector('.w-icon')!.textContent = manual ? WEATHER_ICON[weatherKind] : autoCard.icon;
+  $('w-label').textContent = manual ? `${WEATHER_LABEL[weatherKind]} (chọn tay)` : autoCard.label;
+  $('btn-weather').textContent = WEATHER_ICON[weatherKind];
+  $('btn-weather').title = `Thời tiết: ${WEATHER_LABEL[weatherKind]}`;
+  document.querySelectorAll<HTMLButtonElement>('#weather-menu button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === weatherKind)));
+}
+
+function applyWeather() {
+  showWeatherCard();
+  if (!city) return;
+  const kind = BENCH ? 'clear' : weatherKind;
+  if (kind !== 'auto') return city.setWeather(weatherPreset(kind));
+  if (!liveWeather) return city.setWeather(weatherPreset('clear'));
+  const k = kindFromLive(liveWeather);
+  const p = weatherPreset(k);
+  // Plain clear and cloudy skies follow the measured cloud cover, as before.
+  if (k === 'clear' || k === 'cloudy') p.cloud = liveWeather.cloudCover * 0.7;
+  city.setWeather(p);
+}
+
 async function loadWeather(b: BBox) {
   try {
     const w = await fetchWeather((b.south + b.north) / 2, (b.west + b.east) / 2);
+    liveWeather = w;
     $('w-temp').textContent = `${Math.round(w.temperature)}°`;
-    $('w-label').textContent = w.label;
-    document.querySelector('.w-icon')!.textContent = w.icon;
     $('w-time').textContent = `Lúc ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · Open-Meteo`;
-    city?.setCloud(w.cloudCover * 0.7);
-    weatherRain = w.rain;
-    setRain(w.rain);
-    applyTime();
+    autoCard = { icon: w.icon, label: w.label };
   } catch {
-    document.querySelector('.w-icon')!.textContent = '🌡️';
-    $('w-label').textContent = 'Không có dữ liệu thời tiết';
+    autoCard = { icon: '🌡️', label: 'Không có dữ liệu thời tiết' };
   }
+  applyWeather();
 }
-function setRain(on: boolean) {
-  city?.setRain(on);
-  $('btn-rain').classList.toggle('on', on);
+
+const weatherMenu = $('weather-menu');
+const weatherBtn = $('btn-weather');
+for (const kind of WEATHER_KINDS) {
+  const item = document.createElement('button');
+  item.setAttribute('role', 'menuitemradio');
+  item.dataset.kind = kind;
+  item.textContent = `${WEATHER_ICON[kind]} ${WEATHER_LABEL[kind]}`;
+  item.addEventListener('click', () => {
+    weatherKind = kind;
+    try {
+      localStorage.setItem(WEATHER_KEY, kind);
+    } catch {
+      /* storage blocked */
+    }
+    closeWeatherMenu();
+    applyWeather();
+    applyTime();
+    if (kind === 'auto' && !liveWeather && weatherBox && !PREVIEW) void loadWeather(weatherBox).then(applyTime);
+  });
+  weatherMenu.append(item);
 }
-$('btn-rain').addEventListener('click', () => {
-  weatherRain = !weatherRain;
-  setRain(weatherRain);
+function openWeatherMenu() {
+  const r = weatherBtn.getBoundingClientRect();
+  weatherMenu.hidden = false;
+  const w = weatherMenu.offsetWidth;
+  weatherMenu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+  weatherMenu.style.top = `${Math.min(r.bottom + 6, innerHeight - weatherMenu.offsetHeight - 8)}px`;
+  weatherBtn.setAttribute('aria-expanded', 'true');
+  weatherMenu.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+}
+function closeWeatherMenu(refocus = true) {
+  if (weatherMenu.hidden) return;
+  weatherMenu.hidden = true;
+  weatherBtn.setAttribute('aria-expanded', 'false');
+  if (refocus) weatherBtn.focus();
+}
+weatherBtn.addEventListener('click', () => (weatherMenu.hidden ? openWeatherMenu() : closeWeatherMenu()));
+document.addEventListener('keydown', (e) => e.key === 'Escape' && closeWeatherMenu());
+document.addEventListener('pointerdown', (e) => {
+  if (!weatherMenu.hidden && !weatherMenu.contains(e.target as Node) && !weatherBtn.contains(e.target as Node)) closeWeatherMenu(false);
 });
+showWeatherCard();
 
 // ---------- Time of day ----------
 
