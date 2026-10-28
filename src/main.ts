@@ -8,6 +8,7 @@ import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressS
 import { bboxAreaKm2, pointInRing } from './geo/projection';
 import { CityScene } from './scene/CityScene';
 import { dominantMood, isRising, minuteForMood, MOOD_KEYS, MOOD_LABEL, MOODS, type Mood } from './scene/moods';
+import { parseStyle, type Style, STYLE_LABEL, STYLES } from './scene/style';
 import { compassLabel, sunState } from './scene/sun';
 import { TOY_ROOFS, TOY_WALLS } from './scene/toyPalette';
 import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
@@ -262,7 +263,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
       // Pin the clock so the benchmark does not depend on when it runs (dusk and night cost more).
       slider.value = '720';
     }
-    const stats = await city.build(data, progress);
+    const stats = await city.build(data, progress, style);
     bench?.(stats.seconds, data);
     applyWeather();
     applyTime();
@@ -298,6 +299,8 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     $('btn-build').textContent = 'Dựng 3D';
     onBBox(mapView.bbox);
   }
+  // The style was changed while building.
+  if (city?.data && city.style !== style) void rebuildInStyle();
 }
 
 $('btn-build').addEventListener('click', () => build('osm'));
@@ -849,6 +852,74 @@ document.addEventListener('pointerdown', (e) => {
   if (!weatherMenu.hidden && !weatherMenu.contains(e.target as Node) && !weatherBtn.contains(e.target as Node)) closeWeatherMenu(false);
 });
 showWeatherCard();
+
+// ---------- Style: Đồ chơi / Khối / Siêu thực ----------
+
+const STYLE_KEY = 'tinymap:style';
+/** The stored style; master's `tinymap:colorMode` is read once and becomes it. */
+function storedStyle(): Style | null {
+  try {
+    const s = parseStyle(localStorage.getItem(STYLE_KEY));
+    if (s) return s;
+    const old = parseStyle(localStorage.getItem('tinymap:colorMode'));
+    localStorage.removeItem('tinymap:colorMode');
+    if (old) localStorage.setItem(STYLE_KEY, old);
+    return old;
+  } catch {
+    return null;
+  }
+}
+/** `?style=` wins over storage; the bench always measures Đồ chơi. */
+let style: Style = BENCH ? 'toy' : (parseStyle(new URLSearchParams(location.search).get('style')) ?? storedStyle() ?? 'toy');
+
+function showStyle() {
+  document.querySelectorAll<HTMLButtonElement>('#style-picker button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.style === style);
+    b.setAttribute('aria-pressed', String(b.dataset.style === style));
+  });
+  $('btn-style').textContent = STYLE_LABEL[style];
+  $('btn-style').title = `Kiểu mô hình: ${STYLE_LABEL[style]} (bấm để đổi)`;
+}
+
+function setStyle(s: Style) {
+  style = s;
+  try {
+    localStorage.setItem(STYLE_KEY, s);
+  } catch {
+    /* storage blocked */
+  }
+  showStyle();
+  if (city?.data && city.style !== s) void rebuildInStyle();
+}
+
+/** Builds the model again from the data already loaded, keeping camera, time, mood and weather. */
+async function rebuildInStyle() {
+  const c = city;
+  if (!c?.data || busy) return;
+  busy = true;
+  const btn = $<HTMLButtonElement>('btn-style');
+  btn.disabled = true;
+  closeBuildingInfo();
+  const view = c.saveView();
+  try {
+    await c.build(c.data, () => {}, style);
+    c.restoreView(view);
+    c.setTrafficOverlay(trafficOn);
+    applyWeather();
+    applyTime();
+  } catch (e) {
+    console.error(e);
+  } finally {
+    busy = false;
+    btn.disabled = false;
+  }
+  // Picked again while building.
+  if (c.style !== style) void rebuildInStyle();
+}
+
+document.querySelectorAll<HTMLButtonElement>('#style-picker button').forEach((b) => b.addEventListener('click', () => setStyle(b.dataset.style as Style)));
+$('btn-style').addEventListener('click', () => setStyle(STYLES[(STYLES.indexOf(style) + 1) % STYLES.length]));
+showStyle();
 
 // ---------- Time of day ----------
 

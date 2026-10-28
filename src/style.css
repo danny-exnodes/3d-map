@@ -77,6 +77,14 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 .moods button.on { background: rgba(255, 122, 69, 0.25); border-color: var(--accent); }
 .moods i { display: block; width: 44px; height: 26px; border-radius: 6px; background: linear-gradient(to bottom, var(--sky) 0%, var(--wall) 55%, var(--roof) 100%); }
 @media (max-width: 480px) { .moods { grid-template-columns: repeat(2, minmax(0, 1fr)); } .moods i { width: 100%; } }
+.pickers { display: grid; gap: 6px; }
+/* Style picker: three across at every width; the swatch hints at each look. */
+.moods.styles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.styles [data-style="toy"] i { --sky: #9fd3f2; --wall: #f6e3c6; --roof: #e08a70; border-radius: 10px; }
+.styles [data-style="block"] i { --sky: #9fd3f2; --wall: #e8dcc0; --roof: #b5533c; border-radius: 2px; }
+.styles [data-style="real"] i { --sky: #5f8fbf; --wall: #a9a39a; --roof: #4a4e57; border-radius: 2px; }
+/* Phones: names only, so the map keeps its room. */
+@media (max-width: 480px) { .styles i { display: none; } }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .progress { position: absolute; right: 12px; top: 64px; width: 260px; padding: 14px; z-index: 2; }
 .progress .big { font-size: 40px; font-weight: 300; display: flex; align-items: baseline; gap: 4px; }

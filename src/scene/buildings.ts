@@ -8,7 +8,8 @@ import { MeshBuilder, type XZ } from './geometry';
 import { PrototypeCollector } from './prototypes';
 import { buildRoof, flatCap, minAreaRect } from './roofs';
 import { SpatialGrid } from './spatial';
-import { TOY, TOY_FACADE, TOY_GLSL, toyFlatWidths, toyRoofDeck } from './toyGeometry';
+import { type Style, toyParamsFor } from './style';
+import { TOY, TOY_FACADE, toyFlatWidths, toyGlsl, toyRoofDeck } from './toyGeometry';
 import { PLINTH_SHADE, toyColor } from './toyPalette';
 
 /** Integer codes of HeightSource stored in aSeed (see the "theo nguồn chiều cao" view, #3). */
@@ -74,6 +75,8 @@ export interface BuildOptions {
   roadDistance?: (x: number, z: number) => number;
   /** Model every building exactly (no prototypes), e.g. for comparison. */
   exactOnly?: boolean;
+  /** Đồ chơi (default) or the plain Khối look; Siêu thực is built on Khối. */
+  style?: Style;
 }
 
 export interface BuildingUniforms {
@@ -135,9 +138,11 @@ function isPrototypeCandidate(b: Building, rings: XZ[][], fill: number, short: n
 }
 
 export function buildBuildings(list: Building[], proj: LocalProjection, opts: BuildOptions = {}): BuildingsResult {
+  const style = opts.style ?? 'toy';
+  const params = toyParamsFor(style);
   const mb = new MeshBuilder();
   const footprints = new SpatialGrid<XZ[]>(25);
-  const details = new DetailCollector();
+  const details = new DetailCollector(params.pastel);
   const facade = new THREE.Color();
   const roofCol = new THREE.Color();
   const ids: string[] = [];
@@ -159,8 +164,13 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
     const seed = HEIGHT_SOURCE_CODE[b.heightSource] + 4 * MATERIAL_CODE[b.material ?? 'none'] + (h % 10007) / 10008;
     const y0 = b.minHeight;
     const y1 = b.height;
-    toyColor(b.color ?? '#f0e6d2', 'wall', facade);
-    toyColor(b.roofColor ?? '#d2cbbb', 'roof', roofCol);
+    if (params.pastel) {
+      toyColor(b.color ?? '#f0e6d2', 'wall', facade);
+      toyColor(b.roofColor ?? '#d2cbbb', 'roof', roofCol);
+    } else {
+      facade.set(b.color ?? '#f0e6d2');
+      roofCol.set(b.roofColor ?? '#d2cbbb');
+    }
     mb.setColor(facade).setSeed(seed).setBid(bid);
     footprints.insert(rings[0], rings[0]);
 
@@ -217,12 +227,12 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
     }
 
     // Street-level detail for houses (#5). Rooftop cubes of prototypes stay on the toy slab's deck.
-    const protoDeck = proto ? { axis: rect.axis, ...toyRoofDeck(rect.short, rect.long) } : undefined;
+    const protoDeck = proto ? { axis: rect.axis, ...toyRoofDeck(rect.short, rect.long, params) } : undefined;
     if (tubeDetail && ends) {
       const levels = Math.max(1, Math.round(y1 / LEVEL_H));
       const [a, c] = ends.front;
       // Toy houses: against the inset wall, between the bevels.
-      const toy = proto ? { inset: TOY.inset, maxWidth: toyFlatWidths(rect.short, rect.long)[0] } : undefined;
+      const toy = proto ? { inset: params.inset, maxWidth: toyFlatWidths(rect.short, rect.long, params)[0] } : undefined;
       details.balconies(a, c, levels, LEVEL_H, h, toy);
       if (b.roof === 'flat') details.rooftop(rect.centre, mid(ends.rear), Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h, protoDeck);
     } else if (arch === 'generic' && b.roof === 'flat' && y1 < 25 && area < 400 && rect.short > 3) {
@@ -231,9 +241,9 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
   });
 
   const geom = mb.empty ? new THREE.BufferGeometry() : mb.build(true, true);
-  const material = createBuildingMaterial();
+  const material = createBuildingMaterial(undefined, false, style);
   // Same uniforms (night, selection, source view) for both; toy placement for the prototypes.
-  const instanced = protos.build(createBuildingMaterial(material.userData.uniforms, true));
+  const instanced = protos.build(createBuildingMaterial(material.userData.uniforms, true, style), params);
   const mesh = new THREE.Mesh(geom, material);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -251,19 +261,26 @@ const V = (p: XZ, y: number) => new THREE.Vector3(p[0], y, p[1]);
  * size (TOY_PROTO, see toyGeometry.ts); such meshes take toyDepthMaterial() for their shadows.
  * Their windows are laid out in the house's own frame instead, centred on each wall's flat part,
  * with a door on the street end of low houses (TOY_FACADE).
+ * Other styles than Đồ chơi (STYLE_PLAIN) place prototypes with their own params and keep the plain
+ * look: rectangular windows on a world grid, stronger brick and metal tints, no plinth band, no door.
  */
-export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = false): THREE.MeshLambertMaterial {
+export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = false, style: Style = 'toy'): THREE.MeshLambertMaterial {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   // uLit: share of windows lit at the current hour (#25).
   const uniforms: BuildingUniforms = shared ?? { uNight: { value: 0 }, uSourceView: { value: 0 }, uSelected: { value: -1 }, uLit: { value: 0.35 } };
   mat.userData.uniforms = uniforms;
   mat.userData.isBuildingMaterial = true;
+  mat.userData.style = style;
+  const plain = style !== 'toy';
+  const defines: Record<string, string> = {};
   if (toyProto) {
     mat.userData.toyProto = true;
-    mat.defines = { TOY_PROTO: '' };
+    defines.TOY_PROTO = '';
   }
-  // Never share a compiled program between the exact and the toy material.
-  mat.customProgramCacheKey = () => (toyProto ? 'buildings-toy' : 'buildings');
+  if (plain) defines.STYLE_PLAIN = '';
+  if (toyProto || plain) mat.defines = defines;
+  // Never share a compiled program between the exact and the toy material, nor between styles.
+  mat.customProgramCacheKey = () => (toyProto ? 'buildings-toy' : 'buildings') + (plain ? `-${style}` : '');
   const F = TOY_FACADE;
   const door = F.door;
   mat.onBeforeCompile = (shader) => {
@@ -285,7 +302,7 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         flat varying float vSeed;
         varying float vRoof;
         #ifdef TOY_PROTO
-        ${TOY_GLSL}
+        ${toyGlsl(toyParamsFor(style))}
         attribute float aFront;
         ${TOY_FACADE_VARYINGS}
         #endif`,
@@ -356,8 +373,13 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         float src = mod(code, 4.0);
         float matCode = floor(code / 4.0 + 0.001);
         // Facade materials (#5): 1 glass curtain wall, 2 brick, 3 metal cladding.
-        if (matCode > 1.5 && matCode < 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.13, 0.07), 0.275);
-        if (matCode > 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.38, 0.41, 0.45), 0.3);
+        #ifdef STYLE_PLAIN
+          if (matCode > 1.5 && matCode < 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.13, 0.07), 0.55);
+          if (matCode > 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.38, 0.41, 0.45), 0.6);
+        #else
+          if (matCode > 1.5 && matCode < 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.13, 0.07), 0.275);
+          if (matCode > 2.5) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.38, 0.41, 0.45), 0.3);
+        #endif
         if (uSourceView > 0.5) {
           diffuseColor.rgb = src < 0.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[0])}) : src < 1.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[1])})
             : src < 2.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[2])}) : vec3(${hexToVec(HEIGHT_SOURCE_COLORS[3])});
@@ -367,7 +389,7 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         bool facade = vRoof < 0.5 && abs(bN.y) < 0.3 && vWPos.y > 0.6;
         vec2 cell = vec2(0.0);
         float frameMask = 0.0;
-        #ifdef TOY_PROTO
+        #if defined(TOY_PROTO) && !defined(STYLE_PLAIN)
           // Toy walls, in the house's local metres: the sides face ±x and run along z, the ends face ±z
           // and run along x. Window columns are centred on each face's flat part (TS twin:
           // toyWindowColumns) and stop where the bevels start.
@@ -416,13 +438,20 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
               float my = smoothstep(wy0, wy0 + 0.04, f.y) * (1.0 - smoothstep(wy1, wy1 + 0.04, f.y));
               winMask = mx * my;
             } else {
-              // Rounded box in cell space (corner radius 0.25 of the short side) with a light frame around the glass.
-              vec2 hs = 0.5 * vec2(wx1 - wx0, wy1 - wy0);
-              float rad = 0.25 * 2.0 * min(hs.x, hs.y);
-              vec2 q = abs(f - 0.5 * vec2(wx0 + wx1, wy0 + wy1)) - hs + rad;
-              float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
-              winMask = 1.0 - smoothstep(-aa, aa, sd);
-              frameMask = (1.0 - smoothstep(0.08 - aa, 0.08 + aa, sd)) * (1.0 - winMask);
+              #ifdef STYLE_PLAIN
+                // Plain rectangles.
+                float mx = smoothstep(wx0 - aa, wx0 + aa, f.x) * (1.0 - smoothstep(wx1 - aa, wx1 + aa, f.x));
+                float my = smoothstep(wy0, wy0 + 0.04, f.y) * (1.0 - smoothstep(wy1, wy1 + 0.04, f.y));
+                winMask = mx * my;
+              #else
+                // Rounded box in cell space (corner radius 0.25 of the short side) with a light frame around the glass.
+                vec2 hs = 0.5 * vec2(wx1 - wx0, wy1 - wy0);
+                float rad = 0.25 * 2.0 * min(hs.x, hs.y);
+                vec2 q = abs(f - 0.5 * vec2(wx0 + wx1, wy0 + wy1)) - hs + rad;
+                float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
+                winMask = 1.0 - smoothstep(-aa, aa, sd);
+                frameMask = (1.0 - smoothstep(0.08 - aa, 0.08 + aa, sd)) * (1.0 - winMask);
+              #endif
             }
           }
         #endif
@@ -432,16 +461,24 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
           winLit = step(r, uLit) * (1.0 - floorDark);
           winBright = 0.3 + 0.7 * h21(cell * 1.7 + 3.1);
           winColor = mix(vec3(1.0, 0.72, 0.42), vec3(0.9, 0.93, 1.0), step(0.8, h21(cell.yx + fract(vSeed))));
-          vec3 glass = mix(vec3(${hexToVec('#93a9c4')}), vec3(0.08, 0.1, 0.16), uNight);
+          #ifdef STYLE_PLAIN
+            vec3 glass = mix(vec3(0.42, 0.52, 0.62), vec3(0.08, 0.1, 0.16), uNight);
+          #else
+            vec3 glass = mix(vec3(${hexToVec('#93a9c4')}), vec3(0.08, 0.1, 0.16), uNight);
+          #endif
           if (glassWall) {
             // Curtain wall: bluish, a little brighter towards the top (sky reflection).
             glass = mix(vec3(0.30, 0.45, 0.62) + 0.12 * clamp(vWPos.y / 120.0, 0.0, 1.0), vec3(0.06, 0.08, 0.14), uNight);
             winLit = step(r, uLit * 1.25) * (1.0 - floorDark);
           }
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(${hexToVec('#fffaf0')}), frameMask);
-          diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 1.0));
+          #ifdef STYLE_PLAIN
+            diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 0.75));
+          #else
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(${hexToVec('#fffaf0')}), frameMask);
+            diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 1.0));
+          #endif
         }
-        #ifdef TOY_PROTO
+        #if defined(TOY_PROTO) && !defined(STYLE_PLAIN)
           if (door && facade) {
             // Wooden door from the plinth top, rounded at the top, with a small gold knob; never lit at night.
             vec2 p = vec2(u, vWPos.y - ${glf(TOY.plinthH + door.height / 2)});
@@ -454,8 +491,8 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
             winMask *= 1.0 - doorMask;
           }
         #endif
-        // Plinth band on the exact mesh; prototypes have a real plinth. The 📏 view keeps its colours.
-        #ifndef TOY_PROTO
+        // Plinth band on the exact toy mesh; toy prototypes have a real plinth, Khối has none. The 📏 view keeps its colours.
+        #if !defined(TOY_PROTO) && !defined(STYLE_PLAIN)
         if (abs(bN.y) < 0.3 && vWPos.y < ${TOY.plinthH.toFixed(2)} && uSourceView < 0.5) diffuseColor.rgb *= ${PLINTH_SHADE.toFixed(2)};
         #endif
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.32, 0.08), vSelected * 0.85);`,

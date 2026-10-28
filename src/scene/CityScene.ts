@@ -20,6 +20,7 @@ import { armLightning, idleLightning, isFlashing, type LightningState, nextLight
 import { dominantMood, isRising, moodLighting, type Mood } from './moods';
 import { sunState, type SunState } from './sun';
 import { CloudLayer, SkyDome } from './sky';
+import { type Style, toyParamsFor } from './style';
 import { bakeToyInstances } from './toyGeometry';
 import { tiltShiftStrength } from './tiltShift';
 import { Boats, boatRoutes } from './boats';
@@ -121,6 +122,7 @@ export class CityScene {
   private white = new THREE.Color('#ffffff');
   private cloudLight = new THREE.Color('#ffffff');
   private clouds: CloudLayer | null = null;
+  private builtStyle: Style = 'toy';
   data: CityData | null = null;
   sunInfo: SunState | null = null;
   onFrame?: () => void;
@@ -195,11 +197,19 @@ export class CityScene {
     this.tiltBase = { h: 2 / w, v: 2 / h };
   }
 
-  async build(data: CityData, onProgress: ProgressFn): Promise<BuildStats> {
+  /** The style of the model on screen (the last build's). */
+  get style(): Style {
+    return this.builtStyle;
+  }
+
+  /** Builds the model in a style (style.ts); switching style means building again from the same data. */
+  async build(data: CityData, onProgress: ProgressFn, style: Style = 'toy'): Promise<BuildStats> {
     const t0 = performance.now();
     this.clear();
     this.mainThreadSlices = {};
     this.data = data;
+    this.builtStyle = style;
+    const pastel = toyParamsFor(style).pastel;
     const proj = (this.proj = new LocalProjection(data.bbox));
     this.size = bboxSizeMeters(data.bbox);
 
@@ -208,7 +218,7 @@ export class CityScene {
     const report = (f: number, d: string) => onProgress('build', Math.min(0.9, f), d);
     if (cityWorker.available) {
       try {
-        const r = await cityWorker.build(data, report);
+        const r = await cityWorker.build(data, style, report);
         const t = performance.now();
         built = { ...r, group: deserializeObjects(r.objects) };
         this.mainThreadSlices.deserialize = performance.now() - t;
@@ -216,13 +226,13 @@ export class CityScene {
         console.warn('Worker build failed, building inline', e);
         await nextFrame();
         const t = performance.now();
-        built = buildCity(data, report);
+        built = buildCity(data, report, style);
         this.mainThreadSlices.inlineBuild = performance.now() - t;
       }
     } else {
       await nextFrame();
       const t = performance.now();
-      built = buildCity(data, report);
+      built = buildCity(data, report, style);
       this.mainThreadSlices.inlineBuild = performance.now() - t;
     }
     this.city.add(built.group);
@@ -244,11 +254,10 @@ export class CityScene {
     await nextFrame();
     const tTraffic = performance.now();
     const attractors = data.pois.filter((p) => /market|school|college|university|hospital|place_of_worship|stadium/.test(p.kind)).map((p) => proj.project(p.pos));
-    this.traffic = new Traffic(built.paths, built.railPaths, attractors, MOBILE ? 1100 : 2400, MOBILE ? 300 : 700);
+    this.traffic = new Traffic(built.paths, built.railPaths, attractors, MOBILE ? 1100 : 2400, MOBILE ? 300 : 700, pastel);
     this.mainThreadSlices.traffic = performance.now() - tTraffic;
     this.scene.add(this.traffic.group);
-    // Style plumbing arrives with the style selector; boats are toy-coloured until then.
-    this.boats = new Boats(boatRoutes(data, proj), 4321, true);
+    this.boats = new Boats(boatRoutes(data, proj), 4321, pastel);
     this.scene.add(this.boats.group);
 
     for (const p of data.pois) {
@@ -661,7 +670,7 @@ export class CityScene {
       if ((o as THREE.InstancedMesh).isInstancedMesh && (o as THREE.InstancedMesh).geometry.getAttribute('aCorner')) toy.push(o as THREE.InstancedMesh);
     });
     for (const im of toy) {
-      im.parent!.add(bakeToyInstances(im));
+      im.parent!.add(bakeToyInstances(im, toyParamsFor(this.builtStyle)));
       im.removeFromParent();
     }
     const result = await exporter.parseAsync(root, { binary: true });

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { XZ } from './geometry';
-import { toyDepthMaterial, toyFlatRoofUnit, toyPitchedRoofUnit, toyWallsUnit } from './toyGeometry';
+import { toyDepthMaterial, toyFlatRoofUnit, toyPitchedRoofUnit, type ToyParams, toyWallsUnit } from './toyGeometry';
 
 /**
  * Prototype instancing for ordinary buildings (#22). Most houses in a Vietnamese city are boxes
@@ -42,20 +42,20 @@ export class PrototypeCollector {
     return this.items.length;
   }
 
-  /** One InstancedMesh per prototype that has instances; `material` must be a toy building material. */
-  build(material: THREE.Material): THREE.InstancedMesh[] {
+  /** One InstancedMesh per prototype that has instances; `material` must be a toy building material made for the same params. */
+  build(material: THREE.Material, params?: ToyParams): THREE.InstancedMesh[] {
     const groups: { name: string; geo: () => THREE.BufferGeometry; list: ProtoInstance[]; roof: boolean; m: (i: ProtoInstance) => THREE.Matrix4 }[] = [];
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
     const mat = (i: ProtoInstance, y: number, sx: number, sy: number, sz: number) =>
       new THREE.Matrix4().compose(new THREE.Vector3(i.centre[0], y, i.centre[1]), q.setFromAxisAngle(up, i.angle), new THREE.Vector3(sx, sy, sz));
     // Everything stays inside the footprint; the roofs' eaves and slab are part of the toy units.
-    groups.push({ name: 'buildings-walls', geo: toyWallsUnit, list: this.items, roof: false, m: (i) => mat(i, 0, i.w, i.height, i.l) });
-    groups.push({ name: 'buildings-roof-flat', geo: toyFlatRoofUnit, list: this.items.filter((i) => i.roof === 'flat'), roof: true, m: (i) => mat(i, i.height, i.w, 1, i.l) });
+    groups.push({ name: 'buildings-walls', geo: () => toyWallsUnit(params), list: this.items, roof: false, m: (i) => mat(i, 0, i.w, i.height, i.l) });
+    groups.push({ name: 'buildings-roof-flat', geo: () => toyFlatRoofUnit(params), list: this.items.filter((i) => i.roof === 'flat'), roof: true, m: (i) => mat(i, i.height, i.w, 1, i.l) });
     for (const roof of ['gabled', 'hipped'] as const) {
       groups.push({
         name: `buildings-roof-${roof}`,
-        geo: () => toyPitchedRoofUnit(roof === 'hipped'),
+        geo: () => toyPitchedRoofUnit(roof === 'hipped', params),
         list: this.items.filter((i) => i.roof === roof),
         roof: true,
         m: (i) => mat(i, i.height, i.w, i.rise, i.l),
@@ -70,7 +70,7 @@ export class PrototypeCollector {
       // Every unit gets it: the material declares it, and an unbound attribute reads stale values.
       geo.setAttribute('aFront', new THREE.InstancedBufferAttribute(new Float32Array(g.list.map((i) => i.front)), 1));
       const mesh = new THREE.InstancedMesh(geo, material, g.list.length);
-      mesh.customDepthMaterial = toyDepthMaterial();
+      mesh.customDepthMaterial = toyDepthMaterial(params);
       g.list.forEach((it, k) => {
         mesh.setMatrixAt(k, g.m(it));
         mesh.setColorAt(k, g.roof ? it.roofColor : it.facade);

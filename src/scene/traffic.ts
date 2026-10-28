@@ -130,6 +130,15 @@ const PALETTE: Record<VehicleKind, string[]> = {
   truck: ['#ffffff', '#9fb5d4', '#e08a70', '#fbeec1'],
 };
 const CLOTHES = ['#f4c7b8', '#d6e2f2', '#e08a70', '#fbeec1', '#cfe5d0', '#eba37c', '#ffffff', '#9fb5d4'];
+/** Khối: the plain vehicle paint and clothes. */
+const PLAIN_PALETTE: Record<VehicleKind, string[]> = {
+  moto: ['#e9e9e9', '#1f2024', '#c0392b', '#2e86de', '#8e44ad', '#d35400', '#7f8c8d', '#e84393'],
+  bicycle: ['#2d3436', '#0984e3', '#00b894', '#fdcb6e', '#d63031'],
+  car: ['#f2f2f2', '#2b2d33', '#bdc3c7', '#c0392b', '#2e86de', '#7f8c8d', '#ffffff', '#1e3799'],
+  bus: ['#27ae60', '#2e86de', '#16a085', '#e67e22'],
+  truck: ['#f0f0f0', '#2980b9', '#c0392b', '#f39c12'],
+};
+const PLAIN_CLOTHES = ['#2d3436', '#0984e3', '#d63031', '#fdcb6e', '#00b894', '#e17055', '#f5f6fa', '#6c5ce7'];
 
 /** Free-flow speed for the kind on a road class, m/s. */
 const speedOf = (kind: VehicleKind, cls: RoadClass) => (kind === 'bicycle' ? 4 : FREE_SPEED[cls] * PACE[kind]);
@@ -164,8 +173,11 @@ export class Traffic {
   /**
    * @param attractors local x/z of markets, schools, hospitals… (raise traffic nearby)
    * @param maxVehicles cap on simulated vehicles (fewer on phones)
+   * @param pastel toy colours (Đồ chơi), else the plain ones (Khối)
    */
-  constructor(readonly paths: RoadPath[], private readonly rails: RailPath[], attractors: XZ[] = [], maxVehicles = 2400, maxPeople = 700) {
+  constructor(readonly paths: RoadPath[], private readonly rails: RailPath[], attractors: XZ[] = [], maxVehicles = 2400, maxPeople = 700, pastel = true) {
+    const palette = pastel ? PALETTE : PLAIN_PALETTE;
+    const clothes = pastel ? CLOTHES : PLAIN_CLOTHES;
     this.group.name = 'traffic';
     const n = paths.length;
     this.ratio = new Float32Array(n);
@@ -234,7 +246,7 @@ export class Traffic {
       this.group.add(m);
     }
     for (const v of this.vehicles) {
-      const pal = v.kind === 'moto' || v.kind === 'bicycle' ? CLOTHES : PALETTE[v.kind];
+      const pal = v.kind === 'moto' || v.kind === 'bicycle' ? clothes : palette[v.kind];
       v.color.set(pal[Math.floor(r() * pal.length)]);
       this.bodies.get(v.kind)!.setColorAt(v.slot, v.color);
     }
@@ -263,7 +275,7 @@ export class Traffic {
       for (let c = 0; c < count; c++) {
         const side = r() < 0.5 ? -1 : 1;
         const lateral = p.road.cls === 'path' ? (r() - 0.5) * 1.2 : side * (p.road.width / 2 + 0.7 + r() * 1.1);
-        this.people.push({ path: i, d: r() * p.length, dir: r() < 0.5 ? 1 : -1, lateral, speed: 1.1 + r() * 0.5, threshold: r(), color: new THREE.Color(CLOTHES[Math.floor(r() * CLOTHES.length)]) });
+        this.people.push({ path: i, d: r() * p.length, dir: r() < 0.5 ? 1 : -1, lateral, speed: 1.1 + r() * 0.5, threshold: r(), color: new THREE.Color(clothes[Math.floor(r() * clothes.length)]) });
       }
     });
     if (this.people.length) {

@@ -16,7 +16,18 @@ const AREA_COLORS: Record<AreaFeature['kind'], string> = {
   plaza: '#e2d8c2',
   parking: '#b9b4aa',
 };
+/** Khối: the plain colours. */
+const PLAIN_AREA_COLORS: Record<AreaFeature['kind'], string> = {
+  water: '#5fa8d8',
+  park: '#8cc66b',
+  grass: '#9fd07a',
+  forest: '#6aa752',
+  plaza: '#e2d8c2',
+  parking: '#b9b4aa',
+};
 export const GROUND_COLOR = TOY_GROUND;
+const PLAIN_GROUND_COLOR = '#e8dcc0';
+const PLAIN_TREES = ['#4f9d3a', '#5cae45', '#69b84d', '#3f8a35', '#78c25a'];
 
 export interface LandscapeResult {
   group: THREE.Group;
@@ -32,7 +43,10 @@ export function buildLandscape(
   roads: RoadPath[],
   footprints: SpatialGrid<XZ[]>,
   lampSpots: number[][],
+  /** Toy colours (Đồ chơi), else the plain ones (Khối). */
+  pastel = true,
 ): LandscapeResult {
+  const areaColors = pastel ? AREA_COLORS : PLAIN_AREA_COLORS;
   const group = new THREE.Group();
   group.name = 'landscape';
   const { width, depth } = bboxSizeMeters(data.bbox);
@@ -42,7 +56,7 @@ export function buildLandscape(
     new THREE.BoxGeometry(width, 6, depth).translate(0, -3.01, 0),
     [
       ...Array(2).fill(new THREE.MeshLambertMaterial({ color: '#b9a98a' })),
-      new THREE.MeshLambertMaterial({ color: GROUND_COLOR, depthWrite: false }),
+      new THREE.MeshLambertMaterial({ color: pastel ? GROUND_COLOR : PLAIN_GROUND_COLOR, depthWrite: false }),
       ...Array(3).fill(new THREE.MeshLambertMaterial({ color: '#b9a98a' })),
     ],
   );
@@ -57,12 +71,12 @@ export function buildLandscape(
   const parkRings: XZ[][] = [];
   for (const a of data.areas) {
     const rings = a.polygon.map((r) => r.map((p) => proj.project(p)));
-    const g = flatPolygon(rings, 0, AREA_COLORS[a.kind]);
+    const g = flatPolygon(rings, 0, areaColors[a.kind]);
     if (!g) continue;
     (a.kind === 'water' ? waters : greens).push(g);
     if (a.kind === 'park' || a.kind === 'forest') parkRings.push(rings[0]);
   }
-  const wb = new MeshBuilder().setColor(AREA_COLORS.water);
+  const wb = new MeshBuilder().setColor(areaColors.water);
   for (const w of data.waterways) {
     const pts = w.line.map((p) => proj.project(p));
     ribbon(wb, pts, pts.map(() => 0), w.width);
@@ -137,7 +151,7 @@ export function buildLandscape(
       }
     }
   }
-  const trees = buildTrees(spots, bushSpots, r);
+  const trees = buildTrees(spots, bushSpots, r, pastel);
   if (trees) group.add(trees);
 
   // Street lamps: thin posts plus emissive bulbs that only show at night.
@@ -207,7 +221,7 @@ function toyCrown(): THREE.BufferGeometry {
   return g.translate(0, 3.4, 0);
 }
 
-function buildTrees(spots: [number, number, number][], bushes: [number, number, number][], r: () => number): THREE.Group | null {
+function buildTrees(spots: [number, number, number][], bushes: [number, number, number][], r: () => number, pastel: boolean): THREE.Group | null {
   if (!spots.length) return null;
   const g = new THREE.Group();
   g.name = 'trees';
@@ -219,7 +233,7 @@ function buildTrees(spots: [number, number, number][], bushes: [number, number, 
   const q = new THREE.Quaternion();
   const s = new THREE.Vector3();
   const p = new THREE.Vector3();
-  const greens = TOY_TREES.map((c) => new THREE.Color(c));
+  const greens = (pastel ? TOY_TREES : PLAIN_TREES).map((c) => new THREE.Color(c));
   spots.forEach(([x, z, k], i) => {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * Math.PI * 2);
     s.set(k, k * (0.9 + r() * 0.3), k);

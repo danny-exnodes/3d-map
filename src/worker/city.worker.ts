@@ -29,7 +29,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       return;
     }
     if (req.op === 'build') {
-      const built = buildCity(req.data, (f, detail) => post({ id: req.id, type: 'progress', f, detail }));
+      const built = buildCity(req.data, (f, detail) => post({ id: req.id, type: 'progress', f, detail }), req.style);
       const { objects, transfer } = serializeObject(built.group);
       const result: BuildResult = { objects, paths: built.paths, railPaths: built.railPaths, buildings: built.buildings, trees: built.trees, buildingIds: built.buildingIds };
       post({ id: req.id, type: 'result', result }, transfer);

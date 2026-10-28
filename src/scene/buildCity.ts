@@ -6,6 +6,7 @@ import { buildBuildings } from './buildings';
 import { buildLandscape } from './landscape';
 import { sampleAlong } from './geometry';
 import { buildRoads, type RailPath, type RoadPath } from './roads';
+import { type Style, toyParamsFor } from './style';
 
 export interface BuiltCity {
   group: THREE.Group;
@@ -16,8 +17,8 @@ export interface BuiltCity {
   buildingIds: string[];
 }
 
-/** Pure geometry generation: CityData → meshes. Runs in the build worker (or inline as a fallback). */
-export function buildCity(input: CityData, onProgress: (f: number, detail: string) => void = () => {}): BuiltCity {
+/** Pure geometry generation: CityData → meshes in a style. Runs in the build worker (or inline as a fallback). */
+export function buildCity(input: CityData, onProgress: (f: number, detail: string) => void = () => {}, style: Style = 'toy'): BuiltCity {
   const data = clipCityToBBox(input);
   const proj = new LocalProjection(data.bbox);
   const group = new THREE.Group();
@@ -28,10 +29,11 @@ export function buildCity(input: CityData, onProgress: (f: number, detail: strin
   const b = buildBuildings(data.buildings, proj, {
     onProgress: (f) => onProgress(0.3 + f * 0.35, 'Nhà cửa'),
     roadDistance: roadDistanceField(roads.paths),
+    style,
   });
   group.add(b.mesh, ...b.instanced, b.details);
   onProgress(0.7, 'Cây, sông, đèn đường');
-  const land = buildLandscape(data, proj, roads.paths, b.footprints, roads.lampSpots);
+  const land = buildLandscape(data, proj, roads.paths, b.footprints, roads.lampSpots, toyParamsFor(style).pastel);
   group.add(land.group);
   return { group, paths: roads.paths, railPaths: roads.railPaths, buildings: b.count, trees: land.treeCount, buildingIds: b.ids };
 }

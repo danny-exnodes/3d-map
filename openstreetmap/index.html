@@ -73,11 +73,18 @@
           <button id="btn-cancel" class="ghost small">Huỷ</button>
         </div>
         <footer class="map-bottom card">
-          <div id="mood-picker" class="moods" title="Chọn khung cảnh trong ngày cho mô hình 3D">
-            <button data-mood="morning"><i></i>Buổi sáng</button>
-            <button data-mood="noon"><i></i>Nắng trưa</button>
-            <button data-mood="golden"><i></i>Hoàng hôn</button>
-            <button data-mood="night"><i></i>Đêm ấm</button>
+          <div class="pickers">
+            <div id="mood-picker" class="moods" title="Chọn khung cảnh trong ngày cho mô hình 3D">
+              <button data-mood="morning"><i></i>Buổi sáng</button>
+              <button data-mood="noon"><i></i>Nắng trưa</button>
+              <button data-mood="golden"><i></i>Hoàng hôn</button>
+              <button data-mood="night"><i></i>Đêm ấm</button>
+            </div>
+            <div id="style-picker" class="moods styles" role="group" aria-label="Kiểu mô hình 3D" title="Chọn kiểu mô hình 3D">
+              <button data-style="toy" aria-pressed="false"><i></i>Đồ chơi</button>
+              <button data-style="block" aria-pressed="false"><i></i>Khối</button>
+              <button data-style="real" aria-pressed="false"><i></i>Siêu thực</button>
+            </div>
           </div>
           <div>
             <div><span class="dot accent"></span> <span id="area-label">Chưa chọn vùng</span></div>
@@ -109,6 +116,7 @@
           <button id="btn-sources" class="toggle" title="Tô màu nhà theo nguồn chiều cao">📏</button>
           <button id="btn-pixel" class="toggle" title="Chế độ pixel">▦ Pixel</button>
           <button id="btn-mood" class="toggle" title="Đổi khung cảnh trong ngày">Nắng trưa</button>
+          <button id="btn-style" class="toggle" title="Đổi kiểu mô hình: Đồ chơi → Khối → Siêu thực">Đồ chơi</button>
           <button id="btn-weather" class="toggle" title="Chọn thời tiết" aria-haspopup="menu" aria-expanded="false" aria-controls="weather-menu">🔄</button>
           <button id="btn-space" class="toggle" title="Space view: bay lên vũ trụ nhìn trái đất">🌍</button>
           <button id="btn-shot" title="Chụp ảnh PNG">📷</button>

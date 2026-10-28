@@ -23,28 +23,46 @@ import { PLINTH_SHADE } from './toyPalette';
  * - `position`: the vertex placed for a reference size, divided by it. Only bounds and picking use it.
  *
  * Everything stays inside the true footprint, so neighbouring row houses never overlap: the
- * plinth is the footprint, the body is inset by TOY.inset, roofs reach back out to the footprint.
+ * plinth is the footprint, the body is inset by `inset`, roofs reach back out to the footprint.
+ *
+ * The proportions are parameters (ToyParams): the Khối style (style.ts) builds the same units with
+ * all of them zero, which gives plain boxes on the footprint with sharp-ridged roofs and no chimney.
  */
 
 /** Toy proportions (m). The radius is the mockup's 1.1 m on a 4.4 m house. */
 export const TOY = { inset: 0.3, plinthH: 0.7, radius: 1.1, roofBevel: 0.7, segments: 2 } as const;
 
+/** Proportions the units are built and placed with (m); `chimneys` adds the gabled roof's chimney. */
+export interface ToyParams {
+  inset: number;
+  radius: number;
+  plinthH: number;
+  roofBevel: number;
+  chimneys: boolean;
+}
+
+/** The Đồ chơi proportions, the default everywhere. */
+const TOY_PARAMS: ToyParams = { inset: TOY.inset, radius: TOY.radius, plinthH: TOY.plinthH, roofBevel: TOY.roofBevel, chimneys: true };
+
 /** Flat roof slab thickness (m). */
 const SLAB = 0.9;
+
 /**
- * The body's walls go up to the wall top, so every roof covers the line TOY.inset in from the
- * footprint at or above y = 0: roof surfaces turn upwards a little outside it, LIP_INSET in.
+ * Roof measures that follow from the params:
+ * - lipInset: the body's walls go up to the wall top, so every roof covers the line `inset` in from
+ *   the footprint at or above y = 0: roof surfaces turn upwards a little outside it, lipInset in.
+ * - lipTurn, lipDrop: the eave lip is an arc of radius roofBevel turning up from vertical until it is
+ *   lipInset in, where its top meets the wall top; it hangs lipDrop under the wall top.
+ * - slopeInset: pitched slopes run from the lip top to a ridge strip lipInset each side of the centre
+ *   (hipped ridges end at a quarter of the length), so each slope's run is (size − 2·slopeInset)/2
+ *   across and (size − 2·slopeInset)/4 at a hip end.
+ * All are 0 with no inset and no bevel (Khối).
  */
-const LIP_INSET = TOY.inset - 0.05;
-/** Eave lip: an arc of radius roofBevel turning up from vertical until it is LIP_INSET in, where its top meets the wall top. */
-const LIP_TURN = Math.acos(1 - LIP_INSET / TOY.roofBevel);
-const LIP_DROP = TOY.roofBevel * Math.sin(LIP_TURN);
-/**
- * Pitched slopes run from the lip top to a ridge strip LIP_INSET each side of the centre (hipped
- * ridges end at a quarter of the length), so each slope's run is (size − 2·SLOPE_INSET)/2 across
- * and (size − 2·SLOPE_INSET)/4 at a hip end.
- */
-const SLOPE_INSET = 2 * LIP_INSET;
+function roofDims(p: ToyParams) {
+  const lipInset = Math.max(0, p.inset - 0.05);
+  const lipTurn = p.roofBevel > 0 ? Math.acos(1 - lipInset / p.roofBevel) : 0;
+  return { lipInset, lipTurn, lipDrop: p.roofBevel * Math.sin(lipTurn), slopeInset: 2 * lipInset };
+}
 /** Chimney (gabled roofs only), metres from the ridge line and from the +z end; it starts down at the lip and tops the ridge. */
 const CHIMNEY = { x0: 0.45, x1: 1.05, z0: 1.4, z1: 2.0, top: 0.5 };
 /** Gable ends a little darker than the slopes, like the shaded wall triangles of real houses. */
@@ -52,23 +70,23 @@ const GABLE_SHADE = 0.86;
 const CHIMNEY_SHADE = 0.9;
 
 /**
- * Bevel radius r of a prototype with footprint sx × sz: TOY.radius, clamped so that the body
+ * Bevel radius r of a prototype with footprint sx × sz: the params' radius, clamped so that the body
  * (footprint − 2·inset) keeps r ≤ 0.45 × its extent and the plinth and roofs, whose corners are
  * concentric arcs of radius r + inset, keep r + inset ≤ 0.45 × the footprint.
- * GLSL twin: toyRadius in TOY_GLSL.
+ * GLSL twin: toyRadius in toyGlsl.
  */
-export function toyRadius(sx: number, sz: number): number {
-  return Math.min(TOY.radius, Math.max(0, 0.45 * Math.min(sx, sz) - TOY.inset));
+export function toyRadius(sx: number, sz: number, p: ToyParams = TOY_PARAMS): number {
+  return Math.min(p.radius, Math.max(0, 0.45 * Math.min(sx, sz) - p.inset));
 }
 
 /**
  * The flat roof's usable deck for a prototype of footprint sx × sz, in the house's own frame (x: sx, z: sz),
  * centred on the footprint: a rounded rectangle of half-extents (hx, hz) and corner radius r. The slab top is
- * the wall top (y offset 0 from the roof instance, see toyFlatRoofUnit). The slab is flat out to LIP_INSET, but
- * its edge shades round, so objects keep to the wall line: the outline inset by TOY.inset, bevels included.
+ * the wall top (y offset 0 from the roof instance, see toyFlatRoofUnit). The slab is flat out to the lip inset, but
+ * its edge shades round, so objects keep to the wall line: the outline inset by `inset`, bevels included.
  */
-export function toyRoofDeck(sx: number, sz: number): { hx: number; hz: number; r: number } {
-  return { hx: Math.max(0, sx / 2 - TOY.inset), hz: Math.max(0, sz / 2 - TOY.inset), r: toyRadius(sx, sz) };
+export function toyRoofDeck(sx: number, sz: number, p: ToyParams = TOY_PARAMS): { hx: number; hz: number; r: number } {
+  return { hx: Math.max(0, sx / 2 - p.inset), hz: Math.max(0, sz / 2 - p.inset), r: toyRadius(sx, sz, p) };
 }
 
 /** True when the axis-aligned box centred (cx, cz) with half-sizes (ax, az) lies inside the deck (rounded corners included). */
@@ -89,18 +107,18 @@ export function toyDeckContains(deck: { hx: number; hz: number; r: number }, cx:
  * Places a toy vertex for a house of the given size (m): per horizontal axis
  * `corner × (size/2 − r) + r × dir + offset`, vertically `corner.y × size.y + offset.y`.
  * `dir` is the vertex's aBevel.xy and defaults to the corner itself (a sharp vertex).
- * GLSL twin: toyPlace in TOY_GLSL.
+ * GLSL twin: toyPlace in toyGlsl.
  */
-export function placeToyVertex(corner: THREE.Vector3, offset: THREE.Vector3, size: THREE.Vector3, out = new THREE.Vector3(), dir?: THREE.Vector2): THREE.Vector3 {
-  const r = toyRadius(size.x, size.z);
+export function placeToyVertex(corner: THREE.Vector3, offset: THREE.Vector3, size: THREE.Vector3, out = new THREE.Vector3(), dir?: THREE.Vector2, p: ToyParams = TOY_PARAMS): THREE.Vector3 {
+  const r = toyRadius(size.x, size.z, p);
   const dx = dir ? dir.x : corner.x;
   const dz = dir ? dir.y : corner.z;
   return out.set(corner.x * (size.x / 2 - r) + r * dx + offset.x, corner.y * size.y + offset.y, corner.z * (size.z / 2 - r) + r * dz + offset.z);
 }
 
 /** Flat (unbevelled) widths of the body faces: [the two ends (faces ±z, along x), the two sides (faces ±x, along z)]. GLSL twin: toyFlatWidths. */
-export function toyFlatWidths(sx: number, sz: number): [number, number] {
-  const k = 2 * (TOY.inset + toyRadius(sx, sz));
+export function toyFlatWidths(sx: number, sz: number, p: ToyParams = TOY_PARAMS): [number, number] {
+  const k = 2 * (p.inset + toyRadius(sx, sz, p));
   return [Math.max(0, sx - k), Math.max(0, sz - k)];
 }
 
@@ -147,16 +165,17 @@ function noChimney(seed: number): boolean {
 /**
  * Divisor that turns a stored normal into the normal of the placed vertex (before rotation):
  * metric normals stay as they are, unit-box slope normals are divided by the slope's real run,
- * size − 2·SLOPE_INSET on x and z. GLSL twin: the beginnormal chunk in createBuildingMaterial,
+ * size − 2·slopeInset on x and z. GLSL twin: the beginnormal chunk in createBuildingMaterial,
  * which multiplies by size / divisor because three's instancing then divides by size again.
  */
-function normalDivisor(size: THREE.Vector3, unit: number, out: THREE.Vector3): THREE.Vector3 {
+function normalDivisor(size: THREE.Vector3, unit: number, out: THREE.Vector3, p: ToyParams = TOY_PARAMS): THREE.Vector3 {
   if (unit < 0.5) return out.set(1, 1, 1);
-  return out.set(Math.max(size.x - 2 * SLOPE_INSET, 0.1), size.y, Math.max(size.z - 2 * SLOPE_INSET, 0.1));
+  const { slopeInset } = roofDims(p);
+  return out.set(Math.max(size.x - 2 * slopeInset, 0.1), size.y, Math.max(size.z - 2 * slopeInset, 0.1));
 }
 
-/** GLSL twin of the functions above, for instanced toy meshes (needs USE_INSTANCING and aSeed). */
-export const TOY_GLSL = /* glsl */ `
+/** GLSL twin of the functions above, for instanced toy meshes (needs USE_INSTANCING and aSeed); the params are baked in as constants. */
+export const toyGlsl = (p: ToyParams = TOY_PARAMS) => /* glsl */ `
 attribute vec3 aCorner;
 attribute vec3 aOffset;
 attribute vec3 aBevel;
@@ -165,9 +184,9 @@ vec3 toyScale() {
   return max(vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz)), vec3(1e-4));
 }
 // TS twin: toyRadius.
-float toyRadius(vec3 s) { return clamp(0.45 * min(s.x, s.z) - ${TOY.inset.toFixed(4)}, 0.0, ${TOY.radius.toFixed(4)}); }
+float toyRadius(vec3 s) { return clamp(0.45 * min(s.x, s.z) - ${p.inset.toFixed(4)}, 0.0, ${p.radius.toFixed(4)}); }
 // TS twin: toyFlatWidths.
-vec2 toyFlatWidths(vec3 s) { return max(s.xz - 2.0 * (${TOY.inset.toFixed(4)} + toyRadius(s)), vec2(0.0)); }
+vec2 toyFlatWidths(vec3 s) { return max(s.xz - 2.0 * (${p.inset.toFixed(4)} + toyRadius(s)), vec2(0.0)); }
 // TS twin: placeToyVertex.
 vec3 toyPlace(vec3 corner, vec3 offset, vec2 dir, vec3 s) {
   float r = toyRadius(s);
@@ -177,7 +196,7 @@ vec3 toyPlace(vec3 corner, vec3 offset, vec2 dir, vec3 s) {
 bool toyNoChimney(float seed) { return fract(seed * 13.0) > 0.6; }
 // TS twin: normalDivisor (three's instancing maths divides by s afterwards, hence the extra s).
 vec3 toyNormalScale(vec3 s) {
-  return s / mix(vec3(1.0), max(s - vec3(${(2 * SLOPE_INSET).toFixed(4)}, 0.0, ${(2 * SLOPE_INSET).toFixed(4)}), vec3(0.1, 1e-4, 0.1)), aBevel.z);
+  return s / mix(vec3(1.0), max(s - vec3(${(2 * roofDims(p).slopeInset).toFixed(4)}, 0.0, ${(2 * roofDims(p).slopeInset).toFixed(4)}), vec3(0.1, 1e-4, 0.1)), aBevel.z);
 }
 // Unit-box position that instanceMatrix maps to the placed vertex; chimneys collapse to the roof centre.
 vec3 toyTransformed() {
@@ -188,19 +207,22 @@ vec3 toyTransformed() {
 }
 `;
 
-let toyDepth: THREE.MeshDepthMaterial | null = null;
+const toyDepth = new Map<string, THREE.MeshDepthMaterial>();
 
-/** Shadow-map material for toy prototype meshes (customDepthMaterial): the same placement, so shadows match the rounded shapes. Shared by all of them. */
-export function toyDepthMaterial(): THREE.MeshDepthMaterial {
-  if (toyDepth) return toyDepth;
+/** Shadow-map material for toy prototype meshes (customDepthMaterial): the same placement, so shadows match the units' shapes. One per set of params, shared. */
+export function toyDepthMaterial(p: ToyParams = TOY_PARAMS): THREE.MeshDepthMaterial {
+  const key = [p.inset, p.radius, p.roofBevel].join(',');
+  const cached = toyDepth.get(key);
+  if (cached) return cached;
   const mat = new THREE.MeshDepthMaterial();
-  mat.customProgramCacheKey = () => 'buildings-toy-depth';
+  mat.customProgramCacheKey = () => `buildings-toy-depth-${key}`;
   mat.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n        attribute float aSeed;\n        ${TOY_GLSL}`)
+      .replace('#include <common>', `#include <common>\n        attribute float aSeed;\n        ${toyGlsl(p)}`)
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n        transformed = toyTransformed();');
   };
-  return (toyDepth = mat);
+  toyDepth.set(key, mat);
+  return mat;
 }
 
 type V3 = [number, number, number];
@@ -230,11 +252,12 @@ class ToyMesh {
   constructor(
     private ref: THREE.Vector3,
     private roof: boolean,
+    readonly params: ToyParams,
   ) {}
 
   v(x: ToyVertex): number {
     const d = x.d ?? [x.c[0], x.c[2]];
-    const p = placeToyVertex(new THREE.Vector3(...x.c), new THREE.Vector3(...x.o), this.ref, new THREE.Vector3(), new THREE.Vector2(...d));
+    const p = placeToyVertex(new THREE.Vector3(...x.c), new THREE.Vector3(...x.o), this.ref, new THREE.Vector3(), new THREE.Vector2(...d), this.params);
     const n = new THREE.Vector3(...x.n).normalize();
     const a = this.attrs;
     // Approximate reference shape, only for raycasting and bounds; the shader does the real placement.
@@ -248,7 +271,7 @@ class ToyMesh {
     a.aRoof.push(x.chimney ? 2 : this.roof ? 1 : 0);
     this.placed.push(p);
     // Wind against the placed normal (unit-box normals divided by the reference run).
-    this.normals.push(n.clone().divide(normalDivisor(this.ref, x.unit ? 1 : 0, new THREE.Vector3())));
+    this.normals.push(n.clone().divide(normalDivisor(this.ref, x.unit ? 1 : 0, new THREE.Vector3(), this.params)));
     return this.placed.length - 1;
   }
 
@@ -286,7 +309,7 @@ class ToyMesh {
 
 /**
  * One horizontal ring around the rounded plan: four corner arcs of TOY.segments segments.
- * `grow` is the arc radius beyond the body's (r): 0 on the body, TOY.inset on the footprint edge.
+ * `grow` is the arc radius beyond the body's (r): 0 on the body, `inset` on the footprint edge.
  * `normal(dx, dz)` gives the vertex normal from the plan direction.
  */
 function ring(m: ToyMesh, cy: number, oy: number, grow: number, normal: (dx: number, dz: number) => V3, shade = 1): number[] {
@@ -297,7 +320,7 @@ function ring(m: ToyMesh, cy: number, oy: number, grow: number, normal: (dx: num
     for (let k = 0; k <= TOY.segments; k++) {
       const t = ((q + k / TOY.segments) * Math.PI) / 2;
       const dx = Math.cos(t), dz = Math.sin(t);
-      ids.push(m.v({ c: [cx, cy, cz], o: [grow * dx - TOY.inset * cx, oy, grow * dz - TOY.inset * cz], d: [dx, dz], n: normal(dx, dz), shade }));
+      ids.push(m.v({ c: [cx, cy, cz], o: [grow * dx - m.params.inset * cx, oy, grow * dz - m.params.inset * cz], d: [dx, dz], n: normal(dx, dz), shade }));
     }
   }
   return ids;
@@ -308,31 +331,35 @@ const up = (): V3 => [0, 1, 0];
 const down = (): V3 => [0, -1, 0];
 
 /**
- * Walls: a plinth on the true footprint (darker), then the body inset by TOY.inset with rounded
+ * Walls: a plinth on the true footprint (darker), then the body inset by `inset` with rounded
  * vertical edges, up to the wall top. Its top is always inside a roof (slab or eave lip), so it gets
- * no cap and no bevel.
+ * no cap and no bevel. With no plinth (Khối) the body starts on the ground.
  */
-export function toyWallsUnit(): THREE.BufferGeometry {
-  const m = new ToyMesh(new THREE.Vector3(10, 10, 10), false);
-  const { inset, plinthH } = TOY;
-  m.band(ring(m, 0, 0, inset, side, PLINTH_SHADE), ring(m, 0, plinthH, inset, side, PLINTH_SHADE), true);
-  // The ledge on top of the plinth, out to the body.
-  m.band(ring(m, 0, plinthH, inset, up, PLINTH_SHADE), ring(m, 0, plinthH, 0, up, PLINTH_SHADE), true);
+export function toyWallsUnit(p: ToyParams = TOY_PARAMS): THREE.BufferGeometry {
+  const m = new ToyMesh(new THREE.Vector3(10, 10, 10), false, p);
+  const { inset, plinthH } = p;
+  if (plinthH > 0) {
+    m.band(ring(m, 0, 0, inset, side, PLINTH_SHADE), ring(m, 0, plinthH, inset, side, PLINTH_SHADE), true);
+    // The ledge on top of the plinth, out to the body.
+    m.band(ring(m, 0, plinthH, inset, up, PLINTH_SHADE), ring(m, 0, plinthH, 0, up, PLINTH_SHADE), true);
+  }
   m.band(ring(m, 0, plinthH, 0, side), ring(m, 1, 0, 0, side), true);
   return m.build();
 }
 
 /**
- * Flat roof: a slab SLAB thick whose top is the wall top, from the footprint edge in to LIP_INSET at
+ * Flat roof: a slab SLAB thick whose top is the wall top, from the footprint edge in to the lip inset at
  * the top. One band whose normals turn from the side to straight up, so the whole edge shades round.
+ * With no inset (Khối) the walls reach the footprint, so the slab's sides would lie on them: the roof
+ * is only its top, a lid on the walls.
  */
-export function toyFlatRoofUnit(): THREE.BufferGeometry {
-  const m = new ToyMesh(new THREE.Vector3(10, 1, 10), true);
-  const { inset } = TOY;
-  const top = ring(m, 0, 0, inset - LIP_INSET, up);
-  m.band(ring(m, 0, -SLAB, inset, side), top, true);
+export function toyFlatRoofUnit(p: ToyParams = TOY_PARAMS): THREE.BufferGeometry {
+  const m = new ToyMesh(new THREE.Vector3(10, 1, 10), true, p);
+  const { inset } = p;
+  const top = ring(m, 0, 0, inset - roofDims(p).lipInset, up);
+  if (inset > 0) m.band(ring(m, 0, -SLAB, inset, side), top, true);
   m.poly(top);
-  m.poly(ring(m, 0, -SLAB, inset, down));
+  if (inset > 0) m.poly(ring(m, 0, -SLAB, inset, down));
   return m.build();
 }
 
@@ -340,20 +367,22 @@ export function toyFlatRoofUnit(): THREE.BufferGeometry {
  * Pitched roof over the footprint, ridge along z, wall top at y = 0 and ridge at y = size.y (the rise).
  * A thick rounded eave lip on every eave hangs LIP_DROP under the wall top, the slopes are planar,
  * and the ridge is a strip whose normals turn from one slope to the other, so it shades round.
- * Gabled roofs have vertical gable ends and a chimney; hipped roofs slope at the ends to a ridge
- * half the length of the house.
+ * Gabled roofs have vertical gable ends and a chimney (when the params have one); hipped roofs slope
+ * at the ends to a ridge half the length of the house. With no bevel or inset (Khối) the lip and the
+ * ridge strip shrink to nothing: plain slopes from the footprint's edges up to a sharp ridge.
  */
-export function toyPitchedRoofUnit(hipped: boolean): THREE.BufferGeometry {
-  const m = new ToyMesh(new THREE.Vector3(10, 3, 10), true);
-  const b = TOY.roofBevel;
+export function toyPitchedRoofUnit(hipped: boolean, p: ToyParams = TOY_PARAMS): THREE.BufferGeometry {
+  const m = new ToyMesh(new THREE.Vector3(10, 3, 10), true, p);
+  const b = p.roofBevel;
   const n = TOY.segments;
-  const ridgeHalf = SLOPE_INSET - LIP_INSET;
+  const { lipInset, lipTurn, lipDrop, slopeInset } = roofDims(p);
+  const ridgeHalf = slopeInset - lipInset;
   const long = (sx: number): V3 => [sx, 0.5, 0];
   const end = (sz: number): V3 => [0, 0.25, sz];
   // Lip row k: inset from the eave line and height (k = 0 is the bottom, k = n the slope's start).
   const lip = (k: number) => {
-    const phi = (k / n) * LIP_TURN;
-    return { inset: b * (1 - Math.cos(phi)), y: -LIP_DROP + b * Math.sin(phi), t: k / n };
+    const phi = (k / n) * lipTurn;
+    return { inset: b * (1 - Math.cos(phi)), y: -lipDrop + b * Math.sin(phi), t: k / n };
   };
   const blend = (a: V3, s: V3, t: number): V3 => {
     const sl = Math.hypot(...s);
@@ -396,21 +425,21 @@ export function toyPitchedRoofUnit(hipped: boolean): THREE.BufferGeometry {
       for (let k = 0; k <= n; k++) profile.push(g([1, 0, cz], [-lip(k).inset, lip(k).y, 0]));
       profile.push(g([0, 1, cz], [ridgeHalf, 0, 0]), g([0, 1, cz], [-ridgeHalf, 0, 0]));
       for (let k = n; k >= 0; k--) profile.push(g([-1, 0, cz], [lip(k).inset, lip(k).y, 0]));
-      const mid = g([0, 0, cz], [0, -LIP_DROP, 0]);
+      const mid = g([0, 0, cz], [0, -lipDrop, 0]);
       for (let i = 0; i + 1 < profile.length; i++) m.tri(mid, profile[i], profile[i + 1]);
     }
   }
   // Underside, seen from the street under the overhang.
-  m.poly([[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([cx, cz]) => m.v({ c: [cx, 0, cz], o: [0, -LIP_DROP, 0], n: [0, -1, 0], unit: true })));
-  if (!hipped) chimney(m);
+  m.poly([[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([cx, cz]) => m.v({ c: [cx, 0, cz], o: [0, -lipDrop, 0], n: [0, -1, 0], unit: true })));
+  if (!hipped && p.chimneys) chimney(m, lipDrop);
   return m.build();
 }
 
-/** A box on the +x slope near the +z end, from inside the roof to CHIMNEY.top above the ridge. */
-function chimney(m: ToyMesh) {
+/** A box on the +x slope near the +z end, from inside the roof (lipDrop under the wall top) to CHIMNEY.top above the ridge. */
+function chimney(m: ToyMesh, lipDrop: number) {
   const { x0, x1, z0, z1, top } = CHIMNEY;
   const at = (x: number, hi: boolean, z: number, n: V3) =>
-    m.v({ c: [0, hi ? 1 : 0, 1], o: [x, hi ? top : -LIP_DROP, -z], n, unit: true, shade: CHIMNEY_SHADE, chimney: true });
+    m.v({ c: [0, hi ? 1 : 0, 1], o: [x, hi ? top : -lipDrop, -z], n, unit: true, shade: CHIMNEY_SHADE, chimney: true });
   const faces: [V3, [number, number][]][] = [
     [[1, 0, 0], [[x1, z0], [x1, z1]]],
     [[-1, 0, 0], [[x0, z1], [x0, z0]]],
@@ -424,9 +453,10 @@ function chimney(m: ToyMesh) {
 /**
  * Bakes one instance of a toy unit to plain geometry (position, normal, color) in world space:
  * placement at the instance's scale, then its rotation and translation. With `seed` (the
- * instance's aSeed), chimneys follow the shader's rule. Used by the GLB export.
+ * instance's aSeed), chimneys follow the shader's rule. `params` must be the ones the unit was built
+ * with. Used by the GLB export.
  */
-export function bakeToyInstance(geo: THREE.BufferGeometry, matrix: THREE.Matrix4, seed?: number): THREE.BufferGeometry {
+export function bakeToyInstance(geo: THREE.BufferGeometry, matrix: THREE.Matrix4, seed?: number, params: ToyParams = TOY_PARAMS): THREE.BufferGeometry {
   const t = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
   matrix.decompose(t, q, s);
   s.set(Math.max(Math.abs(s.x), 1e-4), Math.max(Math.abs(s.y), 1e-4), Math.max(Math.abs(s.z), 1e-4));
@@ -434,15 +464,15 @@ export function bakeToyInstance(geo: THREE.BufferGeometry, matrix: THREE.Matrix4
   const roof = geo.getAttribute('aRoof'), normal = geo.getAttribute('normal');
   const dropChimney = seed !== undefined && noChimney(seed);
   const pos = new Float32Array(corner.count * 3), nor = new Float32Array(corner.count * 3);
-  const c = new THREE.Vector3(), o = new THREE.Vector3(), d = new THREE.Vector2(), p = new THREE.Vector3(), n = new THREE.Vector3(), div = new THREE.Vector3();
+  const c = new THREE.Vector3(), o = new THREE.Vector3(), d = new THREE.Vector2(), v = new THREE.Vector3(), n = new THREE.Vector3(), div = new THREE.Vector3();
   for (let i = 0; i < corner.count; i++) {
     c.fromBufferAttribute(corner, i);
     o.fromBufferAttribute(offset, i);
     d.set(bevel.getX(i), bevel.getY(i));
-    placeToyVertex(c, o, s, p, d);
-    if (dropChimney && roof.getX(i) > 1.5) p.set(0, 0, 0);
-    p.applyQuaternion(q).add(t).toArray(pos, i * 3);
-    n.fromBufferAttribute(normal, i).divide(normalDivisor(s, bevel.getZ(i), div)).applyQuaternion(q).normalize().toArray(nor, i * 3);
+    placeToyVertex(c, o, s, v, d, params);
+    if (dropChimney && roof.getX(i) > 1.5) v.set(0, 0, 0);
+    v.applyQuaternion(q).add(t).toArray(pos, i * 3);
+    n.fromBufferAttribute(normal, i).divide(normalDivisor(s, bevel.getZ(i), div, params)).applyQuaternion(q).normalize().toArray(nor, i * 3);
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -453,15 +483,15 @@ export function bakeToyInstance(geo: THREE.BufferGeometry, matrix: THREE.Matrix4
   return out;
 }
 
-/** A plain Mesh for an instanced toy prototype: every instance baked in place, its colour as vertex colour. For the GLB export. */
-export function bakeToyInstances(im: THREE.InstancedMesh): THREE.Mesh {
+/** A plain Mesh for an instanced toy prototype (built with params `p`): every instance baked in place, its colour as vertex colour. For the GLB export. */
+export function bakeToyInstances(im: THREE.InstancedMesh, p: ToyParams = TOY_PARAMS): THREE.Mesh {
   const seed = im.geometry.getAttribute('aSeed');
   const m = new THREE.Matrix4();
   const c = new THREE.Color();
   const parts: THREE.BufferGeometry[] = [];
   for (let i = 0; i < im.count; i++) {
     im.getMatrixAt(i, m);
-    const g = bakeToyInstance(im.geometry, m, seed ? seed.getX(i) : undefined);
+    const g = bakeToyInstance(im.geometry, m, seed ? seed.getX(i) : undefined, p);
     if (im.instanceColor) {
       im.getColorAt(i, c);
       const col = g.getAttribute('color') as THREE.BufferAttribute;
