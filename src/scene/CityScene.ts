@@ -22,6 +22,7 @@ import { sunState, type SunState } from './sun';
 import { CloudLayer, SkyDome } from './sky';
 import { bakeToyInstances } from './toyGeometry';
 import { tiltShiftStrength } from './tiltShift';
+import { Boats, boatRoutes } from './boats';
 import { Traffic } from './traffic';
 
 export interface BuildStats {
@@ -52,6 +53,8 @@ export class CityScene {
   private hemi = new THREE.HemisphereLight('#bcd8ff', '#d8c9a8', 1.2);
   private city = new THREE.Group();
   private traffic: Traffic | null = null;
+  private boats: Boats | null = null;
+  private boatTime = 0;
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
   private details: THREE.Object3D[] = [];
@@ -244,6 +247,9 @@ export class CityScene {
     this.traffic = new Traffic(built.paths, built.railPaths, attractors, MOBILE ? 1100 : 2400, MOBILE ? 300 : 700);
     this.mainThreadSlices.traffic = performance.now() - tTraffic;
     this.scene.add(this.traffic.group);
+    // Style plumbing arrives with the style selector; boats are toy-coloured until then.
+    this.boats = new Boats(boatRoutes(data, proj), 4321, true);
+    this.scene.add(this.boats.group);
 
     for (const p of data.pois) {
       const [x, z] = proj.project(p.pos);
@@ -307,6 +313,11 @@ export class CityScene {
       dispose(this.traffic.group);
       this.scene.remove(this.traffic.group);
       this.traffic = null;
+    }
+    if (this.boats) {
+      this.scene.remove(this.boats.group);
+      this.boats.dispose();
+      this.boats = null;
     }
     for (const l of this.labels) l.el.remove();
     this.labels = [];
@@ -667,6 +678,7 @@ export class CityScene {
     const dt = Math.min(this.timer.getDelta(), 0.1);
     this.controls.update();
     this.traffic?.update(dt);
+    if (this.boats) this.boats.update(dt, (this.boatTime += dt));
     this.clouds?.update(dt);
     this.dome.mesh.position.copy(this.camera.position);
     this.pin.update(dt, this.camera);

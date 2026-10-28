@@ -47,7 +47,7 @@ const LENGTH: Record<VehicleKind, number> = { moto: 1.9, car: 4.3, bus: 11, truc
 const PACE: Record<VehicleKind, number> = { moto: 1, car: 1.05, bus: 0.75, truck: 0.8, bicycle: 0.45 };
 
 /** Box with its base at y0, centred on x/z, with one vertex colour; no bottom face (never seen). */
-function box(w: number, h: number, l: number, y0: number, z = 0, shade = 1): THREE.BufferGeometry {
+export function box(w: number, h: number, l: number, y0: number, z = 0, shade = 1): THREE.BufferGeometry {
   const g = new THREE.BoxGeometry(w, h, l).translate(0, y0 + h / 2, z).toNonIndexed();
   // BoxGeometry faces: +x, -x, +y, -y, +z, -z (6 vertices each once non-indexed); drop -y.
   const pos = g.getAttribute('position').array as Float32Array;
@@ -62,7 +62,7 @@ function box(w: number, h: number, l: number, y0: number, z = 0, shade = 1): THR
 }
 
 /** Like box(), but keeps its own colour (glass, tyres, skin, helmets) instead of the instance colour. */
-function fixed(w: number, h: number, l: number, y0: number, z: number, hex: string): THREE.BufferGeometry {
+export function fixed(w: number, h: number, l: number, y0: number, z: number, hex: string): THREE.BufferGeometry {
   const g = box(w, h, l, y0, z);
   const c = new THREE.Color(hex);
   const col = g.getAttribute('color') as THREE.BufferAttribute;
