@@ -14,6 +14,8 @@ export type BoatRoute =
 
 const MIN_RIVER_WIDTH = 6;
 const MIN_LAKE_M2 = 5000;
+/** Shorter lines give a degenerate heading and nowhere to sail. */
+const MIN_LINE_M = 20;
 const BARGE_RIVER_WIDTH = 30;
 const M2_PER_BOAT = 5000;
 const MAX_BOATS = 60;
@@ -23,6 +25,23 @@ const BOB = 0.15;
 /** A leg across a lake only counts when it keeps this far from the shore (m). */
 const SHORE_MARGIN = 2.5;
 const LEG_STEP = 5;
+
+const RING_BOX = new WeakMap<XZ[], [number, number, number, number]>();
+function ringBox(ring: XZ[]) {
+  let b = RING_BOX.get(ring);
+  if (!b) {
+    b = [Infinity, -Infinity, Infinity, -Infinity];
+    for (const [x, z] of ring) { b[0] = Math.min(b[0], x); b[1] = Math.max(b[1], x); b[2] = Math.min(b[2], z); b[3] = Math.max(b[3], z); }
+    RING_BOX.set(ring, b);
+  }
+  return b;
+}
+
+/** pointInRing with a bounding-box rejection first (legs are sampled thousands of times). */
+function inRing(p: XZ, ring: XZ[]): boolean {
+  const b = ringBox(ring);
+  return p[0] >= b[0] && p[0] <= b[1] && p[1] >= b[2] && p[1] <= b[3] && pointInRing(p, ring);
+}
 
 export function pointInRing(p: XZ, ring: XZ[]): boolean {
   let inside = false;
@@ -82,7 +101,7 @@ export function boatRoutes(data: CityData, proj: LocalProjection): BoatRoute[] {
   for (const w of data.waterways) {
     if (w.width < MIN_RIVER_WIDTH) continue;
     const pts = clipLine(w.line.map((p) => proj.project(p)), hx, hz);
-    if (pts.length >= 2) routes.push({ kind: 'line', pts, width: w.width });
+    if (pts.length >= 2 && lineLength(pts) >= MIN_LINE_M) routes.push({ kind: 'line', pts, width: w.width });
   }
   for (const a of data.areas) {
     if (a.kind !== 'water' || !a.polygon[0]) continue;
@@ -120,28 +139,114 @@ const BARGES_TOY = ['#b5651d', '#8a8f94', '#a0522d', '#7a8288'];
 const BARGES_PLAIN = ['#8c4a1e', '#6f757a', '#5b3a22', '#555b60'];
 const SWANS = ['#ffffff', '#fdf6ee'];
 
-/** Hull with a cabin; also the barge, stretched. +z is the bow. */
+/** Prism for a hull: stern at -l/2, straight sides to `shoulder`, then narrowing to a bow of width `bowW` at +l/2 (0 = point), bow top raised by `rise`. */
+function hull(w: number, l: number, shoulder: number, bowW: number, y0: number, y1: number, rise: number, hex?: string): THREE.BufferGeometry {
+  const hw = w / 2, bw = bowW / 2;
+  const ring: XZ[] = [[-hw, -l / 2], [hw, -l / 2], [hw, shoulder]];
+  if (bw > 0) ring.push([bw, l / 2], [-bw, l / 2]);
+  else ring.push([0, l / 2]);
+  ring.push([-hw, shoulder]);
+  const n = ring.length;
+  const topY = (i: number) => (ring[i][1] > shoulder ? y1 + rise : y1);
+  const top = ring.map((q, i) => new THREE.Vector3(q[0], topY(i), q[1]));
+  const bot = ring.map((q) => new THREE.Vector3(q[0], y0, q[1]));
+  const centre = new THREE.Vector3(0, (y0 + y1) / 2, (ring[0][1] + l / 2) / 2);
+  const pos: number[] = [];
+  const tri = (p: THREE.Vector3, q: THREE.Vector3, r: THREE.Vector3) => {
+    const nrm = q.clone().sub(p).cross(r.clone().sub(p));
+    const mid = p.clone().add(q).add(r).divideScalar(3).sub(centre);
+    // Keep every face wound outwards so Lambert lighting and culling are right.
+    if (nrm.dot(mid) < 0) pos.push(p.x, p.y, p.z, r.x, r.y, r.z, q.x, q.y, q.z);
+    else pos.push(p.x, p.y, p.z, q.x, q.y, q.z, r.x, r.y, r.z);
+  };
+  for (let i = 1; i < n - 1; i++) tri(top[0], top[i], top[i + 1]);
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    tri(top[i], bot[i], bot[j]);
+    tri(top[i], bot[j], top[j]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  const count = pos.length / 3;
+  const c = new THREE.Color(hex ?? '#ffffff');
+  const col = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) col.set([c.r, c.g, c.b], i * 3);
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setAttribute('tint', new THREE.BufferAttribute(new Float32Array(count).fill(hex ? 0 : 1), 1));
+  return g;
+}
+
+/** A box tipped forward by `rx` radians around its base centre, then placed there. */
+function tipped(w: number, h: number, l: number, rx: number, y: number, z: number, hex: string): THREE.BufferGeometry {
+  return fixed(w, h, l, 0, 0, hex).rotateX(rx).translate(0, y, z);
+}
+
+/** Pointed hull, low cabin and canopy. +z is the bow. */
 function boatGeometry(): THREE.BufferGeometry {
   return mergeGeometries([
-    box(1.7, 0.7, 3.6, -0.05, -0.3),
-    box(1.0, 0.5, 1.2, -0.05, 2.1),
-    fixed(1.2, 0.8, 1.5, 0.65, -0.5, '#f4f0e6'),
-    box(1.3, 0.1, 1.8, 1.45, -0.5),
+    hull(1.7, 4.6, 0.9, 0, -0.05, 0.55, 0.2),
+    fixed(1.15, 0.5, 1.3, 0.55, -0.7, '#f4f0e6'),
+    box(1.4, 0.08, 1.7, 1.05, -0.7),
   ])!;
 }
 
-/** Pedal boat with a swan on the front. */
-function swanGeometry(): THREE.BufferGeometry {
+/** Long flat hull with a squared bow, cargo cover and a small wheelhouse at the stern. */
+function bargeGeometry(): THREE.BufferGeometry {
   return mergeGeometries([
-    box(0.5, 0.45, 2.7, -0.05, 0).translate(0.6, 0, 0),
-    box(0.5, 0.45, 2.7, -0.05, 0).translate(-0.6, 0, 0),
-    box(1.7, 0.15, 2.2, 0.4, -0.1),
-    fixed(1.0, 0.7, 1.3, 0.55, -0.5, '#ffffff'),
-    fixed(0.3, 1.0, 0.3, 0.9, 0.35, '#ffffff'),
-    fixed(0.34, 0.3, 0.5, 1.7, 0.45, '#ffffff'),
-    fixed(0.14, 0.1, 0.3, 1.78, 0.85, '#f08a3c'),
+    hull(2.3, 9, 3.9, 1.5, -0.05, 0.6, 0.1),
+    fixed(1.9, 0.3, 4.6, 0.6, 0.9, '#6b5a4a'),
+    fixed(1.7, 0.95, 1.7, 0.6, -3.2, '#f1ede4'),
+    box(1.9, 0.1, 2.0, 1.55, -3.2),
   ])!;
 }
+
+/** Pedal boat: two pointed floats, a deck, a pastel canopy on posts and a swan with an S neck, head and orange beak. */
+function swanGeometry(): THREE.BufferGeometry {
+  const post = (x: number, z: number) => fixed(0.08, 0.95, 0.08, 0.5, 0, '#ffffff').translate(x, 0, z);
+  return mergeGeometries([
+    hull(0.5, 2.9, 0.7, 0, -0.05, 0.4, 0.1).translate(0.6, 0, 0),
+    hull(0.5, 2.9, 0.7, 0, -0.05, 0.4, 0.1).translate(-0.6, 0, 0),
+    box(1.7, 0.12, 2.1, 0.4, -0.1),
+    post(-0.65, -0.95), post(0.65, -0.95), post(-0.65, -0.2), post(0.65, -0.2),
+    fixed(1.6, 0.08, 1.2, 1.45, -0.6, '#f7d9e3'),
+    fixed(0.9, 0.6, 1.2, 0.52, 0.55, '#ffffff'),
+    fixed(0.5, 0.3, 0.5, 0.75, 1.3, '#ffffff'),
+    tipped(0.26, 0.6, 0.26, 0.6, 1.0, 1.0, '#ffffff'),
+    tipped(0.24, 0.55, 0.24, -0.35, 1.45, 1.33, '#ffffff'),
+    fixed(0.28, 0.28, 0.42, 1.85, 1.5, '#ffffff'),
+    fixed(0.14, 0.1, 0.32, 1.95, 1.85, '#f08a3c'),
+  ])!;
+}
+
+/** The three shapes in one geometry; each vertex records its shape and the material hides the others. */
+function boatsGeometry(): { geo: THREE.BufferGeometry; tris: Record<BoatKind, number> } {
+  const kinds: BoatKind[] = ['boat', 'barge', 'swan'];
+  const parts = [boatGeometry(), bargeGeometry(), swanGeometry()];
+  const tris = {} as Record<BoatKind, number>;
+  parts.forEach((g, i) => {
+    const n = g.getAttribute('position').count;
+    g.setAttribute('shape', new THREE.BufferAttribute(new Float32Array(n).fill(i), 1));
+    tris[kinds[i]] = n / 3;
+  });
+  return { geo: mergeGeometries(parts)!, tris };
+}
+
+/** Collapses every vertex whose `shape` differs from the instance's `pick`, so one draw call shows three kinds. */
+function pickShape(mat: THREE.Material) {
+  const prev = mat.onBeforeCompile.bind(mat);
+  mat.onBeforeCompile = (shader, r) => {
+    prev(shader, r);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float shape;\nattribute float pick;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nif (abs(shape - pick) > 0.5) transformed = vec3(0.0);');
+  };
+  mat.customProgramCacheKey = () => 'boats-' + mat.type;
+  return mat;
+}
+
+/** Triangles each kind adds per boat (all three are submitted, two collapsed). */
+export const BOAT_TRIANGLES = boatsGeometry().tris;
 
 interface Boat {
   kind: BoatKind;
@@ -152,8 +257,8 @@ interface Boat {
   speed: number;
   phase: number;
   scale: number;
-  /** Which instanced mesh and slot it draws in. */
-  mesh: 0 | 1;
+  /** Which instanced mesh (always 0) and slot it draws in. */
+  mesh: 0;
   slot: number;
   /** Area boats: current target and a wait timer. */
   tx: number;
@@ -172,8 +277,6 @@ export interface BoatInfo {
   x: number;
   z: number;
 }
-
-const BARGE_SCALE_Z = 1.8;
 
 export class Boats {
   readonly group = new THREE.Group();
@@ -199,11 +302,11 @@ export class Boats {
     routes.forEach((rt, ri) => {
       for (let i = 0; i < counts[ri]; i++) {
         const kind: BoatKind = rt.kind === 'line' ? (rt.width >= BARGE_RIVER_WIDTH && i % 3 === 0 ? 'barge' : 'boat') : i % 3 === 1 ? 'swan' : 'boat';
-        const mesh = kind === 'swan' ? 1 : 0;
+        const mesh = 0;
         const b: Boat = {
           kind, route: ri, x: 0, z: 0, yaw: 0, mesh, slot: 0,
           speed: kind === 'barge' ? 1.2 + r() * 0.6 : kind === 'swan' ? 0.8 + r() * 0.5 : 1.8 + r() * 1.4,
-          phase: r() * Math.PI * 2, scale: kind === 'swan' ? 1.3 : kind === 'barge' ? 1.5 : 1.4,
+          phase: r() * Math.PI * 2, scale: kind === 'swan' ? 1.5 : kind === 'barge' ? 1.3 : 1.4,
           tx: 0, tz: 0, wait: 0, d: 0, dir: r() < 0.5 ? 1 : -1, side: 0, lat: 0,
         };
         if (rt.kind === 'line') {
@@ -222,16 +325,17 @@ export class Boats {
     });
 
     const palette = (b: Boat) => (b.kind === 'swan' ? SWANS : b.kind === 'barge' ? (toy ? BARGES_TOY : BARGES_PLAIN) : toy ? HULLS_TOY : HULLS_PLAIN);
-    const geos = [boatGeometry(), swanGeometry()];
-    geos.forEach((g, mi) => {
-      const mesh = new THREE.InstancedMesh(g, applyTint(new THREE.MeshLambertMaterial({ vertexColors: true })), Math.max(1, slots[mi]));
-      mesh.count = slots[mi];
-      mesh.castShadow = false;
-      mesh.frustumCulled = false;
-      mesh.name = mi === 0 ? 'boats' : 'swans';
-      this.meshes.push(mesh);
-      if (slots[mi]) this.group.add(mesh);
-    });
+    const { geo } = boatsGeometry();
+    const picks = new Float32Array(Math.max(1, slots[0]));
+    for (const b of this.boats) picks[b.slot] = b.kind === 'boat' ? 0 : b.kind === 'barge' ? 1 : 2;
+    geo.setAttribute('pick', new THREE.InstancedBufferAttribute(picks, 1));
+    const mesh = new THREE.InstancedMesh(geo, pickShape(applyTint(new THREE.MeshLambertMaterial({ vertexColors: true }))), Math.max(1, slots[0]));
+    mesh.count = slots[0];
+    mesh.castShadow = false;
+    mesh.frustumCulled = false;
+    mesh.name = 'boats';
+    this.meshes.push(mesh);
+    if (slots[0]) this.group.add(mesh);
     const col = new THREE.Color();
     for (const b of this.boats) {
       const pal = palette(b);
@@ -242,7 +346,7 @@ export class Boats {
 
   private inArea(p: XZ, rt: Extract<BoatRoute, { kind: 'area' }>): boolean {
     if (rt.bounds && (Math.abs(p[0]) > rt.bounds[0] || Math.abs(p[1]) > rt.bounds[1])) return false;
-    return pointInRing(p, rt.ring) && !(rt.holes?.some((h) => pointInRing(p, h)) ?? false);
+    return inRing(p, rt.ring) && !(rt.holes?.some((h) => inRing(p, h)) ?? false);
   }
 
   /** Centre and the four points `m` metres around it, all on the water. */
@@ -365,7 +469,7 @@ export class Boats {
     for (const b of this.boats) {
       d.position.set(b.x, WATER_Y + Math.sin(time * 1.4 + b.phase) * BOB, b.z);
       d.rotation.set(Math.sin(time * 0.9 + b.phase * 1.7) * 0.03, b.yaw, Math.sin(time * 1.1 + b.phase) * 0.04, 'YXZ');
-      d.scale.set(b.scale, b.scale, b.scale * (b.kind === 'barge' ? BARGE_SCALE_Z : 1));
+      d.scale.set(b.scale, b.scale, b.scale);
       d.updateMatrix();
       this.meshes[b.mesh].setMatrixAt(b.slot, d.matrix);
     }

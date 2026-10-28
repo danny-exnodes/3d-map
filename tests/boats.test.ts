@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CityData } from '../src/data/types';
 import { bboxSizeMeters, LocalProjection } from '../src/geo/projection';
-import { Boats, boatCount, boatRoutes, pointInRing, type BoatRoute } from '../src/scene/boats';
+import { Boats, BOAT_TRIANGLES, boatCount, boatRoutes, pointInRing, type BoatRoute } from '../src/scene/boats';
 import type { XZ } from '../src/scene/geometry';
 
 const LAKE: XZ[] = [[-100, -50], [100, -50], [100, 50], [-100, 50]];
@@ -60,6 +60,10 @@ describe('boatRoutes', () => {
     for (let i = 0; i < 300; i++) boats.update(0.1, i * 0.1);
     expect(boats.positions().every((p) => p[0] <= hx)).toBe(true);
   });
+  it('drops waterways shorter than 20 m', () => {
+    const routes = boatRoutes(emptyData({ waterways: [{ id: 's', line: [[0, 0], [10, 0]].map((p) => ll(p as XZ)), width: 12 }, { id: 'k', line: [[0, 0], [30, 0]].map((p) => ll(p as XZ)), width: 12 }] }), proj);
+    expect(routes.length).toBe(1);
+  });
   it('returns nothing without water', () => {
     expect(boatRoutes(emptyData({}), proj)).toEqual([]);
     expect(new Boats([], 1, true).group.children.length).toBe(0);
@@ -101,6 +105,19 @@ describe('Boats', () => {
     expect(boats.positions().length).toBe(list.length);
     boats.dispose();
   });
+  it('keep off the island in a lake', () => {
+    const island = rect(0, 0, 60, 30);
+    const isle: BoatRoute = { kind: 'area', ring: LAKE, areaM2: 50000, holes: [island] };
+    const boats = new Boats([isle], 5, true);
+    expect(boats.list().length).toBe(10);
+    for (let i = 0; i < 1500; i++) {
+      boats.update(0.1, i * 0.1);
+      for (const p of boats.positions()) {
+        expect(pointInRing(p, island)).toBe(false);
+        expect(pointInRing(p, LAKE)).toBe(true);
+      }
+    }
+  });
   it('actually moves', () => {
     const boats = new Boats([lake], 2, false);
     const before = boats.positions().map((p) => [...p]);
@@ -109,6 +126,10 @@ describe('Boats', () => {
   });
   it('uses at most two draw calls', () => {
     expect(new Boats([lake, river], 1, true).group.children.length).toBeLessThanOrEqual(2);
+  });
+  it('stays inside the triangle budget at 60 boats', () => {
+    const per = BOAT_TRIANGLES.boat + BOAT_TRIANGLES.barge + BOAT_TRIANGLES.swan;
+    expect(per * 60).toBeLessThanOrEqual(15000);
   });
   it('caps the fleet at 60', () => {
     const big: BoatRoute = { kind: 'area', ring: rect(0, 0, 2000, 2000), areaM2: 4e6 };
