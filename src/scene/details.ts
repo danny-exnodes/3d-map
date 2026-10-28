@@ -36,7 +36,8 @@ export class DetailCollector {
     const w = len * (0.6 + r() * 0.25);
     const depth = 0.9 + r() * 0.4;
     const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
-    const railColor = new THREE.Color(r() < 0.5 ? '#3b3f46' : r() < 0.5 ? '#f2efe8' : '#7a5236');
+    // Light warm toy railings: cream, peach or sand.
+    const railColor = new THREE.Color(r() < 0.5 ? '#f6efe3' : r() < 0.5 ? '#f3c9b5' : '#ecd2b4');
     for (let f = 1; f < Math.floor(levels); f++) {
       if (r() < 0.12) continue; // some storeys enclosed
       const y = f * floorH;
@@ -78,12 +79,12 @@ export class DetailCollector {
       inst.name = name;
       g.add(inst);
     };
-    add('detail-balconies', box, new THREE.MeshLambertMaterial({ color: '#c9c4ba' }), this.slabs);
+    add('detail-balconies', box, new THREE.MeshLambertMaterial({ color: '#f4ead6' }), this.slabs);
     add('detail-railings', box.clone(), new THREE.MeshLambertMaterial(), this.rails, this.railColors);
     add('detail-huts', box.clone(), new THREE.MeshLambertMaterial(), this.huts, this.hutColors);
-    // Horizontal stainless tank (bồn nước inox) on a small stand.
+    // Horizontal stainless tank (bồn nước inox), matte toy grey-white: metal looks dark without an env map.
     const tank = new THREE.CylinderGeometry(0.55, 0.55, 1.7, 10).rotateZ(Math.PI / 2);
-    add('detail-tanks', tank, new THREE.MeshStandardMaterial({ color: '#dfe3e8', metalness: 0.6, roughness: 0.3 }), this.tanks);
+    add('detail-tanks', tank, new THREE.MeshLambertMaterial({ color: '#e9edf0' }), this.tanks);
     return g;
   }
 }

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { buildingFromOsm } from '../src/data/buildings';
 import { LocalProjection } from '../src/geo/projection';
 import { buildBuildings } from '../src/scene/buildings';
+import { DetailCollector } from '../src/scene/details';
 import { MeshBuilder, type XZ } from '../src/scene/geometry';
 import { buildRoof, minAreaRect } from '../src/scene/roofs';
 
@@ -66,5 +67,21 @@ describe('procedural detail', () => {
     balconies.getMatrixAt(0, m);
     expect(new THREE.Vector3().setFromMatrixPosition(m).z).toBeGreaterThan(8);
     expect(res.ids).toEqual(['way/42']);
+  });
+
+  it('tints balconies and roof tanks in toy colours (#32)', () => {
+    const c = new DetailCollector();
+    for (let i = 0; i < 12; i++) c.balconies([i * 10, 0], [i * 10 + 5, 0], 4, 3.3, i * 7919);
+    c.rooftop([0, 0], [0, 5], 0, 10, new THREE.Color('#f6e3c6'), 1);
+    const g = c.build();
+    const light = (col: THREE.Color) => col.getHSL({ h: 0, s: 0, l: 0 }, THREE.SRGBColorSpace).l;
+    const slabs = g.getObjectByName('detail-balconies') as THREE.InstancedMesh;
+    expect(light((slabs.material as THREE.MeshLambertMaterial).color)).toBeGreaterThan(0.8);
+    const rails = g.getObjectByName('detail-railings') as THREE.InstancedMesh;
+    const col = new THREE.Color();
+    for (let i = 0; i < rails.count; i++) expect(light(rails.getColorAt(i, col))).toBeGreaterThan(0.6);
+    const tanks = g.getObjectByName('detail-tanks') as THREE.InstancedMesh;
+    expect((tanks.material as THREE.Material).type).toBe('MeshLambertMaterial');
+    expect((tanks.material as THREE.MeshLambertMaterial).color.getHexString()).toBe('e9edf0');
   });
 });
