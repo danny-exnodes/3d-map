@@ -81,8 +81,8 @@ describe('validRelay', () => {
 });
 
 describe('flightsUrl', () => {
-  it('builds the readsb path with 4 decimals', () => {
-    expect(flightsUrl('/flights-api', 21.03, 105.85, 40)).toBe('/flights-api/v2/lat/21.0300/lon/105.8500/dist/40');
+  it('builds the readsb path with 2 decimals (about 1 km, enough for a 40 nm radius)', () => {
+    expect(flightsUrl('/flights-api', 21.03, 105.85, 40)).toBe('/flights-api/v2/lat/21.03/lon/105.85/dist/40');
   });
 });
 
@@ -111,6 +111,18 @@ describe('fetchFlights', () => {
   it('parses a good response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(fixture))));
     expect(await fetchFlights('/flights-api', 21, 105, 40)).toHaveLength(12);
+    vi.unstubAllGlobals();
+  });
+
+  it('bases seenAt on the response clock when it has one, else on Date.now()', async () => {
+    const row = { hex: 'a', lat: 21, lon: 105, alt_baro: 1000, seen_pos: 10 };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ now: 1_700_000_000, aircraft: [row] }))));
+    expect((await fetchFlights('/flights-api', 21, 105, 40))[0].seenAt).toBe(1_700_000_000_000 - 10_000);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ aircraft: [row] }))));
+    const t = Date.now();
+    const got = (await fetchFlights('/flights-api', 21, 105, 40))[0].seenAt;
+    expect(got).toBeGreaterThanOrEqual(t - 10_000);
+    expect(got).toBeLessThanOrEqual(Date.now() - 10_000);
     vi.unstubAllGlobals();
   });
 });

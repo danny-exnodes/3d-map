@@ -367,6 +367,7 @@ export class CityScene {
   private setRealLook(on: boolean) {
     this.realLook = on;
     this.gtao.enabled = on;
+    if (on) realUniforms.uWet.value = this.wet;
     if (!on) {
       this.scene.environment = null;
       this.realism.releaseEnvironment();
@@ -443,7 +444,8 @@ export class CityScene {
       this.sun.intensity = (real ? 0.3 : 0.55) * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25) * (1 - this.weather.dim);
     }
     this.hemiBase = L.hemiIntensity * (1 - this.weather.hemiDim) * (real ? 0.15 : 1);
-    this.hemi.intensity = this.hemiBase;
+    // A flash that is running survives the slider and ▶, which call this every frame.
+    this.hemi.intensity = isFlashing(this.lightning) ? flashHemi(this.hemiBase, real) : this.hemiBase;
     this.sunDir.copy(s.direction);
     this.night = s.night;
     this.hemi.color.copy(L.hemiSky);
@@ -474,7 +476,7 @@ export class CityScene {
     this.scene.background = this.lastSky;
     (this.scene.fog as THREE.Fog).color.copy(this.lastSky);
     this.cloudLight.copy(this.lastSky).lerp(this.white, 0.55);
-    this.clouds?.setLight(this.cloudLight);
+    this.clouds?.setLight(isFlashing(this.lightning) ? this.white : this.cloudLight);
     this.dome.update(this.lastSky, this.sunDir, this.night, this.camera.position);
   }
 

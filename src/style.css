@@ -194,6 +194,10 @@ main[data-layout="split"] #city-view { left: calc(var(--split) + 6px); }
 #splitter:hover, #splitter.drag { background: var(--accent); }
 main[data-layout="split"] .toolbar { flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 24px); }
 main[data-layout="split"] .map-bottom { flex-wrap: wrap; }
+/* The info card sits under the toolbar row (two rows when the pane is narrow) instead of behind it. */
+main[data-layout="split"] #city-view { container-type: inline-size; }
+main[data-layout="split"] .info { top: 64px; }
+@container (max-width: 700px) { main[data-layout="split"] .info { top: 108px; } }
 #canvas { touch-action: none; }
 
 /* Selection handles (#23) */

@@ -13,10 +13,10 @@ export interface Flight {
   seenAt: number;
 }
 
-/** URL of the deployed Cloudflare Worker (proxy/flights-worker.js); empty until the owner deploys it. */
 /** A plane with no report for this long is gone. */
 export const STALE_MS = 60_000;
 
+/** URL of the deployed Cloudflare Worker (proxy/flights-worker.js); empty until the owner deploys it. */
 export const DEFAULT_FLIGHTS_RELAY = '';
 
 const FT_M = 0.3048;
@@ -83,11 +83,13 @@ export function flightsRelay(search: string, storage: Storage | null, dev: boole
 }
 
 export function flightsUrl(relay: string, lat: number, lon: number, nm: number): string {
-  return `${relay.replace(/\/+$/, '')}/v2/lat/${lat.toFixed(4)}/lon/${lon.toFixed(4)}/dist/${nm}`;
+  return `${relay.replace(/\/+$/, '')}/v2/lat/${lat.toFixed(2)}/lon/${lon.toFixed(2)}/dist/${nm}`;
 }
 
 export async function fetchFlights(relay: string, lat: number, lon: number, nm: number, signal?: AbortSignal): Promise<Flight[]> {
   const res = await fetch(flightsUrl(relay, lat, lon, nm), { signal });
   if (!res.ok) throw new Error(`flights relay ${res.status}`);
-  return parseFlights(await res.json(), Date.now());
+  const json = await res.json();
+  const sec = (json as { now?: unknown } | null)?.now;
+  return parseFlights(json, typeof sec === 'number' && Number.isFinite(sec) && sec > 0 ? sec * 1000 : Date.now());
 }
