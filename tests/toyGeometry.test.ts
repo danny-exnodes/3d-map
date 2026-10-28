@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { bakeToyInstance, bakeToyInstances, toyFlatRoofUnit, toyPitchedRoofUnit, toyWallsUnit, TOY } from '../src/scene/toyGeometry';
+import { bakeToyInstance, bakeToyInstances, toyDoorWidth, toyFlatRoofUnit, toyFlatWidths, toyPitchedRoofUnit, toyWallsUnit, toyWindowColumns, TOY, TOY_FACADE } from '../src/scene/toyGeometry';
 
 const m = (w: number, h: number, l: number, y = 0) => new THREE.Matrix4().compose(new THREE.Vector3(0, y, 0), new THREE.Quaternion(), new THREE.Vector3(w, h, l));
 const box = (g: THREE.BufferGeometry) => (g.computeBoundingBox(), g.boundingBox!);
@@ -74,11 +74,15 @@ describe('toy prototypes: shading and chimneys', () => {
   });
   it('flags every roof vertex, and no wall vertex, so roofs get no windows', () => {
     const flags = (g: THREE.BufferGeometry) => Array.from(g.getAttribute('aRoof').array as Float32Array);
-    for (const unit of [toyFlatRoofUnit(), toyPitchedRoofUnit(false), toyPitchedRoofUnit(true)]) {
+    for (const unit of [toyFlatRoofUnit(), toyPitchedRoofUnit(true)]) {
       const f = flags(unit);
       expect(f.length).toBe(unit.getAttribute('position').count);
       expect(f.every((v) => v === 1)).toBe(true);
     }
+    // Gabled roofs: chimney vertices are 2, the rest of the roof 1.
+    const gabled = flags(toyPitchedRoofUnit(false));
+    expect(gabled.every((v) => v === 1 || v === 2)).toBe(true);
+    expect(gabled.filter((v) => v === 2).length).toBe(20);
     const w = toyWallsUnit();
     expect(flags(w).length).toBe(w.getAttribute('position').count);
     expect(flags(w).every((v) => v === 0)).toBe(true);
@@ -120,5 +124,47 @@ describe('toy prototypes: shading and chimneys', () => {
     expect(b.min.x).toBeLessThan(-100 + 1);
     expect(b.max.x).toBeGreaterThan(100 - 1);
     expect(b.max.y).toBeCloseTo(15, 2);
+  });
+});
+
+describe('toy facade layout (#32 final review)', () => {
+  it('measures the flat part of each body face as the walls unit places it', () => {
+    for (const [w, l] of [[4, 16], [3.5, 12], [6, 9], [12, 30], [2.6, 3]]) {
+      const [fx, fz] = toyFlatWidths(w, l);
+      const g = bakeToyInstance(toyWallsUnit(), m(w, 6, l));
+      const p = g.getAttribute('position'), n = g.getAttribute('normal');
+      // Body vertices whose normal is a face normal bound the flat parts.
+      let endX = 0, sideZ = 0;
+      for (let i = 0; i < p.count; i++) {
+        if (p.getY(i) <= TOY.plinthH + 1e-3) continue;
+        if (Math.abs(n.getZ(i)) > 0.999) endX = Math.max(endX, Math.abs(p.getX(i)));
+        if (Math.abs(n.getX(i)) > 0.999) sideZ = Math.max(sideZ, Math.abs(p.getZ(i)));
+      }
+      expect(fx).toBeCloseTo(2 * endX, 3);
+      expect(fz).toBeCloseTo(2 * sideZ, 3);
+    }
+  });
+
+  it('centres whole window columns on the flat part, never on the bevels', () => {
+    for (const flatW of [0.7, 1.2, 1.6, 3.2, 5, 6.5, 13.4]) {
+      const { n, colW, scale } = toyWindowColumns(flatW);
+      expect(n).toBe(Math.max(1, Math.floor(flatW / TOY_FACADE.column)));
+      expect(n * colW).toBeCloseTo(flatW, 6);
+      // Window plus frame stays inside its column, so inside the flat part, with a gap each side.
+      if (scale > 0) expect(scale * (TOY_FACADE.window + 2 * TOY_FACADE.frame)).toBeLessThanOrEqual(colW - 2 * TOY_FACADE.gap + 1e-9);
+      expect(scale).toBeLessThanOrEqual(1);
+    }
+    // A 4 m tube-house front (1.2 m flat) still gets one narrowed window.
+    const front = toyWindowColumns(toyFlatWidths(4, 16)[0]);
+    expect(front.n).toBe(1);
+    expect(front.scale * TOY_FACADE.window).toBeGreaterThan(0.6);
+    // Too narrow for a window: none at all.
+    expect(toyWindowColumns(0.4).scale).toBe(0);
+  });
+
+  it('narrows the door to the flat front and drops it when there is no room', () => {
+    expect(toyDoorWidth(5)).toBe(TOY_FACADE.door.width);
+    expect(toyDoorWidth(1.2)).toBeCloseTo(1.2 * TOY_FACADE.door.fill, 6);
+    expect(toyDoorWidth(0.3)).toBe(0);
   });
 });

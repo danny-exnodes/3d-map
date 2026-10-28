@@ -24,18 +24,21 @@ export class DetailCollector {
 
   /**
    * Balconies on every storey above the ground floor, centred on the front edge a→b
-   * (wall outward normal = right of a→b, matching the wall winding).
+   * (wall outward normal = right of a→b, matching the wall winding). Toy houses pass `inset`, how far
+   * their wall stands back from the edge, and `maxWidth`, the flat part of that wall between the bevels.
    */
-  balconies(a: XZ, b: XZ, levels: number, floorH: number, seed: number) {
+  balconies(a: XZ, b: XZ, levels: number, floorH: number, seed: number, toy?: { inset: number; maxWidth: number }) {
     const r = rng(seed);
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (len < 2.5 || len > 9) return;
     const tx = (b[0] - a[0]) / len, tz = (b[1] - a[1]) / len;
     const nx = -tz, nz = tx; // outward
     const yaw = Math.atan2(-tz, tx); // local x along the edge, local z outward
-    const w = len * (0.6 + r() * 0.25);
+    const w = Math.min(len * (0.6 + r() * 0.25), toy?.maxWidth ?? Infinity);
+    if (w < 0.6) return;
     const depth = 0.9 + r() * 0.4;
-    const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
+    const back = toy?.inset ?? 0;
+    const mx = (a[0] + b[0]) / 2 - nx * back, mz = (a[1] + b[1]) / 2 - nz * back;
     // Light warm toy railings: cream, peach or sand.
     const railColor = new THREE.Color(r() < 0.5 ? '#f6efe3' : r() < 0.5 ? '#f3c9b5' : '#ecd2b4');
     for (let f = 1; f < Math.floor(levels); f++) {

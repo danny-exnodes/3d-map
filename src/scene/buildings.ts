@@ -8,7 +8,7 @@ import { MeshBuilder, type XZ } from './geometry';
 import { PrototypeCollector } from './prototypes';
 import { buildRoof, flatCap, minAreaRect } from './roofs';
 import { SpatialGrid } from './spatial';
-import { TOY, TOY_GLSL } from './toyGeometry';
+import { TOY, TOY_FACADE, TOY_GLSL, toyFlatWidths } from './toyGeometry';
 import { PLINTH_SHADE, toyColor } from './toyPalette';
 
 /** Integer codes of HeightSource stored in aSeed (see the "theo nguồn chiều cao" view, #3). */
@@ -97,6 +97,25 @@ export function isLandmark(b: Building, area: number): boolean {
   return !!b.name && area > 600;
 }
 
+const mid = (s: [XZ, XZ]): XZ => [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
+
+/**
+ * The street end of a house: of the two short sides of its rectangle, the one nearer a road, with the
+ * opposite (rear) side. `front` is oriented so that its right-hand side points away from the centre;
+ * `sign` is +1 when the front lies towards +rect.axis, the prototypes' local +z (aFront).
+ */
+function streetEnd(rect: ReturnType<typeof minAreaRect>, roadDistance?: (x: number, z: number) => number) {
+  const [c0, c1, c2, c3] = rect.corners;
+  const d01 = Math.hypot(c1[0] - c0[0], c1[1] - c0[1]);
+  const sides: [XZ, XZ][] = d01 < rect.long - 1e-6 ? [[c0, c1], [c2, c3]] : [[c1, c2], [c3, c0]];
+  const dist = (s: [XZ, XZ]) => roadDistance?.(...mid(s)) ?? 0;
+  const [f, rear] = dist(sides[0]) <= dist(sides[1]) ? sides : [sides[1], sides[0]];
+  const m = mid(f);
+  const front: [XZ, XZ] = (f[1][0] - f[0][0]) * (rect.centre[1] - m[1]) - (f[1][1] - f[0][1]) * (rect.centre[0] - m[0]) > 0 ? [f[1], f[0]] : f;
+  const sign = (m[0] - rect.centre[0]) * rect.axis[0] + (m[1] - rect.centre[1]) * rect.axis[1] >= 0 ? 1 : -1;
+  return { front, rear, sign };
+}
+
 /** Simple enough to be a scaled box with a standard roof. */
 function isPrototypeCandidate(b: Building, rings: XZ[][], fill: number, short: number): boolean {
   if (b.isPart || rings.length !== 1 || b.minHeight > 0.5 || fill < 0.88 || short < 2.5) return false;
@@ -139,6 +158,9 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
 
     // Ordinary boxy houses share prototypes; landmarks and complex shapes are modelled exactly (#22).
     const proto = !opts.exactOnly && isPrototypeCandidate(b, rings, fill, rect.short) && !isLandmark(b, area);
+    const tubeDetail = (arch === 'tube' || arch === 'shophouse') && !b.isPart && y1 < 30 && rect.short > 2.5;
+    // The door side of toy houses and the balcony side of tube houses.
+    const ends = proto || tubeDetail ? streetEnd(rect, opts.roadDistance) : null;
     if (proto) {
       const pitchedRoof = b.roof === 'gabled' || b.roof === 'hipped';
       const lowPitch = arch === 'industrial' || arch === 'tube' || arch === 'shophouse';
@@ -154,6 +176,7 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
         roofColor: roofCol.clone(),
         seed,
         bid,
+        front: ends!.sign,
       });
     }
     // Tall blocks get a wider podium and a set-back tower (khối đế), when the shape allows it.
@@ -179,20 +202,13 @@ export function buildBuildings(list: Building[], proj: LocalProjection, opts: Bu
     }
 
     // Street-level detail for houses (#5).
-    if ((arch === 'tube' || arch === 'shophouse') && !b.isPart && y1 < 30 && rect.short > 2.5) {
+    if (tubeDetail && ends) {
       const levels = Math.max(1, Math.round(y1 / LEVEL_H));
-      const [c0, c1, c2, c3] = rect.corners;
-      // The two short sides of the rectangle; the one nearer a road is the street front.
-      const d01 = Math.hypot(c1[0] - c0[0], c1[1] - c0[1]);
-      const sides: [XZ, XZ][] = d01 < rect.long - 1e-6 ? [[c0, c1], [c2, c3]] : [[c1, c2], [c3, c0]];
-      const mid = (s: [XZ, XZ]): XZ => [(s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2];
-      const dist = (s: [XZ, XZ]) => opts.roadDistance?.(...mid(s)) ?? 0;
-      const [front, rear] = dist(sides[0]) <= dist(sides[1]) ? sides : [sides[1], sides[0]];
-      // Orient the front edge so that its right-hand side points away from the rectangle centre.
-      const m = mid(front);
-      const [a, c] = (front[1][0] - front[0][0]) * (rect.centre[1] - m[1]) - (front[1][1] - front[0][1]) * (rect.centre[0] - m[0]) > 0 ? [front[1], front[0]] : front;
-      details.balconies(a, c, levels, LEVEL_H, h);
-      if (b.roof === 'flat') details.rooftop(rect.centre, mid(rear), Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h);
+      const [a, c] = ends.front;
+      // Toy houses: against the inset wall, between the bevels.
+      const toy = proto ? { inset: TOY.inset, maxWidth: toyFlatWidths(rect.short, rect.long)[0] } : undefined;
+      details.balconies(a, c, levels, LEVEL_H, h, toy);
+      if (b.roof === 'flat') details.rooftop(rect.centre, mid(ends.rear), Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h);
     } else if (arch === 'generic' && b.roof === 'flat' && y1 < 25 && area < 400 && rect.short > 3) {
       details.rooftop(rect.centre, rect.corners[2], Math.atan2(-rect.axis[1], rect.axis[0]), y1, facade, h);
     }
@@ -217,6 +233,8 @@ const V = (p: XZ, y: number) => new THREE.Vector3(p[0], y, p[1]);
  * windows at night. Window grid is derived from world position so it needs no UVs.
  * With `toyProto`, it places the vertices of instanced toy prototypes for each house's real
  * size (TOY_PROTO, see toyGeometry.ts); such meshes take toyDepthMaterial() for their shadows.
+ * Their windows are laid out in the house's own frame instead, centred on each wall's flat part,
+ * with a door on the street end of low houses (TOY_FACADE).
  */
 export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = false): THREE.MeshLambertMaterial {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -230,6 +248,8 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
   }
   // Never share a compiled program between the exact and the toy material.
   mat.customProgramCacheKey = () => (toyProto ? 'buildings-toy' : 'buildings');
+  const F = TOY_FACADE;
+  const door = F.door;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
     shader.uniforms.uSourceView = uniforms.uSourceView;
@@ -248,9 +268,10 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         // Flat: interpolating a per-building constant adds noise that speckles the window hashes.
         flat varying float vSeed;
         varying float vRoof;
-        varying float vDiag;
         #ifdef TOY_PROTO
         ${TOY_GLSL}
+        attribute float aFront;
+        ${TOY_FACADE_VARYINGS}
         #endif`,
       )
       .replace(
@@ -265,6 +286,7 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         `#include <begin_vertex>
         #ifdef TOY_PROTO
           transformed = toyTransformed();
+          vToyLocal = transformed * toyScale();
         #endif`,
       )
       .replace(
@@ -284,11 +306,10 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         // Toy roof units never get windows; the exact mesh has no aRoof attribute.
         #ifdef TOY_PROTO
           vRoof = aRoof;
-          // 0 on the four flat wall faces, > 0 across the rounded corner facets (their own window grids would look chopped).
-          vDiag = abs(aBevel.x * aBevel.y);
+          vToyDir = aBevel.xy;
+          vToyFace = vec4(toyFlatWidths(toyScale()), toyScale().y, aFront);
         #else
           vRoof = 0.0;
-          vDiag = 0.0;
         #endif
         vSelected = abs(aBid - uSelected) < 0.5 ? 1.0 : 0.0;`,
       );
@@ -304,7 +325,9 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         varying vec3 vWNormal;
         flat varying float vSeed;
         varying float vRoof;
-        varying float vDiag;
+        #ifdef TOY_PROTO
+        ${TOY_FACADE_VARYINGS}
+        #endif
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
         float winMask; float winLit; vec3 winColor; float winBright;`,
       )
@@ -324,31 +347,70 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
             : src < 2.5 ? vec3(${hexToVec(HEIGHT_SOURCE_COLORS[2])}) : vec3(${hexToVec(HEIGHT_SOURCE_COLORS[3])});
         }
         winMask = 0.0; winLit = 0.0; winColor = vec3(0.0); winBright = 0.0;
-        if (vRoof < 0.5 && vDiag < 0.02 && abs(bN.y) < 0.3 && vWPos.y > 0.6) {
-          vec2 t = normalize(vec2(-bN.z, bN.x));
-          float u = dot(vWPos.xz, t);
-          float cellW = 3.2;
-          float cellH = 3.3;
-          vec2 cell = vec2(floor(u / cellW), floor(vWPos.y / cellH));
-          vec2 f = vec2(fract(u / cellW), fract(vWPos.y / cellH));
-          float aa = fwidth(u / cellW) * 1.5;
-          bool glassWall = matCode > 0.5 && matCode < 1.5;
-          float wx0 = glassWall ? 0.05 : 0.22, wx1 = glassWall ? 0.95 : 0.78;
-          float wy0 = glassWall ? 0.08 : 0.32, wy1 = glassWall ? 0.92 : 0.82;
-          float frameMask = 0.0;
-          if (glassWall) {
-            float mx = smoothstep(wx0 - aa, wx0 + aa, f.x) * (1.0 - smoothstep(wx1 - aa, wx1 + aa, f.x));
-            float my = smoothstep(wy0, wy0 + 0.04, f.y) * (1.0 - smoothstep(wy1, wy1 + 0.04, f.y));
-            winMask = mx * my;
-          } else {
-            // Rounded box in cell space (corner radius 0.25 of the short side) with a light frame around the glass.
-            vec2 hs = 0.5 * vec2(wx1 - wx0, wy1 - wy0);
-            float rad = 0.25 * 2.0 * min(hs.x, hs.y);
-            vec2 q = abs(f - 0.5 * vec2(wx0 + wx1, wy0 + wy1)) - hs + rad;
+        bool glassWall = matCode > 0.5 && matCode < 1.5;
+        bool facade = vRoof < 0.5 && abs(bN.y) < 0.3 && vWPos.y > 0.6;
+        vec2 cell = vec2(0.0);
+        float frameMask = 0.0;
+        #ifdef TOY_PROTO
+          // Toy walls, in the house's local metres: the sides face ±x and run along z, the ends face ±z
+          // and run along x. Window columns are centred on each face's flat part (TS twin:
+          // toyWindowColumns) and stop where the bevels start.
+          float side = abs(vToyDir.x) > abs(vToyDir.y) ? 1.0 : 0.0;
+          float flatW = mix(vToyFace.x, vToyFace.y, side);
+          float u = mix(vToyLocal.x, vToyLocal.z, side);
+          float aaM = max(fwidth(u), fwidth(vWPos.y)) * 1.5;
+          // A door on the street end of a low house (TS twin: toyDoorWidth).
+          float doorW = min(${glf(door.width)}, ${glf(door.fill)} * flatW);
+          bool door = side < 0.5 && vToyDir.y * vToyFace.w > 0.0 && vToyFace.z <= ${glf(door.maxWall)} && doorW >= ${glf(door.min)};
+          facade = facade && abs(u) < 0.5 * flatW;
+          if (facade) {
+            float n = max(1.0, floor(flatW / ${glf(F.column)}));
+            float colW = flatW / n;
+            float k = min(1.0, max(colW - ${glf(2 * F.gap)}, 0.0) / ${glf(F.window + 2 * F.frame)});
+            if (k * ${glf(F.window)} < ${glf(F.minWindow)}) k = 0.0;
+            float col = clamp(floor((u + 0.5 * flatW) / colW), 0.0, n - 1.0);
+            float uc = u + 0.5 * flatW - (col + 0.5) * colW;
+            float storey = floor(vWPos.y / 3.3);
+            // Offset per face, so that opposite walls do not share one lit pattern.
+            cell = vec2(col + 17.0 * (2.0 * side + step(0.0, mix(vToyDir.y, vToyDir.x, side))), storey);
+            // Same shapes as the exact mesh, in metres: glazing, or a rounded window with a light frame.
+            vec2 p = vec2(uc, vWPos.y - storey * 3.3 - (glassWall ? 0.5 : 0.57) * 3.3);
+            vec2 hs = glassWall ? vec2(min(1.44, 0.5 * colW - 0.05), 0.42 * 3.3) : vec2(0.5 * ${glf(F.window)} * k, 0.25 * 3.3);
+            float rad = glassWall ? 0.0 : 0.5 * min(hs.x, hs.y);
+            vec2 q = abs(p) - hs + rad;
             float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
-            winMask = 1.0 - smoothstep(-aa, aa, sd);
-            frameMask = (1.0 - smoothstep(0.08 - aa, 0.08 + aa, sd)) * (1.0 - winMask);
+            if (glassWall || k > 0.0) winMask = 1.0 - smoothstep(-aaM, aaM, sd);
+            if (!glassWall && k > 0.0) frameMask = (1.0 - smoothstep(${glf(F.frame)} * k - aaM, ${glf(F.frame)} * k + aaM, sd)) * (1.0 - winMask);
+            // The door takes the ground-floor window of its column.
+            if (door && storey < 0.5 && abs((col + 0.5) * colW - 0.5 * flatW) < 0.25 * colW) { winMask = 0.0; frameMask = 0.0; }
           }
+        #else
+          if (facade) {
+            vec2 t = normalize(vec2(-bN.z, bN.x));
+            float u = dot(vWPos.xz, t);
+            float cellW = 3.2;
+            float cellH = 3.3;
+            cell = vec2(floor(u / cellW), floor(vWPos.y / cellH));
+            vec2 f = vec2(fract(u / cellW), fract(vWPos.y / cellH));
+            float aa = fwidth(u / cellW) * 1.5;
+            float wx0 = glassWall ? 0.05 : 0.22, wx1 = glassWall ? 0.95 : 0.78;
+            float wy0 = glassWall ? 0.08 : 0.32, wy1 = glassWall ? 0.92 : 0.82;
+            if (glassWall) {
+              float mx = smoothstep(wx0 - aa, wx0 + aa, f.x) * (1.0 - smoothstep(wx1 - aa, wx1 + aa, f.x));
+              float my = smoothstep(wy0, wy0 + 0.04, f.y) * (1.0 - smoothstep(wy1, wy1 + 0.04, f.y));
+              winMask = mx * my;
+            } else {
+              // Rounded box in cell space (corner radius 0.25 of the short side) with a light frame around the glass.
+              vec2 hs = 0.5 * vec2(wx1 - wx0, wy1 - wy0);
+              float rad = 0.25 * 2.0 * min(hs.x, hs.y);
+              vec2 q = abs(f - 0.5 * vec2(wx0 + wx1, wy0 + wy1)) - hs + rad;
+              float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
+              winMask = 1.0 - smoothstep(-aa, aa, sd);
+              frameMask = (1.0 - smoothstep(0.08 - aa, 0.08 + aa, sd)) * (1.0 - winMask);
+            }
+          }
+        #endif
+        if (facade) {
           float r = h21(cell + fract(vSeed) * 97.0);
           float floorDark = step(0.82, h21(vec2(cell.y, fract(vSeed) * 31.0)));
           winLit = step(r, uLit) * (1.0 - floorDark);
@@ -363,6 +425,19 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(${hexToVec('#fffaf0')}), frameMask);
           diffuseColor.rgb = mix(diffuseColor.rgb, glass, winMask * (glassWall ? 0.9 : 1.0));
         }
+        #ifdef TOY_PROTO
+          if (door && facade) {
+            // Wooden door from the plinth top, rounded at the top, with a small gold knob; never lit at night.
+            vec2 p = vec2(u, vWPos.y - ${glf(TOY.plinthH + door.height / 2)});
+            vec2 hs = vec2(0.5 * doorW, ${glf(door.height / 2)});
+            float rad = p.y > 0.0 ? 0.4 * hs.x : 0.0;
+            vec2 q = abs(p) - hs + rad;
+            float doorMask = 1.0 - smoothstep(-aaM, aaM, length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad);
+            float knob = 1.0 - smoothstep(-aaM, aaM, length(p - vec2(0.3 * doorW, -0.05)) - ${glf(door.knob)});
+            diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(${hexToVec('#a8704c')}), vec3(${hexToVec('#f2c14e')}), knob), doorMask);
+            winMask *= 1.0 - doorMask;
+          }
+        #endif
         // Plinth band on the exact mesh; prototypes have a real plinth. The 📏 view keeps its colours.
         #ifndef TOY_PROTO
         if (abs(bN.y) < 0.3 && vWPos.y < ${TOY.plinthH.toFixed(2)} && uSourceView < 0.5) diffuseColor.rgb *= ${PLINTH_SHADE.toFixed(2)};
@@ -379,6 +454,14 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
   };
   return mat;
 }
+
+/** Varyings of the toy facade: local position (m), plan direction of the vertex (aBevel.xy) and, per house, the flat widths of the ends and sides, the wall height and aFront. */
+const TOY_FACADE_VARYINGS = `varying vec3 vToyLocal;
+        varying vec2 vToyDir;
+        flat varying vec4 vToyFace;`;
+
+/** GLSL float literal. */
+const glf = (x: number) => x.toFixed(4);
 
 /** Linear-space GLSL vec3 literal for a hex colour. */
 function hexToVec(hex: string): string {

@@ -7,8 +7,8 @@ import { toyDepthMaterial, toyFlatRoofUnit, toyPitchedRoofUnit, toyWallsUnit } f
  * with a flat, gabled or hipped roof, so they share four unit meshes (walls, flat slab, gable,
  * hip) and each house is only a transform plus colour, seed and id. The units are rounded toy
  * shapes whose vertices the shader places for each house's real size, so bevels never stretch
- * (toyGeometry.ts, #32). Windows are generated from world position in the shader, so they keep
- * their real size too.
+ * (toyGeometry.ts, #32). Windows and doors are drawn by the shader in metres, so they keep their
+ * real size too; `aFront` tells it which end faces the street.
  */
 export type ProtoRoof = 'flat' | 'gabled' | 'hipped';
 
@@ -27,6 +27,8 @@ export interface ProtoInstance {
   roofColor: THREE.Color;
   seed: number;
   bid: number;
+  /** Street end (door side): +1 or −1 along the local long axis (+z). */
+  front: number;
 }
 
 export class PrototypeCollector {
@@ -65,6 +67,8 @@ export class PrototypeCollector {
       const geo = g.geo();
       geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(new Float32Array(g.list.map((i) => i.seed)), 1));
       geo.setAttribute('aBid', new THREE.InstancedBufferAttribute(new Float32Array(g.list.map((i) => i.bid)), 1));
+      // Every unit gets it: the material declares it, and an unbound attribute reads stale values.
+      geo.setAttribute('aFront', new THREE.InstancedBufferAttribute(new Float32Array(g.list.map((i) => i.front)), 1));
       const mesh = new THREE.InstancedMesh(geo, material, g.list.length);
       mesh.customDepthMaterial = toyDepthMaterial();
       g.list.forEach((it, k) => {

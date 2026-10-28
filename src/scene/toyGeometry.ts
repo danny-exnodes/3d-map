@@ -17,8 +17,9 @@ import { PLINTH_SHADE } from './toyPalette';
  * - `aBevel` (vec3): xy = plan direction (x, z) of the rounded corner the vertex sits on, scaled
  *   by the bevel radius r (equal to aCorner.xz on sharp vertices, which makes r cancel out);
  *   z = 1 when `normal` is a unit-box normal (pitched-roof slopes), 0 when it is in metres.
- * - `aChimney` (float): 1 on chimney vertices.
- * - `aRoof` (float): 1 on every vertex of the roof units, which never get windows.
+ * - `aRoof` (float): 0 on the walls unit, 1 on the roof units (which never get windows), 2 on chimney
+ *   vertices (roof parts that the seed may drop). One attribute for both keeps the toy material within
+ *   16 vertex attribute slots, which ANGLE enforces.
  * - `position`: the vertex placed for a reference size, divided by it. Only bounds and picking use it.
  *
  * Everything stays inside the true footprint, so neighbouring row houses never overlap: the
@@ -73,6 +74,46 @@ export function placeToyVertex(corner: THREE.Vector3, offset: THREE.Vector3, siz
   return out.set(corner.x * (size.x / 2 - r) + r * dx + offset.x, corner.y * size.y + offset.y, corner.z * (size.z / 2 - r) + r * dz + offset.z);
 }
 
+/** Flat (unbevelled) widths of the body faces: [the two ends (faces ±z, along x), the two sides (faces ±x, along z)]. GLSL twin: toyFlatWidths. */
+export function toyFlatWidths(sx: number, sz: number): [number, number] {
+  const k = 2 * (TOY.inset + toyRadius(sx, sz));
+  return [Math.max(0, sx - k), Math.max(0, sz - k)];
+}
+
+/**
+ * Facade layout on toy walls (m). Windows sit in columns centred on each face's flat part, never on
+ * the bevels; the street end of a low house gets a door with a knob. Read by the shader in
+ * createBuildingMaterial (buildings.ts) and by the TS twins below.
+ */
+export const TOY_FACADE = {
+  /** Nominal column width: a flat part W wide gets max(1, floor(W / column)) columns. */
+  column: 3.2,
+  /** Glass width and the frame around it at full size; both shrink together to leave `gap` each side in a narrow column. */
+  window: 1.792,
+  frame: 0.256,
+  gap: 0.1,
+  /** Narrower windows are left out. */
+  minWindow: 0.3,
+  /** Door from the plinth top, `fill` of a narrow flat front at most, none below `min`; only on walls up to `maxWall` (≤ 2 storeys). */
+  door: { width: 1.2, height: 2, fill: 0.85, min: 0.5, maxWall: 7, knob: 0.07 },
+} as const;
+
+/** Window columns on a flat part flatW wide: count, column width, and window scale (0 = no windows). GLSL twin in createBuildingMaterial. */
+export function toyWindowColumns(flatW: number): { n: number; colW: number; scale: number } {
+  const { column, window, frame, gap, minWindow } = TOY_FACADE;
+  const n = Math.max(1, Math.floor(flatW / column));
+  const colW = flatW / n;
+  const scale = Math.min(1, Math.max(0, colW - 2 * gap) / (window + 2 * frame));
+  return { n, colW, scale: window * scale >= minWindow ? scale : 0 };
+}
+
+/** Door width on a street front whose flat part is flatW wide (0 = no door). GLSL twin in createBuildingMaterial. */
+export function toyDoorWidth(flatW: number): number {
+  const { width, fill, min } = TOY_FACADE.door;
+  const w = Math.min(width, fill * flatW);
+  return w >= min ? w : 0;
+}
+
 /** Chimney rule: a chimney is dropped (collapsed into the roof) when this holds. GLSL twin: toyNoChimney. */
 function noChimney(seed: number): boolean {
   const f = Math.fround(Math.fround(seed) * 13);
@@ -95,13 +136,14 @@ export const TOY_GLSL = /* glsl */ `
 attribute vec3 aCorner;
 attribute vec3 aOffset;
 attribute vec3 aBevel;
-attribute float aChimney;
 attribute float aRoof;
 vec3 toyScale() {
   return max(vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz)), vec3(1e-4));
 }
 // TS twin: toyRadius.
 float toyRadius(vec3 s) { return clamp(0.45 * min(s.x, s.z) - ${TOY.inset.toFixed(4)}, 0.0, ${TOY.radius.toFixed(4)}); }
+// TS twin: toyFlatWidths.
+vec2 toyFlatWidths(vec3 s) { return max(s.xz - 2.0 * (${TOY.inset.toFixed(4)} + toyRadius(s)), vec2(0.0)); }
 // TS twin: placeToyVertex.
 vec3 toyPlace(vec3 corner, vec3 offset, vec2 dir, vec3 s) {
   float r = toyRadius(s);
@@ -117,7 +159,7 @@ vec3 toyNormalScale(vec3 s) {
 vec3 toyTransformed() {
   vec3 s = toyScale();
   vec3 p = toyPlace(aCorner, aOffset, aBevel.xy, s);
-  if (aChimney > 0.5 && toyNoChimney(aSeed)) p = vec3(0.0);
+  if (aRoof > 1.5 && toyNoChimney(aSeed)) p = vec3(0.0);
   return p / s;
 }
 `;
@@ -153,8 +195,8 @@ interface ToyVertex {
 
 /** Indexed toy unit under construction. Triangles are wound to face their vertices' normals. */
 class ToyMesh {
-  private attrs: Record<'position' | 'normal' | 'color' | 'aCorner' | 'aOffset' | 'aBevel' | 'aChimney' | 'aRoof', number[]> = {
-    position: [], normal: [], color: [], aCorner: [], aOffset: [], aBevel: [], aChimney: [], aRoof: [],
+  private attrs: Record<'position' | 'normal' | 'color' | 'aCorner' | 'aOffset' | 'aBevel' | 'aRoof', number[]> = {
+    position: [], normal: [], color: [], aCorner: [], aOffset: [], aBevel: [], aRoof: [],
   };
   private index: number[] = [];
   /** Vertices placed at the reference size, to wind triangles. */
@@ -179,8 +221,7 @@ class ToyMesh {
     a.aCorner.push(...x.c);
     a.aOffset.push(...x.o);
     a.aBevel.push(d[0], d[1], x.unit ? 1 : 0);
-    a.aChimney.push(x.chimney ? 1 : 0);
-    a.aRoof.push(this.roof ? 1 : 0);
+    a.aRoof.push(x.chimney ? 2 : this.roof ? 1 : 0);
     this.placed.push(p);
     // Wind against the placed normal (unit-box normals divided by the reference run).
     this.normals.push(n.clone().divide(normalDivisor(this.ref, x.unit ? 1 : 0, new THREE.Vector3())));
@@ -211,7 +252,7 @@ class ToyMesh {
 
   build(): THREE.BufferGeometry {
     const g = new THREE.BufferGeometry();
-    const sizes = { position: 3, normal: 3, color: 3, aCorner: 3, aOffset: 3, aBevel: 3, aChimney: 1, aRoof: 1 };
+    const sizes = { position: 3, normal: 3, color: 3, aCorner: 3, aOffset: 3, aBevel: 3, aRoof: 1 };
     for (const [name, size] of Object.entries(sizes)) g.setAttribute(name, new THREE.Float32BufferAttribute(this.attrs[name as keyof typeof sizes], size));
     g.setIndex(this.index);
     g.computeBoundingSphere();
@@ -366,7 +407,7 @@ export function bakeToyInstance(geo: THREE.BufferGeometry, matrix: THREE.Matrix4
   matrix.decompose(t, q, s);
   s.set(Math.max(Math.abs(s.x), 1e-4), Math.max(Math.abs(s.y), 1e-4), Math.max(Math.abs(s.z), 1e-4));
   const corner = geo.getAttribute('aCorner'), offset = geo.getAttribute('aOffset'), bevel = geo.getAttribute('aBevel');
-  const chimney = geo.getAttribute('aChimney'), normal = geo.getAttribute('normal');
+  const roof = geo.getAttribute('aRoof'), normal = geo.getAttribute('normal');
   const dropChimney = seed !== undefined && noChimney(seed);
   const pos = new Float32Array(corner.count * 3), nor = new Float32Array(corner.count * 3);
   const c = new THREE.Vector3(), o = new THREE.Vector3(), d = new THREE.Vector2(), p = new THREE.Vector3(), n = new THREE.Vector3(), div = new THREE.Vector3();
@@ -375,7 +416,7 @@ export function bakeToyInstance(geo: THREE.BufferGeometry, matrix: THREE.Matrix4
     o.fromBufferAttribute(offset, i);
     d.set(bevel.getX(i), bevel.getY(i));
     placeToyVertex(c, o, s, p, d);
-    if (dropChimney && chimney.getX(i) > 0.5) p.set(0, 0, 0);
+    if (dropChimney && roof.getX(i) > 1.5) p.set(0, 0, 0);
     p.applyQuaternion(q).add(t).toArray(pos, i * 3);
     n.fromBufferAttribute(normal, i).divide(normalDivisor(s, bevel.getZ(i), div)).applyQuaternion(q).normalize().toArray(nor, i * 3);
   }

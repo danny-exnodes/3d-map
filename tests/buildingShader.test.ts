@@ -23,4 +23,16 @@ describe('building shader', () => {
       expect(fragmentShader).toMatch(/flat varying float vSeed;/);
     }
   });
+
+  it('declares the toy facade varyings the same way in both shaders, and only for prototypes', () => {
+    const toy = compiled(true);
+    for (const v of ['varying vec3 vToyLocal;', 'varying vec2 vToyDir;', 'flat varying vec4 vToyFace;']) {
+      expect(toy.vertexShader).toContain(v);
+      expect(toy.fragmentShader).toContain(v);
+    }
+    expect(toy.vertexShader).toContain('attribute float aFront;');
+    // The bevel gate (vDiag) is gone: windows are bounded by each face's flat width instead.
+    expect(toy.fragmentShader).not.toContain('vDiag');
+    expect(toy.fragmentShader).toMatch(/abs\(u\) < 0\.5 \* flatW/);
+  });
 });
