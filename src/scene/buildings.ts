@@ -245,7 +245,8 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         varying float vSelected;
         varying vec3 vWPos;
         varying vec3 vWNormal;
-        varying float vSeed;
+        // Flat: interpolating a per-building constant adds noise that speckles the window hashes.
+        flat varying float vSeed;
         varying float vRoof;
         varying float vDiag;
         #ifdef TOY_PROTO
@@ -301,7 +302,7 @@ export function createBuildingMaterial(shared?: BuildingUniforms, toyProto = fal
         varying float vSelected;
         varying vec3 vWPos;
         varying vec3 vWNormal;
-        varying float vSeed;
+        flat varying float vSeed;
         varying float vRoof;
         varying float vDiag;
         float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }

@@ -15,4 +15,12 @@ describe('building shader', () => {
     const band = fragmentShader.split('\n').find((l) => l.includes('vWPos.y <') && l.includes('diffuseColor.rgb *='));
     expect(band).toContain('uSourceView < 0.5');
   });
+
+  it('keeps the per-building seed constant across a face (no speckled windows)', () => {
+    for (const toy of [false, true]) {
+      const { vertexShader, fragmentShader } = compiled(toy);
+      expect(vertexShader).toMatch(/flat varying float vSeed;/);
+      expect(fragmentShader).toMatch(/flat varying float vSeed;/);
+    }
+  });
 });
