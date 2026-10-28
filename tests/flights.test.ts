@@ -28,6 +28,20 @@ describe('parseFlights', () => {
     expect(f.seenAt).toBeCloseTo(NOW - 324, 5);
   });
 
+  it('uses alt_geom when alt_baro is missing and skips rows with no altitude', () => {
+    const base = { hex: 'x', lat: 21, lon: 105 };
+    const f = parseFlights({ aircraft: [{ ...base, alt_geom: 1000 }, { ...base, flight: 'NOALT' }] }, NOW);
+    expect(f).toHaveLength(1);
+    expect(f[0].altM).toBeCloseTo(304.8);
+  });
+
+  it('skips out-of-range or non-finite positions and zeroes bad gs/track', () => {
+    const ok = { alt_baro: 0, lat: 21, lon: 105 };
+    const f = parseFlights({ aircraft: [{ ...ok, lat: 91 }, { ...ok, lon: -181 }, { ...ok, lat: null }, { ...ok, gs: 'x', track: NaN }] }, NOW);
+    expect(f).toHaveLength(1);
+    expect([f[0].gsMs, f[0].trackDeg]).toEqual([0, 0]);
+  });
+
   it('accepts the adsb.lol "ac" key and tolerates junk', () => {
     expect(parseFlights({ ac: (fixture as any).aircraft.slice(0, 2) }, NOW)).toHaveLength(2);
     expect(parseFlights({}, NOW)).toEqual([]);
@@ -43,6 +57,13 @@ describe('flightsRelay', () => {
     expect(flightsRelay('', store(null), true)).toBe('/flights-api');
     expect(flightsRelay('', null, false)).toBeNull();
   });
+
+  it('ignores relays that are not https or a same-origin path', () => {
+    for (const bad of ['http://a.test', 'javascript:alert(1)', '//evil.test', 'data:text/plain,x']) {
+      expect(flightsRelay('?flights=' + encodeURIComponent(bad), store(bad), false)).toBeNull();
+    }
+    expect(flightsRelay('?flights=/relay', null, false)).toBe('/relay');
+  });
 });
 
 describe('flightsUrl', () => {
@@ -55,6 +76,21 @@ describe('fetchFlights', () => {
   it('rejects on a non-2xx response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('slow down', { status: 429 })));
     await expect(fetchFlights('/flights-api', 21, 105, 40)).rejects.toThrow();
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects a 200 with a non-JSON body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>')));
+    await expect(fetchFlights('/flights-api', 21, 105, 40)).rejects.toThrow();
+    vi.unstubAllGlobals();
+  });
+
+  it('passes the abort signal to fetch', async () => {
+    const f = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', f);
+    const ac = new AbortController();
+    await fetchFlights('/flights-api', 21, 105, 40, ac.signal);
+    expect((f.mock.calls[0] as unknown[])[1]).toEqual({ signal: ac.signal });
     vi.unstubAllGlobals();
   });
 

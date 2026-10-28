@@ -26,33 +26,45 @@ export function parseFlights(json: unknown, now: number): Flight[] {
   if (!Array.isArray(rows)) return [];
   const out: Flight[] = [];
   for (const r of rows) {
-    if (!r || typeof r.lat !== 'number' || typeof r.lon !== 'number') continue;
+    if (!r || !Number.isFinite(r.lat) || !Number.isFinite(r.lon) || Math.abs(r.lat) > 90 || Math.abs(r.lon) > 180) continue;
+    let altFt: number;
+    if (r.alt_baro === 'ground') altFt = 0;
+    else if (Number.isFinite(r.alt_baro)) altFt = r.alt_baro;
+    else if (Number.isFinite(r.alt_geom)) altFt = r.alt_geom;
+    else continue;
+    const gs = Number.isFinite(r.gs) ? r.gs : 0;
+    const seen = Number.isFinite(r.seen_pos) ? r.seen_pos : 0;
     out.push({
       hex: String(r.hex ?? ''),
       callsign: String(r.flight ?? '').trim(),
       type: String(r.t ?? ''),
       lat: r.lat,
       lon: r.lon,
-      altM: typeof r.alt_baro === 'number' ? r.alt_baro * FT_M : 0,
-      gsMs: (Number(r.gs) || 0) * KT_MS,
-      trackDeg: Number(r.track) || 0,
-      seenAt: now - (Number(r.seen_pos) || 0) * 1000,
+      altM: altFt * FT_M,
+      gsMs: gs * KT_MS,
+      trackDeg: Number.isFinite(r.track) ? r.track : 0,
+      seenAt: now - seen * 1000,
     });
   }
   return out;
 }
 
+/** https URLs, or a same-origin path (not protocol-relative). */
+function validRelay(v: string): boolean {
+  return /^https:\/\/[^\s/]/.test(v) || (v.startsWith('/') && !v.startsWith('//'));
+}
+
 /** `?flights=<url>` > `tinymap:flightsRelay` > DEFAULT_FLIGHTS_RELAY > the Vite dev proxy > none. */
 export function flightsRelay(search: string, storage: Storage | null, dev: boolean): string | null {
   const q = new URLSearchParams(search).get('flights');
-  if (q) return q;
+  if (q && validRelay(q)) return q;
   let saved: string | null = null;
   try {
     saved = storage?.getItem('tinymap:flightsRelay') ?? null;
   } catch {
     /* storage blocked */
   }
-  if (saved) return saved;
+  if (saved && validRelay(saved)) return saved;
   if (DEFAULT_FLIGHTS_RELAY) return DEFAULT_FLIGHTS_RELAY;
   return dev ? '/flights-api' : null;
 }
