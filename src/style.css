@@ -166,6 +166,57 @@ body.preview #btn-example, body.preview #btn-google, body.preview #btn-back, bod
 .off-selected .bar div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
 .off-saved-title { border-top: 1px solid var(--line); padding-top: 8px; }
 
+/* Land parcels, market prices, valuation (#37 #38 #39): reuses the .offline panel */
+.land { width: min(400px, calc(100% - 24px)); max-height: calc(100% - 150px); font-size: 13px; }
+.land textarea { width: 100%; background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: 12px ui-monospace, monospace; resize: vertical; }
+.land label { display: flex; flex-direction: column; gap: 3px; }
+.land label.opt { flex-direction: row; }
+.land-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
+.land-tabs button { flex: 1; background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 2px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.land-tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.land-sec { display: flex; flex-direction: column; gap: 8px; }
+.land-sec[hidden] { display: none; }
+.land-banner, .land-disclaimer { padding: 6px 8px; border-radius: 6px; background: rgba(255, 179, 71, 0.1); border: 1px solid rgba(255, 179, 71, 0.25); color: #f3d3a4; }
+.land-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); }
+.land-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.land-list { max-height: 260px; }
+.land .off-list li { justify-content: flex-start; }
+.land .off-list li > b { margin-left: auto; white-space: nowrap; font-weight: 600; }
+.land .off-list li > a { margin-left: auto; color: var(--accent); font-size: 12px; white-space: nowrap; }
+.ll-main { display: flex; flex-direction: column; min-width: 0; }
+.ll-main > span { overflow: hidden; text-overflow: ellipsis; }
+.chip { display: inline-block; min-width: 38px; padding: 1px 5px; border-radius: 4px; color: #1b0f08; font: 600 11px ui-monospace, monospace; text-align: center; flex: none; }
+.land-dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: 12.5px; }
+.land-dl dt { color: var(--muted); }
+.land-dl dd { margin: 0; }
+.land-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.land-table th, .land-table td { padding: 2px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+.land-table th { color: var(--muted); font-weight: 500; }
+.land-table td:last-child, .land-table th:last-child { text-align: right; }
+.land-table tr.front td { color: var(--accent); font-weight: 600; }
+.land-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.land-stats > div { display: flex; flex-direction: column; padding: 6px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); }
+.land-stats b { font-size: 15px; font-weight: 600; }
+.land-stats small { color: var(--muted); font-size: 11px; }
+.land-comps { max-height: 240px; }
+.land-assume { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; align-items: end; }
+.land-assume input[type='number'] { width: 100%; }
+.land-adj { font-size: 12px; }
+.land-adj summary { cursor: pointer; color: var(--muted); }
+.land-adj > div { margin-top: 6px; }
+.land-adj a, .land-links a { color: var(--accent); }
+.land-links { color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
+.land-notes { margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.conf-high { color: var(--ok); }
+.conf-medium { color: var(--accent-2); }
+.conf-low { color: #ff6b6b; }
+.land-ai { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.ai-out { max-height: 260px; overflow: auto; font-size: 12.5px; line-height: 1.45; display: flex; flex-direction: column; gap: 8px; }
+.ai-out:empty { display: none; }
+.ai-q { color: var(--accent); font-weight: 600; margin-bottom: 2px; }
+.ai-a .md-h { display: inline-block; margin-top: 4px; }
+.land-import { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.03); }
+
 /* Split view (#23): map | 3D, resizable on wide screens */
 main { --split: 42%; }
 main[data-layout="split"] #map-view { right: auto; width: var(--split); }
@@ -211,6 +262,12 @@ main[data-layout="split"] .map-bottom { flex-wrap: wrap; }
   .map-bottom { left: 8px; right: 8px; bottom: 20px; }
   .offline { top: 104px; right: 8px; left: 8px; width: auto; }
   .building-info { right: 8px; left: 8px; width: auto; bottom: 70px; }
+}
+
+@media (max-width: 600px) {
+  /* Bottom sheet on phones (#37): full width, above the map footer. */
+  .land { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 62%; border-radius: var(--radius) var(--radius) 0 0; z-index: 4; }
+  .land-assume { grid-template-columns: 1fr; }
 }
 
 /* Space view (#24) */

@@ -17,6 +17,7 @@ import { cityWorker } from './worker/client';
 import { APP_ROOT, DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
 import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
 import { bboxAround, MapView } from './ui/MapView';
+import type { LandPanel } from './ui/LandPanel';
 import { SpaceView } from './ui/SpaceView';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -56,7 +57,17 @@ function onBBox(b: BBox | null) {
   highlightMood();
   history.replaceState(null, '', `#bbox=${[b.south, b.west, b.north, b.east].map((v) => v.toFixed(5)).join(',')}`);
 }
-mapView.onChange = onBBox;
+// Land parcels, market prices and valuation (#37 #38 #39); shares the offline panel's spot.
+// The land panel (#37-#39) is loaded on first use so its code is not parsed during the 3D build.
+let land: LandPanel | null = null;
+$('btn-land').addEventListener('click', async () => {
+  if (!land) {
+    const { LandPanel } = await import('./ui/LandPanel');
+    land ??= new LandPanel(mapView, $<HTMLButtonElement>('btn-land'), { onOpen: () => !$('offline').hidden && $('btn-offline').click() });
+  }
+  land.toggle();
+});
+mapView.onChange = (b) => (onBBox(b), land?.bboxChanged(b));
 
 $('btn-draw').addEventListener('click', () => {
   locationNotice = '';
@@ -380,6 +391,7 @@ function renderSaved() {
 
 $('btn-offline').addEventListener('click', () => {
   const panel = $('offline');
+  if (panel.hidden && land?.isOpen) land.close();
   panel.hidden = !panel.hidden;
   $('btn-offline').classList.toggle('on', !panel.hidden);
   if (!panel.hidden) {
