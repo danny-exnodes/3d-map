@@ -1,6 +1,6 @@
 # Tiny Map: hướng dẫn cho agent
 
-Trước khi làm gì, đọc **checkpoint mới nhất** trong `docs/releases/` (hiện là [`docs/releases/v0.0.6.md`](docs/releases/v0.0.6.md)). Sau đó xem [issue #1 (Roadmap)](https://github.com/danny-exnodes/3d-map/issues/1) trên GitHub để biết trạng thái hiện tại.
+Trước khi làm gì, đọc **checkpoint mới nhất** trong `docs/releases/` (hiện là [`docs/releases/v0.0.7.md`](docs/releases/v0.0.7.md)). Sau đó xem [issue #1 (Roadmap)](https://github.com/danny-exnodes/3d-map/issues/1) trên GitHub để biết trạng thái hiện tại.
 
 Bộ skill của dự án ở `.claude/skills/`. Bắt đầu từ `tinymap-workflow` (điều phối). Các vai trò: `product-owner`, `tech-lead`, `developer`, `qa-visual`, `steward` (GitHub/PR/CI), `release-checkpoint`.
 
@@ -10,5 +10,6 @@ Tóm tắt:
 - Quy trình: mỗi việc là một issue, có PO đề xuất và TechLead phân tích. Chỉ code khi cả hai đã đồng ý (label `status: ready`).
 - Nhánh mặc định là `master`. Làm trên `feature/*` hoặc `fix/*`, mở PR, chờ CI xanh rồi merge. Merge vào `master` sẽ tự deploy GitHub Pages.
 - Trước khi push: `npm run typecheck && npm test && npm run build`. Với thay đổi về hiệu năng, chạy thêm `npm run bench`.
+- Mô-đun đất đai (thửa, giá thị trường, định giá, trợ lý AI) nằm ở `src/land/` (hàm thuần, có test) và `src/ui/LandPanel.ts`. Không có API địa chính công khai: thửa OSM chỉ là tham khảo. Không cào Guland, Meey Map, batdongsan.
 - Sandbox cloud không gọi được Overpass (đường mặc định giờ không cần Overpass); khi test nhánh Overpass, mock bằng Playwright.
 - Khi kết thúc một đợt việc, viết checkpoint mới `docs/releases/vX.Y.Z.md` theo đúng cấu trúc của bản trước.

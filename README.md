@@ -50,6 +50,11 @@
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
 
+**Mới trong v0.0.7** (bản OSM, nút 🗺 trên bản đồ)
+- **Thửa đất trong vùng chọn:** mã và tên loại đất theo TT 08/2024 (kèm mã cũ), diện tích, chu vi, từng cạnh, mặt tiền, chiều sâu, hình dạng. Có thửa tham khảo từ lớp sử dụng đất OSM; thửa thật nhập bằng bảng toạ độ VN2000 trong sổ đỏ, hoặc file GeoJSON/KML.
+- **Giá rao bán quanh thửa:** tin đất Chợ Tốt Nhà (snapshot hằng ngày), trung vị và P25 đến P75 giá/m², lọc tin giá sai, liên kết về tin gốc. Có thể nhập CSV hoặc dùng proxy riêng để lấy dữ liệu trực tiếp.
+- **Định giá và tư vấn:** ước tính theo phương pháp so sánh, chỉnh được giả định (vị trí, lô góc, pháp lý, lộ giới); xuất hồ sơ JSON `tinymap.valuation/v1` cho AI agent khác; trợ lý AI Claude chạy bằng key Anthropic của bạn. Kết quả chỉ để tham khảo, không phải chứng thư thẩm định giá.
+
 **Mới trong v0.0.6**
 - Phong cách đồ chơi duy nhất cho bản OSM, bốn tâm trạng theo vòng ngày/đêm và thẻ chọn tâm trạng trước khi dựng. Các chế độ Có màu / Đơn sắc / Siêu thực và tham số `?style=` đã bỏ.
 - Ngân sách tam giác của benchmark nâng lên 500k.
@@ -142,6 +147,9 @@ Yêu cầu Node 22.18+ (CLI chiều cao chạy thẳng file `.ts`) và trình du
 | [Google Routes API](https://developers.google.com/maps/documentation/routes) | giao thông thực (tuỳ chọn) | REST, key của người dùng | Google Maps Platform ToS |
 | [NASA GIBS](https://earthdata.nasa.gov/gibs) Blue Marble | ảnh trái đất (Space view) | WMTS (CORS) | public domain |
 | [Open‑Meteo](https://open-meteo.com/) | thời tiết | trình duyệt | CC BY 4.0 |
+| [OpenFreeMap](https://openfreemap.org/) lớp `landuse`/`landcover`/`park` | thửa tham khảo (không phải thửa địa chính) | vector tiles z14 (CORS) | ODbL |
+| [Chợ Tốt Nhà](https://www.nhatot.com/) | tin rao bán đất (giá rao, không phải giá giao dịch) | snapshot hằng ngày do CI tạo (`tools/listings.ts`), hoặc proxy của người dùng; bỏ dữ liệu cá nhân người bán | dữ liệu của Chợ Tốt; liên kết về tin gốc |
+| [Anthropic Claude API](https://platform.claude.com/) | trợ lý tư vấn đầu tư (tuỳ chọn) | gọi thẳng từ trình duyệt, key của người dùng | Anthropic ToS |
 
 ### Lưới chiều cao Google 2.5D
 
@@ -209,6 +217,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.7](docs/releases/v0.0.7.md) (2026-10-31): thửa đất trong vùng chọn (loại đất, kích thước), giá rao bán Chợ Tốt quanh thửa, định giá so sánh, hồ sơ JSON và trợ lý AI.
 - [v0.0.6](docs/releases/v0.0.6.md) (2026-10-27): phong cách đồ chơi duy nhất (nhà bo tròn, pastel), bốn tâm trạng và thẻ chọn trước khi dựng; bỏ Có màu / Đơn sắc / Siêu thực.
 - [v0.0.5](docs/releases/v0.0.5.md) (2026-10-27): bản Google 3D ở `/`, bản OSM ở `/openstreetmap/`; hết nhà chồng lấn, bó vỉa, xe vào ở nút giao, chọn vùng, ghim vị trí.
 - [v0.0.4](docs/releases/v0.0.4.md) (2026-10-27): địa chỉ toà nhà, vật liệu bớt nhựa, xe thật hơn, giao thông Google, Space view liền mạch.
