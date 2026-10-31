@@ -50,6 +50,7 @@ export class MapView {
       this.map.addSource('ward', { type: 'geojson', data: this.ward ?? EMPTY });
       this.map.addLayer({ id: 'ward-fill', type: 'fill', source: 'ward', paint: { 'fill-color': '#3b82f6', 'fill-opacity': 0.08 } }, 'sel-fill');
       this.map.addLayer({ id: 'ward-line', type: 'line', source: 'ward', paint: { 'line-color': '#60a5fa', 'line-width': 2, 'line-dasharray': [2, 1] } }, 'sel-fill');
+      this.addLandLayers();
       if (this.bbox) this.render();
     });
 
@@ -252,6 +253,69 @@ export class MapView {
   setWard(polygon: number[][][][] | null) {
     this.ward = polygon ? { type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: polygon } } : null;
     (this.map.getSource('ward') as GeoJSONSource | undefined)?.setData(this.ward ?? EMPTY);
+  }
+
+  // ---- Land parcels and market listings (#37 #38) ----
+
+  private parcels: GeoJSON.FeatureCollection = EMPTY;
+  private market: GeoJSON.FeatureCollection = EMPTY;
+  /** Called with a parcel id when the user clicks a parcel (not while drawing). */
+  onParcelClick?: (id: string) => void;
+
+  /** Parcel fills under the selection, market listings as small circles on top. */
+  private addLandLayers() {
+    const m = this.map;
+    m.addSource('parcels', { type: 'geojson', data: this.parcels });
+    m.addLayer(
+      { id: 'parcels-fill', type: 'fill', source: 'parcels', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['get', 'sel'], 0.6, 0.35] } },
+      'sel-fill',
+    );
+    m.addLayer(
+      {
+        id: 'parcels-line',
+        type: 'line',
+        source: 'parcels',
+        paint: { 'line-color': ['case', ['get', 'sel'], '#ffffff', ['get', 'color']], 'line-width': ['case', ['get', 'sel'], 2.5, 0.8], 'line-opacity': 0.9 },
+      },
+      'sel-fill',
+    );
+    m.addSource('market', { type: 'geojson', data: this.market });
+    m.addLayer({
+      id: 'market',
+      type: 'circle',
+      source: 'market',
+      paint: { 'circle-radius': 5, 'circle-color': '#ffd166', 'circle-stroke-color': '#1b0f08', 'circle-stroke-width': 1.5 },
+    });
+    // Registered after the body-drag handlers, so the pointer cursor wins over 'grab' on a parcel.
+    // A plain click (no drag beyond MapLibre's click tolerance) still fires after the body-drag
+    // mousedown called preventDefault, so moving the selection keeps working.
+    m.on('click', 'parcels-fill', (e) => {
+      if (this.drawing || !e.features?.length) return;
+      // Overlapping land-use polygons: pick the smallest one under the pointer.
+      const f = [...e.features].sort((a, b) => Number(a.properties?.area ?? 0) - Number(b.properties?.area ?? 0))[0];
+      const id = f.properties?.id;
+      if (id != null) this.onParcelClick?.(String(id));
+    });
+    m.on('mousemove', 'parcels-fill', () => {
+      const c = m.getCanvas();
+      if (!this.drawing && c.style.cursor !== 'grabbing') c.style.cursor = 'pointer';
+    });
+    m.on('mouseleave', 'parcels-fill', () => {
+      const c = m.getCanvas();
+      if (c.style.cursor === 'pointer') c.style.cursor = '';
+    });
+  }
+
+  /** Shows parcels (features with `id`, `color`, `sel`, `area` properties) or clears them. */
+  setParcels(fc: GeoJSON.FeatureCollection | null, _selectedId?: string) {
+    this.parcels = fc ?? EMPTY;
+    (this.map.getSource('parcels') as GeoJSONSource | undefined)?.setData(this.parcels);
+  }
+
+  /** Shows market listings as points or clears them. */
+  setMarket(fc: GeoJSON.FeatureCollection | null) {
+    this.market = fc ?? EMPTY;
+    (this.map.getSource('market') as GeoJSONSource | undefined)?.setData(this.market);
   }
 
   /** Last place shown with a labelled marker (search result, own position, default place). */
