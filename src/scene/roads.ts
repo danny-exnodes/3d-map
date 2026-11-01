@@ -39,7 +39,18 @@ export const ROAD_COLORS: Record<RoadClass, string> = {
   service: TOY_ROAD,
   path: '#cbbf9f',
 };
+/** Khối: grey asphalt by road class. */
+const PLAIN_ROAD_COLORS: Record<RoadClass, string> = {
+  motorway: '#3b3f48',
+  primary: '#40444d',
+  secondary: '#454953',
+  tertiary: '#4a4e57',
+  residential: '#50545c',
+  service: '#5d6068',
+  path: '#cbbf9f',
+};
 const SIDEWALK = '#f6eeda';
+const PLAIN_SIDEWALK = '#d9cfb8';
 const KERB = '#eeeae0';
 const KERB_H = 0.15;
 const PARAPET = '#cfc9be';
@@ -76,7 +87,9 @@ export function elevationOf(r: { bridge: boolean; layer: number }, length: numbe
   return length < 90 ? Math.min(h, 1 + length * 0.04) : h;
 }
 
-export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection): RoadsResult {
+/** `pastel`: toy colours (Đồ chơi), else the plain ones (Khối). */
+export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection, pastel = true): RoadsResult {
+  const roadColors = pastel ? ROAD_COLORS : PLAIN_ROAD_COLORS;
   const group = new THREE.Group();
   group.name = 'roads';
   const paths: RoadPath[] = [];
@@ -114,7 +127,7 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
     const e = degree.get(key(p));
     return e && e.n >= 3 ? e.r : 0;
   };
-  const sidewalks = new MeshBuilder().setColor(SIDEWALK);
+  const sidewalks = new MeshBuilder().setColor(pastel ? SIDEWALK : PLAIN_SIDEWALK);
   const ground = new MeshBuilder();
   const elevated = new MeshBuilder();
   const marks = new MeshBuilder().setColor('#f3f1e8');
@@ -130,7 +143,7 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
       const joined = (p: XZ) => (tunnelEnds.get(key(p)) ?? 0) > 1;
       const heights = profile(dist, TUNNEL_DEPTH, joined(pts[0]), joined(pts[pts.length - 1])).map((y) => -y);
       paths.push({ road, pts, heights, dist, length: dist[dist.length - 1] });
-      buildTunnel(road, pts, heights, ground, elevated, tunnelCover);
+      buildTunnel(road, pts, heights, ground, elevated, tunnelCover, roadColors[road.cls]);
       continue;
     }
     const elevatedWay = h > 3;
@@ -165,7 +178,7 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
     }
     if (isElevated) {
       ribbon(elevated.setColor(DECK), pts, lift.map((y) => y - 0.01), road.width + 1.2, { skirt: 1.3 });
-      ribbon(elevated.setColor(ROAD_COLORS[road.cls]), pts, lift, road.width);
+      ribbon(elevated.setColor(roadColors[road.cls]), pts, lift, road.width);
       // Concrete parapets along both edges make the deck read clearly against the street below (#25).
       for (const side of [-1, 1]) {
         ribbon(elevated.setColor(PARAPET), pts, lift.map((y) => y + 1.05), 0.4, { offset: side * (road.width / 2 + 0.4), skirt: 1.1 });
@@ -178,7 +191,7 @@ export function buildRoads(roads: Road[], rails: Rail[], proj: LocalProjection):
         }
       });
     } else {
-      ribbon(ground.setColor(ROAD_COLORS[road.cls]), pts, lift, road.width);
+      ribbon(ground.setColor(roadColors[road.cls]), pts, lift, road.width);
       if (road.bridge && h > 0) {
         // Small bridges over canals: low railings.
         for (const side of [-1, 1]) {
@@ -353,7 +366,7 @@ export function densify(pts: XZ[], step: number): XZ[] {
  * retaining walls; where the tunnel is covered, only a dark band on the surface shows its course,
  * and a portal face closes each ramp.
  */
-function buildTunnel(road: Road, pts: XZ[], heights: number[], ground: MeshBuilder, walls: MeshBuilder, cover: MeshBuilder) {
+function buildTunnel(road: Road, pts: XZ[], heights: number[], ground: MeshBuilder, walls: MeshBuilder, cover: MeshBuilder, asphalt: string) {
   const runs: { open: boolean; from: number; to: number }[] = [];
   for (let i = 0; i < pts.length; i++) {
     const open = heights[i] > TUNNEL_COVERED;
@@ -366,7 +379,7 @@ function buildTunnel(road: Road, pts: XZ[], heights: number[], ground: MeshBuild
     const h = heights.slice(run.from, run.to + 1);
     if (p.length < 2) continue;
     if (run.open) {
-      ribbon(ground.setColor(ROAD_COLORS[road.cls]), p, h, road.width);
+      ribbon(ground.setColor(asphalt), p, h, road.width);
       for (const side of [-1, 1]) {
         // Dark cut walls going down to the road, a light coping on top.
         ribbon(walls.setColor('#6f6c66'), p, p.map(() => 0.65), 0.45, { offset: side * (road.width / 2 + 0.25), skirt: TUNNEL_DEPTH + 0.65 });

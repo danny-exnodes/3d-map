@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { type BuildingUniforms, createBuildingMaterial } from './buildings';
+import { type Style, toyParamsFor } from './style';
 import { toyDepthMaterial } from './toyGeometry';
 
 /**
@@ -12,6 +13,8 @@ export interface MaterialDesc {
   color: [number, number, number];
   params: Record<string, number | boolean>;
   userData: Record<string, number>;
+  /** Building materials: the style they were made for. */
+  style?: Style;
 }
 
 export interface ObjectDesc {
@@ -54,7 +57,7 @@ function describeMaterial(m: THREE.Material): MaterialDesc {
   const userData: Record<string, number> = {};
   for (const [k, v] of Object.entries(m.userData)) if (typeof v === 'number') userData[k] = v;
   const c = (m as THREE.MeshLambertMaterial).color;
-  return { kind, color: c ? [c.r, c.g, c.b] : [1, 1, 1], params, userData };
+  return { kind, color: c ? [c.r, c.g, c.b] : [1, 1, 1], params, userData, style: m.userData.style };
 }
 
 /** Flattens a built group into transferable descriptions (world matrices baked per object). */
@@ -106,7 +109,7 @@ function createMaterial(d: MaterialDesc, shared: { buildings?: BuildingUniforms 
   const { toyProto, ...params } = d.params;
   const m =
     d.kind === 'buildings'
-      ? createBuildingMaterial(shared.buildings, !!toyProto)
+      ? createBuildingMaterial(shared.buildings, !!toyProto, d.style)
       : d.kind === 'standard'
         ? new THREE.MeshStandardMaterial()
         : d.kind === 'basic'
@@ -136,7 +139,7 @@ export function deserializeObjects(objects: ObjectDesc[]): THREE.Group {
       const inst = new THREE.InstancedMesh(g, material, d.count ?? 0);
       inst.instanceMatrix = new THREE.InstancedBufferAttribute(d.instanceMatrix!, 16);
       if (d.instanceColor) inst.instanceColor = new THREE.InstancedBufferAttribute(d.instanceColor, 3);
-      if (mats[0].userData.toyProto) inst.customDepthMaterial = toyDepthMaterial();
+      if (mats[0].userData.toyProto) inst.customDepthMaterial = toyDepthMaterial(toyParamsFor(mats[0].userData.style ?? 'toy'));
       inst.computeBoundingSphere();
       obj = inst;
     } else {

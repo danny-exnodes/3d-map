@@ -1,5 +1,6 @@
 import type { CityLoadOptions } from '../data/loader';
 import type { BBox, CityData } from '../data/types';
+import type { Style } from '../scene/style';
 import type { BuildResult, WorkerRequest, WorkerResponse } from './protocol';
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; onProgress?: (f: number, d: string, step?: string) => void };
@@ -60,8 +61,8 @@ class CityWorkerClient {
     return this.call<CityData>('loadCity', { bbox, opts }, onProgress, signal);
   }
 
-  build(data: CityData, onProgress?: Pending['onProgress']) {
-    return this.call<BuildResult>('build', { data }, onProgress);
+  build(data: CityData, style: Style, onProgress?: Pending['onProgress']) {
+    return this.call<BuildResult>('build', { data, style }, onProgress);
   }
 
   parseOverpass(bbox: BBox, text: string) {

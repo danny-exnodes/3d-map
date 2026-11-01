@@ -3,6 +3,7 @@ import { LocationPin } from './locationPin';
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -16,11 +17,18 @@ import { buildCity } from './buildCity';
 import type { RailPath, RoadPath } from './roads';
 import { deserializeObjects } from './serialize';
 import { createLampPools, litShare } from './nightLights';
+import { armLightning, flashHemi, idleLightning, isFlashing, type LightningState, nextLightning, type WeatherPreset, weatherPreset } from './weather';
 import { dominantMood, isRising, moodLighting, type Mood } from './moods';
 import { sunState, type SunState } from './sun';
+import { CloudLayer, SkyDome } from './sky';
+import { Realism, realUniforms, wetness } from './realistic';
+import { type Style, toyParamsFor } from './style';
 import { bakeToyInstances } from './toyGeometry';
 import { tiltShiftStrength } from './tiltShift';
+import { Boats, boatRoutes } from './boats';
 import { Traffic } from './traffic';
+import type { Aircraft } from './aircraft';
+import type { Flight } from '../data/flights';
 
 export interface BuildStats {
   buildings: number;
@@ -35,6 +43,21 @@ export const MOBILE = typeof matchMedia !== 'undefined' && matchMedia('(pointer:
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
+/**
+ * GTAO whose normal/depth pre-pass leaves out `skip`: meshes shaped in their vertex shader (the boats'
+ * shape pick), which the pass's override material would draw as every hull kind at once.
+ */
+class CityGTAOPass extends GTAOPass {
+  skip: THREE.Object3D[] = [];
+
+  override render(...args: Parameters<GTAOPass['render']>) {
+    const shown = this.skip.filter((o) => o.visible);
+    for (const o of shown) o.visible = false;
+    super.render(...args);
+    for (const o of shown) o.visible = true;
+  }
+}
+
 export class CityScene {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -42,6 +65,15 @@ export class CityScene {
   readonly controls: MapControls;
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
+  /** Ambient occlusion, only in Siêu thực (#19). */
+  private gtao: CityGTAOPass;
+  private realism: Realism;
+  /** The mood lighting of the last setTime, for the Siêu thực sky and environment light. */
+  private light: ReturnType<typeof moodLighting> | null = null;
+  /** Where uWet is heading (wetness of the weather's rain). */
+  private wet = 0;
+  /** The model on screen wears the Siêu thực materials. */
+  private realLook = false;
   private sunDir = new THREE.Vector3(0, 1, 0);
   private night = 0;
   private lightDirty = false;
@@ -50,6 +82,12 @@ export class CityScene {
   private hemi = new THREE.HemisphereLight('#bcd8ff', '#d8c9a8', 1.2);
   private city = new THREE.Group();
   private traffic: Traffic | null = null;
+  private boats: Boats | null = null;
+  private aircraft: Aircraft | null = null;
+  /** Latest planes, kept so a lazily loaded or rebuilt `Aircraft` starts with them. */
+  private flights: Flight[] = [];
+  private wantPlanes = false;
+  private boatTime = 0;
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
   private details: THREE.Object3D[] = [];
@@ -62,8 +100,18 @@ export class CityScene {
   private raycaster = new THREE.Raycaster();
   /** Called with the picked building (or null) when the user clicks the model (#10). */
   onPick?: (b: Building | null) => void;
+  /** A plane was clicked (or, with null, something else was). */
+  onPickPlane?: (f: Flight | null) => void;
   private sourceView = false;
   private rain: THREE.Points | null = null;
+  private rainLevel: 0 | 1 | 2 = 0;
+  private weather: WeatherPreset = weatherPreset('clear');
+  private fogBase = { near: 2000, far: 6000 };
+  private hemiBase = 1.2;
+  private lastTime: { date: Date; hour: number } | null = null;
+  private lightning: LightningState = idleLightning();
+  private reduceMotion = false;
+  private slate = new THREE.Color('#6b7480');
   private timer = new THREE.Timer();
   private size = { width: 1000, depth: 1000 };
   private proj: LocalProjection | null = null;
@@ -104,6 +152,11 @@ export class CityScene {
   private viewOff = new THREE.Vector3();
   private mood: Mood = 'noon';
   private lastSky = new THREE.Color('#9fd3f2');
+  private dome = new SkyDome(this.lastSky);
+  private white = new THREE.Color('#ffffff');
+  private cloudLight = new THREE.Color('#ffffff');
+  private clouds: CloudLayer | null = null;
+  private builtStyle: Style = 'toy';
   data: CityData | null = null;
   sunInfo: SunState | null = null;
   onFrame?: () => void;
@@ -132,11 +185,23 @@ export class CityScene {
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.6;
     this.sun.shadow.radius = 3;
-    this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group);
+    this.scene.add(this.sun, this.sun.target, this.hemi, this.city, this.pin.group, this.dome.mesh);
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this.reduceMotion = motion.matches;
+    motion.addEventListener('change', (e) => {
+      this.reduceMotion = e.matches;
+      if (e.matches) this.endFlash();
+    });
     this.scene.fog = new THREE.Fog('#9fd3f2', 2000, 6000);
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.gtao = new CityGTAOPass(this.scene, this.camera, 512, 512);
+    this.gtao.updateGtaoMaterial({ radius: 6, distanceExponent: 1.5, thickness: 4, scale: 1.2, samples: 12 });
+    this.gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6 });
+    this.gtao.blendIntensity = 0.9;
+    this.gtao.enabled = false;
+    this.composer.addPass(this.gtao);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.2, 0.5, 0.92);
     this.composer.addPass(this.bloom);
     this.tiltH = new ShaderPass(HorizontalTiltShiftShader);
@@ -145,6 +210,8 @@ export class CityScene {
     this.composer.addPass(this.tiltH);
     this.composer.addPass(this.tiltV);
     this.composer.addPass(new OutputPass());
+    this.realism = new Realism(this.renderer);
+    this.scene.add(this.realism.sky);
 
     new ResizeObserver(() => this.resize()).observe(container);
     // Click (not drag) on the model picks a building.
@@ -172,11 +239,25 @@ export class CityScene {
     this.tiltBase = { h: 2 / w, v: 2 / h };
   }
 
-  async build(data: CityData, onProgress: ProgressFn): Promise<BuildStats> {
+  /** Ambient occlusion is the most expensive part of Siêu thực; drop it on slow devices. */
+  private adaptRealism() {
+    if (this.realLook && this.fps < 30 && this.gtao.enabled && this.pixelRatio <= 1) this.gtao.enabled = false;
+  }
+
+  /** The style of the model on screen (the last successful build's). */
+  get style(): Style {
+    return this.builtStyle;
+  }
+
+  /** Builds the model in a style (style.ts); switching style means building again from the same data. */
+  async build(data: CityData, onProgress: ProgressFn, style: Style = 'toy'): Promise<BuildStats> {
     const t0 = performance.now();
     this.clear();
     this.mainThreadSlices = {};
     this.data = data;
+    const pastel = toyParamsFor(style).pastel;
+    // Siêu thực is the Khối model with realistic materials, swapped in before anything is drawn.
+    const real = style === 'real';
     const proj = (this.proj = new LocalProjection(data.bbox));
     this.size = bboxSizeMeters(data.bbox);
 
@@ -185,7 +266,7 @@ export class CityScene {
     const report = (f: number, d: string) => onProgress('build', Math.min(0.9, f), d);
     if (cityWorker.available) {
       try {
-        const r = await cityWorker.build(data, report);
+        const r = await cityWorker.build(data, style, report);
         const t = performance.now();
         built = { ...r, group: deserializeObjects(r.objects) };
         this.mainThreadSlices.deserialize = performance.now() - t;
@@ -193,16 +274,18 @@ export class CityScene {
         console.warn('Worker build failed, building inline', e);
         await nextFrame();
         const t = performance.now();
-        built = buildCity(data, report);
+        built = buildCity(data, report, style);
         this.mainThreadSlices.inlineBuild = performance.now() - t;
       }
     } else {
       await nextFrame();
       const t = performance.now();
-      built = buildCity(data, report);
+      built = buildCity(data, report, style);
       this.mainThreadSlices.inlineBuild = performance.now() - t;
     }
+    if (real) this.timeRealism(() => this.realism.apply(built.group));
     this.city.add(built.group);
+    this.setRealLook(real);
     const buildingsMesh = built.group.getObjectByName('buildings') as THREE.Mesh | undefined;
     this.buildingUniforms = (buildingsMesh?.material as THREE.Material | undefined)?.userData.uniforms ?? null;
     this.buildingsMesh = buildingsMesh ?? null;
@@ -221,9 +304,14 @@ export class CityScene {
     await nextFrame();
     const tTraffic = performance.now();
     const attractors = data.pois.filter((p) => /market|school|college|university|hospital|place_of_worship|stadium/.test(p.kind)).map((p) => proj.project(p.pos));
-    this.traffic = new Traffic(built.paths, built.railPaths, attractors, MOBILE ? 1100 : 2400, MOBILE ? 300 : 700);
+    this.traffic = new Traffic(built.paths, built.railPaths, attractors, MOBILE ? 1100 : 2400, MOBILE ? 300 : 700, pastel);
     this.mainThreadSlices.traffic = performance.now() - tTraffic;
+    const traffic = this.traffic;
+    if (real) this.timeRealism(() => this.realism.apply(traffic.group));
     this.scene.add(this.traffic.group);
+    this.boats = new Boats(boatRoutes(data, proj), 4321, pastel);
+    this.scene.add(this.boats.group);
+    this.gtao.skip = [this.boats.group];
 
     for (const p of data.pois) {
       const [x, z] = proj.project(p.pos);
@@ -248,12 +336,18 @@ export class CityScene {
     cam.near = 1;
     cam.far = ext * 4;
     cam.updateProjectionMatrix();
-    this.scene.fog = new THREE.Fog('#9fd3f2', ext * 1.6, ext * 5);
+    this.fogBase = { near: ext * 1.6, far: ext * 5 };
+    this.scene.fog = new THREE.Fog('#9fd3f2', this.fogBase.near * this.weather.fogScale, this.fogBase.far * this.weather.fogScale);
+    this.clouds = new CloudLayer(ext);
+    this.clouds.setCover(this.cloud);
+    this.clouds.setLight(this.cloudLight);
+    this.scene.add(this.clouds.mesh);
     this.controls.maxDistance = ext * 3;
     this.controls.minDistance = 20;
     this.resetView();
 
     onProgress('build', 1, 'Xong');
+    this.builtStyle = style;
     return {
       buildings: built.buildings,
       trees: built.trees,
@@ -261,6 +355,31 @@ export class CityScene {
       seconds: (performance.now() - t0) / 1000,
       areaKm2: (this.size.width * this.size.depth) / 1e6,
     };
+  }
+
+  private timeRealism(f: () => void) {
+    const t = performance.now();
+    f();
+    this.mainThreadSlices.realism = (this.mainThreadSlices.realism ?? 0) + performance.now() - t;
+  }
+
+  /** Siêu thực: ambient occlusion and image-based light; the other styles free the environment map. */
+  private setRealLook(on: boolean) {
+    this.realLook = on;
+    this.gtao.enabled = on;
+    if (on) realUniforms.uWet.value = this.wet;
+    if (!on) {
+      this.scene.environment = null;
+      this.realism.releaseEnvironment();
+    }
+    this.showSkies();
+  }
+
+  /** Siêu thực: three's Sky by day, the toy dome with its stars at night (R12). The other styles: the dome. */
+  private showSkies() {
+    const dome = !this.realLook || this.night > 0.5;
+    this.dome.mesh.visible = dome;
+    if (dome) this.realism.sky.visible = false;
   }
 
   clear() {
@@ -272,6 +391,7 @@ export class CityScene {
         if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
         else mat?.dispose();
       });
+    this.realism.reset();
     dispose(this.city);
     this.city.clear();
     this.buildingsMesh = null;
@@ -283,33 +403,49 @@ export class CityScene {
       this.scene.remove(this.traffic.group);
       this.traffic = null;
     }
+    if (this.boats) {
+      this.scene.remove(this.boats.group);
+      this.boats.dispose();
+      this.boats = null;
+    }
     for (const l of this.labels) l.el.remove();
     this.labels = [];
-    this.setRain(false);
+    this.dropAircraft();
+    if (this.clouds) {
+      this.scene.remove(this.clouds.mesh);
+      this.clouds.dispose();
+      this.clouds = null;
+    }
+    this.disposeRain();
   }
 
   /** Apply time of day. `localHour` is the clock hour at the area (drives traffic density). */
   setTime(date: Date, localHour: number) {
     if (!this.proj) return;
+    this.lastTime = { date, hour: localHour };
     const s = (this.sunInfo = sunState(date, this.proj.lat0, this.proj.lon0));
     const rising = isRising(date, this.proj.lat0, this.proj.lon0);
-    const L = moodLighting(s, rising, this.cloud);
+    const L = (this.light = moodLighting(s, rising, this.cloud));
+    // Siêu thực gets its ambient light from the sky (environment map), so the other lights are dimmer.
+    const real = this.realLook;
     this.mood = dominantMood(s, rising);
-    this.renderer.toneMappingExposure = L.exposure;
+    this.renderer.toneMappingExposure = L.exposure * this.weather.exposure;
     const ext = Math.max(this.size.width, this.size.depth);
     this.sun.position.copy(s.direction).multiplyScalar(ext * 1.5);
     this.sun.target.position.set(0, 0, 0);
     if (s.direction.y > 0) {
       this.sun.color.copy(L.sunColor);
-      this.sun.intensity = L.sunIntensity;
+      this.sun.intensity = L.sunIntensity * (1 - this.weather.dim);
     } else {
       // Moonlight: a dim, cool key light from a fixed high angle so night scenes keep their shape.
       // It fades in from zero as the sun sinks, so the switch of light direction is invisible (#22).
       this.sun.position.set(-0.4, 0.8, -0.45).normalize().multiplyScalar(ext * 1.5);
       this.sun.color.set('#8fa2ff');
-      this.sun.intensity = 0.55 * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25);
+      this.sun.intensity = (real ? 0.3 : 0.55) * THREE.MathUtils.smoothstep(-s.direction.y, 0.01, 0.25) * (1 - this.weather.dim);
     }
-    this.hemi.intensity = L.hemiIntensity;
+    this.hemiBase = L.hemiIntensity * (1 - this.weather.hemiDim) * (real ? 0.15 : 1);
+    // A flash that is running survives the slider and ▶, which call this every frame.
+    this.hemi.intensity = isFlashing(this.lightning) ? flashHemi(this.hemiBase, real) : this.hemiBase;
     this.sunDir.copy(s.direction);
     this.night = s.night;
     this.hemi.color.copy(L.hemiSky);
@@ -318,7 +454,10 @@ export class CityScene {
     // limited rate instead of on every slider event (#22).
     this.lightDirty = true;
     this.lastSky.copy(L.sky);
+    // Storm clouds grey the whole sky; at night the slate darkens with it.
+    this.lastSky.lerp(this.slate.clone().multiplyScalar(1 - 0.85 * s.night), this.weather.grey);
     this.applySky();
+    this.showSkies();
     this.bloom.strength = 0.06 + s.night * 0.4;
     this.bloom.threshold = s.night > 0.5 ? 0.8 : 0.95;
     this.applyStreetGlow();
@@ -326,7 +465,7 @@ export class CityScene {
     if (this.lampBulbs) this.lampBulbs.visible = s.night > 0.35;
     if (this.lampPools) {
       this.lampPools.visible = s.night > 0.3;
-      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * 0.45;
+      (this.lampPools.material as THREE.ShaderMaterial).uniforms.uIntensity.value = THREE.MathUtils.smoothstep(s.night, 0.3, 0.8) * (real ? 0.75 : 0.45);
     }
     if (this.buildingUniforms) this.buildingUniforms.uLit.value = litShare(localHour);
     this.traffic?.setHour(localHour);
@@ -336,12 +475,15 @@ export class CityScene {
   private applySky() {
     this.scene.background = this.lastSky;
     (this.scene.fog as THREE.Fog).color.copy(this.lastSky);
+    this.cloudLight.copy(this.lastSky).lerp(this.white, 0.55);
+    this.clouds?.setLight(isFlashing(this.lightning) ? this.white : this.cloudLight);
+    this.dome.update(this.lastSky, this.sunDir, this.night, this.camera.position);
   }
 
-  /** Warm sodium glow on streets after dark. */
+  /** Warm sodium glow on streets after dark (dimmer in Siêu thực, which has less ambient light). */
   private applyStreetGlow() {
     // Lamp pools carry most of the street light now; keep only a faint overall tint.
-    const k = this.night * 0.35;
+    const k = this.night * (this.realLook ? 0.1 : 0.35);
     this.city.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
       if (!Array.isArray(m) && m?.userData?.streetGlow) m.emissive.setRGB(0.32, 0.17, 0.06).multiplyScalar(k * m.userData.streetGlow);
@@ -350,18 +492,59 @@ export class CityScene {
 
   /** Raycasts the buildings mesh at a screen point and selects the building under it. */
   pick(clientX: number, clientY: number): Building | null {
-    if (!this.buildingsMesh) return null;
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
+    const plane = this.aircraft?.pickAt(this.raycaster) ?? null;
     // Exact buildings carry the id per vertex, prototype instances per instance (#22).
-    const hit = this.raycaster.intersectObjects([this.buildingsMesh, ...this.protoMeshes], false)[0];
+    const hit = this.buildingsMesh ? this.raycaster.intersectObjects([this.buildingsMesh, ...this.protoMeshes], false)[0] : undefined;
+    // Whichever the ray reaches first: a plane behind a tower does not take the click.
+    if (plane && (!hit || plane.t < hit.distance)) {
+      this.select(-1);
+      this.onPick?.(null);
+      this.onPickPlane?.(plane.flight);
+      return null;
+    }
+    this.onPickPlane?.(null);
+    if (!this.buildingsMesh) return null;
     const bidAttr = (hit?.object as THREE.Mesh | undefined)?.geometry.getAttribute('aBid');
     const bid = !hit || !bidAttr ? -1 : hit.instanceId !== undefined ? Math.round(bidAttr.getX(hit.instanceId)) : hit.face ? Math.round(bidAttr.getX(hit.face.a)) : -1;
     const b = bid >= 0 ? (this.buildingById.get(this.buildingIds[bid]) ?? null) : null;
     this.select(b ? bid : -1);
     this.onPick?.(b);
     return b;
+  }
+
+  /** Planes on or off. The module loads on first use; it is not part of the bench or of a page without planes. */
+  async setPlanes(on: boolean): Promise<void> {
+    this.wantPlanes = on;
+    if (!on) return this.dropAircraft();
+    if (this.aircraft || !this.proj) return;
+    const proj = this.proj;
+    const { Aircraft } = await import('./aircraft');
+    // Off again, or another model built, while the module loaded.
+    if (!this.wantPlanes || this.aircraft || this.proj !== proj) return;
+    const half = Math.max(this.size.width, this.size.depth) / 2;
+    this.aircraft = new Aircraft(proj, half, { toy: this.builtStyle === 'toy', labelLayer: this.labelLayer });
+    this.scene.add(this.aircraft.group);
+    this.aircraft.setFlights(this.flights, Date.now());
+  }
+
+  setFlights(fs: Flight[]) {
+    this.flights = fs;
+    this.aircraft?.setFlights(fs, Date.now());
+  }
+
+  /** How many planes are being drawn from the last poll. */
+  get planeCount(): number {
+    return this.aircraft?.count() ?? 0;
+  }
+
+  private dropAircraft() {
+    if (!this.aircraft) return;
+    this.scene.remove(this.aircraft.group);
+    this.aircraft.dispose();
+    this.aircraft = null;
   }
 
   select(bid: number) {
@@ -376,20 +559,37 @@ export class CityScene {
 
   setCloud(c: number) {
     this.cloud = Math.min(1, Math.max(0, c));
+    this.clouds?.setCover(this.cloud);
   }
 
-  setRain(on: boolean) {
-    if (!on) {
-      if (this.rain) {
-        this.scene.remove(this.rain);
-        this.rain.geometry.dispose();
-        (this.rain.material as THREE.Material).dispose();
-        this.rain = null;
-      }
-      return;
-    }
-    if (this.rain) return;
-    const n = 6000;
+  /** Apply a weather look: clouds, rain, fog distance, light dimming, lightning. */
+  setWeather(p: WeatherPreset) {
+    this.weather = p;
+    this.wet = wetness(p.rain);
+    this.setCloud(p.cloud);
+    this.setRain(p.rain);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = this.fogBase.near * p.fogScale;
+    fog.far = this.fogBase.far * p.fogScale;
+    this.lightning = armLightning(this.lightning, p.lightning, performance.now());
+    if (this.lastTime) this.setTime(this.lastTime.date, this.lastTime.hour);
+  }
+
+  private disposeRain() {
+    this.rainLevel = 0;
+    if (!this.rain) return;
+    this.scene.remove(this.rain);
+    this.rain.geometry.dispose();
+    (this.rain.material as THREE.Material).dispose();
+    this.rain = null;
+  }
+
+  private setRain(level: 0 | 1 | 2) {
+    if (level === this.rainLevel && (this.rain !== null) === (level > 0)) return;
+    this.disposeRain();
+    this.rainLevel = level;
+    if (level === 0) return;
+    const n = level === 2 ? 12000 : 6000;
     const pos = new Float32Array(n * 3);
     const { width, depth } = this.size;
     for (let i = 0; i < n; i++) {
@@ -402,6 +602,24 @@ export class CityScene {
     this.rain = new THREE.Points(g, new THREE.PointsMaterial({ color: '#cfe3ff', size: 1.2, transparent: true, opacity: 0.6 }));
     this.rain.name = 'rain';
     this.scene.add(this.rain);
+  }
+
+  /** Stop a running flash right away and put the lights back. */
+  private endFlash() {
+    if (!isFlashing(this.lightning)) return;
+    this.lightning = { ...this.lightning, flashEnd: 0, lastEnd: performance.now(), flashAt: performance.now() + 4000 };
+    this.hemi.intensity = this.hemiBase;
+    this.clouds?.setLight(this.cloudLight);
+  }
+
+  private updateLightning(now: number) {
+    if (this.reduceMotion) return;
+    const was = isFlashing(this.lightning);
+    this.lightning = nextLightning(this.lightning, now, Math.random());
+    const is = isFlashing(this.lightning);
+    if (is === was) return;
+    this.hemi.intensity = is ? flashHemi(this.hemiBase, this.realLook) : this.hemiBase;
+    this.clouds?.setLight(is ? this.white : this.cloudLight);
   }
 
   /**
@@ -579,7 +797,7 @@ export class CityScene {
       if ((o as THREE.InstancedMesh).isInstancedMesh && (o as THREE.InstancedMesh).geometry.getAttribute('aCorner')) toy.push(o as THREE.InstancedMesh);
     });
     for (const im of toy) {
-      im.parent!.add(bakeToyInstances(im));
+      im.parent!.add(bakeToyInstances(im, toyParamsFor(this.builtStyle)));
       im.removeFromParent();
     }
     const result = await exporter.parseAsync(root, { binary: true });
@@ -596,12 +814,29 @@ export class CityScene {
     const dt = Math.min(this.timer.getDelta(), 0.1);
     this.controls.update();
     this.traffic?.update(dt);
+    if (this.boats) this.boats.update(dt, (this.boatTime += dt));
+    this.clouds?.update(dt, this.camera.position);
+    try {
+      this.aircraft?.update(Date.now(), this.camera);
+    } catch (e) {
+      console.error(e);
+    }
+    this.dome.mesh.position.copy(this.camera.position);
     this.pin.update(dt, this.camera);
     const now = performance.now();
     if (this.lightDirty && now - this.lastLightUpdate > 120) {
       this.lightDirty = false;
       this.lastLightUpdate = now;
       this.renderer.shadowMap.needsUpdate = true;
+      if (this.realLook && this.light) {
+        this.realism.update(this.scene, this.sunDir, this.night, this.cloud, this.light, this.lastSky, this.weather.grey);
+        this.showSkies();
+      }
+    }
+    if (this.realLook) {
+      realUniforms.uTime.value = this.timer.getElapsed();
+      realUniforms.uWet.value += (this.wet - realUniforms.uWet.value) * Math.min(1, dt * 0.5);
+      this.realism.sky.position.copy(this.camera.position);
     }
     if (this.details.length) {
       const near = this.camera.position.distanceTo(this.controls.target) < 700;
@@ -610,11 +845,17 @@ export class CityScene {
         this.renderer.shadowMap.needsUpdate = true;
       }
     }
+    if (this.weather.lightning) this.updateLightning(now);
     if (this.rain) {
       const p = this.rain.geometry.attributes.position as THREE.BufferAttribute;
+      const half = this.size.width / 2;
+      const drift = dt * 60 * this.weather.slant;
       for (let i = 0; i < p.count; i++) {
         let y = p.getY(i) - dt * 60;
         if (y < 0) y += 220;
+        let x = p.getX(i) + drift;
+        if (x > half) x -= this.size.width;
+        p.setX(i, x);
         p.setY(i, y);
       }
       p.needsUpdate = true;
@@ -640,6 +881,7 @@ export class CityScene {
     this.fps = (w.frames * 1000) / (now - w.start);
     w.start = now;
     w.frames = 0;
+    this.adaptRealism();
     if (this.pixelMode || !this.data) return;
     if (this.fps < 40 && this.pixelRatio > 1) {
       this.pixelRatio = Math.max(1, this.pixelRatio - 0.25);
@@ -677,6 +919,10 @@ export class CityScene {
   dispose() {
     cancelAnimationFrame(this.raf);
     this.clear();
+    this.scene.remove(this.dome.mesh, this.realism.sky);
+    this.dome.dispose();
+    this.realism.dispose();
+    this.gtao.dispose();
     this.renderer.dispose();
   }
 }
