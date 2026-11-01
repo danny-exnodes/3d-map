@@ -1,0 +1,38 @@
+name: Release
+
+# Tags the current master and publishes a GitHub release whose notes are the version's checkpoint.
+# Run by hand (Actions > Release > Run workflow, or the API) after the release PR is merged. Agent
+# sandboxes cannot push tags, so this is how they cut a release.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version, e.g. v0.0.8 (docs/releases/<version>.md must exist)'
+        required: true
+      title:
+        description: 'Short Vietnamese summary for the release title'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          TITLE: ${{ inputs.title }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $VERSION"; exit 1; }
+          notes="docs/releases/$VERSION.md"
+          [ -f "$notes" ] || { echo "missing $notes"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null; then
+            echo "tag $VERSION already exists"; exit 1
+          fi
+          title="$VERSION${TITLE:+: $TITLE}"
+          gh release create "$VERSION" --target "$GITHUB_SHA" --title "$title" --notes-file "$notes"
