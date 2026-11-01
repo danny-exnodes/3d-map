@@ -1002,7 +1002,10 @@ const flightsLabel = (() => {
     return FLIGHTS_SOURCE;
   }
 })();
-let flightsOn = !BENCH && !!flightsSource && (storedFlights() ?? true);
+// A relay handed over in a link (?flights=) never starts on by itself: the page would send the area's
+// position to a host the visitor did not choose. The visitor turns it on with ✈ (#41).
+const flightsFromLink = !!flightsSource && new URLSearchParams(location.search).get('flights') === flightsSource;
+let flightsOn = !BENCH && !!flightsSource && !flightsFromLink && (storedFlights() ?? true);
 let flightList: Flight[] = [];
 let flightsTimer = 0;
 let flightsAbort: AbortController | null = null;

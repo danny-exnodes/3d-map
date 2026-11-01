@@ -89,7 +89,7 @@ export function flightsUrl(relay: string, lat: number, lon: number, nm: number):
 export async function fetchFlights(relay: string, lat: number, lon: number, nm: number, signal?: AbortSignal): Promise<Flight[]> {
   const res = await fetch(flightsUrl(relay, lat, lon, nm), { signal });
   if (!res.ok) throw new Error(`flights relay ${res.status}`);
-  const json = await res.json();
-  const sec = (json as { now?: unknown } | null)?.now;
-  return parseFlights(json, typeof sec === 'number' && Number.isFinite(sec) && sec > 0 ? sec * 1000 : Date.now());
+  // seen_pos is an age relative to the response, so it is applied to the browser's clock: seenAt is
+  // compared with Date.now() later, and a server `now` would mix two clocks (a phone 61 s fast saw no planes) (#41).
+  return parseFlights(await res.json(), Date.now());
 }

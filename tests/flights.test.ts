@@ -114,11 +114,10 @@ describe('fetchFlights', () => {
     vi.unstubAllGlobals();
   });
 
-  it('bases seenAt on the response clock when it has one, else on Date.now()', async () => {
+  it('bases seenAt on the browser clock even when the response has its own (#41)', async () => {
     const row = { hex: 'a', lat: 21, lon: 105, alt_baro: 1000, seen_pos: 10 };
+    // A server clock far from the browser's must not make every plane stale.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ now: 1_700_000_000, aircraft: [row] }))));
-    expect((await fetchFlights('/flights-api', 21, 105, 40))[0].seenAt).toBe(1_700_000_000_000 - 10_000);
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ aircraft: [row] }))));
     const t = Date.now();
     const got = (await fetchFlights('/flights-api', 21, 105, 40))[0].seenAt;
     expect(got).toBeGreaterThanOrEqual(t - 10_000);
