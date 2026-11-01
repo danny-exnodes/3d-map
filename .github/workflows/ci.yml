@@ -61,6 +61,13 @@ jobs:
       - name: Add height tiles to the site
         if: github.event_name != 'pull_request'
         run: mkdir -p dist/heights && cp -r heights-z14 dist/heights/z14
+      # Daily Chợ Tốt land-ad snapshot for the market panel (#38). The gateway has no CORS for our
+      # origin, so it is fetched here; on failure the small committed sample in public/market stays.
+      - name: Market listings snapshot
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: npx tsx tools/listings.ts --out dist/market
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request'
         with:

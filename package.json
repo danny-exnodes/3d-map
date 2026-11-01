@@ -13,9 +13,11 @@
     "bench": "node bench/run.cjs",
     "heights": "node tools/gob-heights.mjs",
     "heights:tiles": "node tools/height-tiles.mjs",
-    "wards": "node tools/wards.mjs"
+    "wards": "node tools/wards.mjs",
+    "listings": "tsx tools/listings.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.135.0",
     "@mapbox/vector-tile": "^3.0.0",
     "3d-tiles-renderer": "^0.5.3",
     "maplibre-gl": "^6.16.0",
