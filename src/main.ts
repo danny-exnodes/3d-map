@@ -974,10 +974,10 @@ showStyle();
 // ---------- Live planes ----------
 
 const FLIGHTS_KEY = 'tinymap:flights';
-/** adsb.fi radius around the area centre (nm) and the poll period. */
+/** adsb.lol radius around the area centre (nm) and the poll period. */
 const FLIGHTS_NM = 40;
 const FLIGHTS_POLL_MS = 15_000;
-const FLIGHTS_SOURCE = 'adsb.fi';
+const FLIGHTS_SOURCE = 'adsb.lol';
 const flightsSource = (() => {
   try {
     return flightsRelay(location.search, localStorage, import.meta.env.DEV);
@@ -993,7 +993,7 @@ function storedFlights(): boolean | null {
     return null;
   }
 }
-/** The default relay and the dev proxy are adsb.fi; a relay chosen with ?flights= or from storage shows its own host. */
+/** The default relay and the dev proxy are adsb.lol; a relay chosen with ?flights= or from storage shows its own host. */
 const flightsLabel = (() => {
   if (!flightsSource || flightsSource === DEFAULT_FLIGHTS_RELAY || flightsSource === '/flights-api') return FLIGHTS_SOURCE;
   try {

@@ -53,14 +53,14 @@ describe('flightsRelay', () => {
   it('prefers ?flights=, then storage, then the default, then the dev proxy', () => {
     expect(flightsRelay('?flights=https://a.test', store('https://b.test'), true)).toBe('https://a.test');
     expect(flightsRelay('', store('https://b.test'), true)).toBe('https://b.test');
-    expect(DEFAULT_FLIGHTS_RELAY).toBe('');
-    expect(flightsRelay('', store(null), true)).toBe('/flights-api');
-    expect(flightsRelay('', null, false)).toBeNull();
+    expect(DEFAULT_FLIGHTS_RELAY).toMatch(/^https:\/\//);
+    expect(flightsRelay('', store(null), true)).toBe(DEFAULT_FLIGHTS_RELAY);
+    expect(flightsRelay('', null, false)).toBe(DEFAULT_FLIGHTS_RELAY);
   });
 
   it('ignores relays that are not https or a same-origin path', () => {
     for (const bad of ['http://a.test', 'javascript:alert(1)', '//evil.test', 'data:text/plain,x']) {
-      expect(flightsRelay('?flights=' + encodeURIComponent(bad), store(bad), false)).toBeNull();
+      expect(flightsRelay('?flights=' + encodeURIComponent(bad), store(bad), false)).toBe(DEFAULT_FLIGHTS_RELAY);
     }
     expect(flightsRelay('?flights=/relay', null, false)).toBe('/relay');
   });

@@ -1,7 +1,7 @@
 # Relay máy bay (Cloudflare Worker)
 
 Các nguồn dữ liệu bay miễn phí không gửi header CORS, nên trang web trên GitHub Pages phải gọi qua relay này.
-Worker chỉ chuyển tiếp đúng một dạng đường dẫn (`/v2/lat/<lat>/lon/<lon>/dist/<1-250>`) tới adsb.fi,
+Worker chỉ chuyển tiếp đúng một dạng đường dẫn (`/v2/lat/<lat>/lon/<lon>/dist/<1-250>`) tới adsb.lol (adsb.fi chặn mọi request từ Cloudflare),
 chỉ trả lời cho `https://danny-exnodes.github.io` và `http://localhost:5173`, cache 10 giây.
 
 ## Triển khai (gói miễn phí)

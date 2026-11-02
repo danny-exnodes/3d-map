@@ -45,7 +45,7 @@
 - **Bầu trời**: vòm trời gradient theo tâm trạng, quầng sáng mặt trời, sao ban đêm và mây low-poly trôi quanh mô hình (số mây theo độ phủ mây). Mây ở gần camera tự mờ đi.
 - **Thời tiết**: nút trên thanh 3D chọn **Tự động** (thời tiết thực từ Open‑Meteo: nhiệt độ, mây, mưa), **Nắng**, **Nhiều mây**, **Mưa**, **Dông** (mưa nặng, chớp), **Sương mù**; hoặc `?weather=auto|clear|cloudy|rain|storm|fog`. Lựa chọn được lưu.
 - **Tàu thuyền**: thuyền nhỏ, thuyền đạp thiên nga và sà lan chạy trên sông, kênh, hồ, không ra khỏi mặt nước.
-- **Máy bay thật**: nút ✈ hiện máy bay đang bay quanh khu vực (dữ liệu adsb.fi, 15 giây một lần), có nhãn callsign, bấm để xem loại, độ cao, tốc độ. Vị trí trên màn hình **bị nén** cho vừa mô hình (không phải vị trí thật). Cần một relay CORS: `npm run dev` có sẵn, còn trang đã đăng cần triển khai Cloudflare Worker ([`proxy/README.md`](proxy/README.md)) rồi đặt `DEFAULT_FLIGHTS_RELAY` trong `src/data/flights.ts`, hoặc dùng `?flights=<url>`. Không có relay thì không có máy bay.
+- **Máy bay thật**: nút ✈ hiện máy bay đang bay quanh khu vực (dữ liệu adsb.lol, giấy phép ODbL, 15 giây một lần), có nhãn callsign, bấm để xem loại, độ cao, tốc độ. Vị trí trên màn hình **bị nén** cho vừa mô hình (không phải vị trí thật). Đi qua relay CORS là Cloudflare Worker `tinymap-flights.ian-exnodes.workers.dev` ([`proxy/README.md`](proxy/README.md)); đổi relay bằng `?flights=<url>`. Không có relay thì không có máy bay.
 
 **Hiệu năng**
 - Dữ liệu tải và mô hình dựng trong Web Worker, main thread không bị đơ.
@@ -214,7 +214,7 @@ src/
   scene/weather.ts        # sáu kiểu thời tiết, chớp
   scene/boats.ts          # tàu thuyền trên nước
   scene/aircraft.ts       # máy bay thật (nén vị trí, nhãn, bấm chọn)
-  data/flights.ts         # adsb.fi qua relay
+  data/flights.ts         # adsb.lol qua relay
   scene/prototypes.ts     # nhà mẫu dùng chung (instancing)
   scene/trafficModel.ts   # mô hình lưu lượng, tỉ lệ phương tiện
   scene/nightLights.ts    # tỉ lệ cửa sổ sáng, vũng đèn đường
