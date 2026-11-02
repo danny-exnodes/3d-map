@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error plain JS module deployed to Cloudflare
-import worker, { relayPath } from '../proxy/flights-worker.js';
+import worker, { relayPath, upstreamFor } from '../proxy/flights-worker.js';
 
 const u = (p: string) => new URL(p, 'https://relay.test');
 
@@ -12,6 +12,15 @@ describe('relayPath', () => {
     for (const p of ['/v2/all', '/../x', '/v2/lat/21/lon/105/dist/0', '/v2/lat/21/lon/105/dist/999', '/v2/lat/abc/lon/105/dist/40', '/v2/lat/91/lon/105/dist/40', '/v2/lat/21/lon/181/dist/40', '/v2/lat/21.12345/lon/105/dist/40', '/v2/lat/21/lon/105/dist/40/', '//v2/lat/21/lon/105/dist/40', '/v2%2Flat/21/lon/105/dist/40', '/v2/lat/21/lon/105%2F../dist/40']) {
       expect(relayPath(u(p))).toBeNull();
     }
+  });
+});
+
+describe('upstreamFor', () => {
+  it('maps the readsb query and the two flood paths, nothing else', () => {
+    expect(upstreamFor(u('/v2/lat/21.0300/lon/105.8512/dist/40'))).toBe('https://api.adsb.lol/v2/lat/21.03/lon/105.85/dist/40');
+    expect(upstreamFor(u('/flood/hanoi'))).toBe('https://thoatnuochanoi.vn/ungngap/api/flood/getflood');
+    expect(upstreamFor(u('/flood/hcm'))).toBe('https://bandotrieucuong.tuoitrethanhphobac.vn/api/forecasts');
+    for (const p of ['/flood', '/flood/', '/flood/danang', '/flood/hanoi/', '/flood/hanoi/x', '/flood/HANOI', '//flood/hanoi']) expect(upstreamFor(u(p))).toBeNull();
   });
 });
 
@@ -46,6 +55,13 @@ describe('fetch', () => {
     const r = await run('http://localhost:5173', '/v2/all');
     expect(r.status).toBe(404);
     expect(r.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173');
+  });
+
+  it('forwards /flood/hanoi for an allowed origin and 403s a foreign one', async () => {
+    const r = await run('https://danny-exnodes.github.io', '/flood/hanoi');
+    expect(r.status).toBe(200);
+    expect((up.mock.calls[0] as unknown[])[0]).toBe('https://thoatnuochanoi.vn/ungngap/api/flood/getflood');
+    expect((await run('https://evil.test', '/flood/hanoi')).status).toBe(403);
   });
 
   it('403s a missing Origin', async () => {

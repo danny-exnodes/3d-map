@@ -21,3 +21,13 @@ dán nội dung `flights-worker.js` rồi Deploy.
   hoặc `localStorage.setItem('tinymap:flightsRelay', '<url>')`.
 
 Khi chạy `npm run dev`, relay là route `/flights-api` của Vite, không cần Worker.
+
+## Điểm ngập (💧)
+
+Cùng Worker còn chuyển tiếp hai đường dẫn cho lớp điểm ngập (cache 60 giây):
+
+- `/flood/hanoi` → `https://thoatnuochanoi.vn/ungngap/api/flood/getflood` (trạm đo ngập của Thoát nước Hà Nội, số đo thật);
+- `/flood/hcm` → `https://bandotrieucuong.tuoitrethanhphobac.vn/api/forecasts` (dự báo nguy cơ ngập TP.HCM, Bản đồ triều cường của Tuổi Trẻ).
+
+Hai nguồn này không có tài liệu hay giấy phép công khai: chỉ deploy hai đường này khi chủ dữ liệu đã đồng ý.
+Cả hai đã được thử từ máy chủ Cloudflare (`wrangler dev --remote`, 02/11/2026): trả lời 200.
