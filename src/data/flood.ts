@@ -59,25 +59,32 @@ function num(v: unknown): number {
 
 const placed = (p: FloodPoint) => Number.isFinite(p.lat) && Number.isFinite(p.lon);
 
+/** The placed points; throws when there were rows but none could be read (the feed changed shape), so the caller reports a failure instead of "no flooding". */
+function keepPlaced(points: FloodPoint[]): FloodPoint[] {
+  const ok = points.filter(placed);
+  if (points.length && !ok.length) throw new Error('flood feed: no readable rows');
+  return ok;
+}
+
 export function parseHsdc(json: unknown): FloodPoint[] {
-  const rows = (json as { Content?: unknown } | null)?.Content;
-  if (!Array.isArray(rows)) return [];
-  return rows
-    .map((r: Record<string, unknown>): FloodPoint => {
+  const body = json as { Code?: unknown; Content?: unknown } | null;
+  if (body?.Code !== 1 || !Array.isArray(body.Content)) throw new Error('flood feed: unexpected HSDC response');
+  return keepPlaced(
+    body.Content.map((r: Record<string, unknown>): FloodPoint => {
       const level = hsdcLevel(r?.Icon);
       return { id: `hn-${r?.TramId}`, name: String(r?.TenTram ?? ''), lat: num(r?.Lat), lon: num(r?.Lng), level, radiusM: STATION_RADIUS[level], source: 'hanoi' };
-    })
-    .filter(placed);
+    }),
+  );
 }
 
 export function parseTuoiTre(json: unknown): FloodPoint[] {
-  if (!Array.isArray(json)) return [];
-  return json
-    .map((r: Record<string, unknown>): FloodPoint => {
+  if (!Array.isArray(json)) throw new Error('flood feed: unexpected Tuổi Trẻ response');
+  return keepPlaced(
+    json.map((r: Record<string, unknown>): FloodPoint => {
       const radius = num(r?.radius_m);
       return { id: `hcm-${r?.zone_id}`, name: String(r?.name ?? ''), lat: num(r?.lat), lon: num(r?.lng), level: tuoiTreLevel(r?.level), radiusM: Number.isFinite(radius) ? radius : 0, source: 'hcm' };
-    })
-    .filter(placed);
+    }),
+  );
 }
 
 /** The city whose feed covers this point, from rough boxes around Hà Nội and TP.HCM. */

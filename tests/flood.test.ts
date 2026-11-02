@@ -42,7 +42,11 @@ describe('parseHsdc', () => {
       { TramId: '4', TenTram: 'D', Lat: '21.03', Lng: '105.85' },
     ];
     expect(parseHsdc({ Code: 1, Content: c }).map((p) => p.id)).toEqual(['hn-4']);
-    for (const junk of [null, {}, { Content: 'x' }, []]) expect(parseHsdc(junk)).toEqual([]);
+  });
+
+  it('throws on a response it cannot read, so the card never shows a false all-clear', () => {
+    for (const junk of [null, {}, { Content: 'x' }, [], { Code: 0, Content: null }, { Code: 1, Content: [{ TramId: '1' }] }]) expect(() => parseHsdc(junk)).toThrow();
+    expect(parseHsdc({ Code: 1, Content: [] })).toEqual([]);
   });
 });
 
@@ -52,6 +56,11 @@ describe('parseTuoiTre', () => {
     expect(ps).toHaveLength(11);
     expect(ps[0]).toMatchObject({ id: 'hcm-1', name: 'Thảo Điền - An Khánh', lat: 10.803, lon: 106.735, level: 0, radiusM: 900, source: 'hcm' });
     expect(ps.filter((p) => p.level === 1)).toHaveLength(5);
+  });
+
+  it('throws on a response it cannot read', () => {
+    for (const junk of [null, {}, { detail: 'Not Found' }, [{ zone_id: 1, name: 'A' }]]) expect(() => parseTuoiTre(junk)).toThrow();
+    expect(parseTuoiTre([])).toEqual([]);
   });
 });
 
