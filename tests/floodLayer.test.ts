@@ -9,23 +9,37 @@ const p = (o: Partial<FloodPoint>): FloodPoint => ({ id: 'a', name: 'A', lat: 21
 
 describe('FloodLayer', () => {
   it('draws flooded points inside the model and skips dry or outside ones', () => {
-    const l = new FloodLayer(proj, 400);
+    const l = new FloodLayer(proj, 400, 400);
     l.setPoints([p({}), p({ id: 'b', level: 0 }), p({ id: 'c', lat: 21.2 })]);
     expect(l.mesh.count).toBe(1);
     l.dispose();
   });
 
-  it('clamps a large zone to half the model', () => {
-    const l = new FloodLayer(proj, 400);
-    l.setPoints([p({ radiusM: 900, source: 'hcm', level: 1 })]);
-    const m = new THREE.Matrix4();
-    l.mesh.getMatrixAt(0, m);
-    expect(new THREE.Vector3().setFromMatrixScale(m).x).toBeCloseTo(400);
+  it('keeps a large off-centre zone on the slab: clipped at the model edges, not shrunk', () => {
+    const l = new FloodLayer(proj, 400, 300);
+    l.setPoints([p({ radiusM: 900, source: 'hcm', level: 1, lat: 21.031 })]);
+    expect(l.mesh.count).toBe(1);
+    const planes = (l.mesh.material as THREE.Material).clippingPlanes ?? [];
+    expect(planes).toHaveLength(4);
+    const kept = (x: number, z: number) => planes.every((pl) => pl.distanceToPoint(new THREE.Vector3(x, 0.3, z)) >= 0);
+    expect(kept(0, 0)).toBe(true);
+    expect(kept(399, -299)).toBe(true);
+    expect(kept(401, 0)).toBe(false);
+    expect(kept(0, -301)).toBe(false);
+    l.dispose();
+  });
+
+  it('uses each axis of a non-square model: a point past the narrow edge is not drawn', () => {
+    const l = new FloodLayer(proj, 400, 200);
+    const [, z] = proj.project([105.85, 21.0275]); // about 280 m south of the centre
+    expect(z).toBeGreaterThan(200);
+    l.setPoints([p({ lat: 21.0275 })]);
+    expect(l.mesh.count).toBe(0);
     l.dispose();
   });
 
   it('caps the disc count at 64', () => {
-    const l = new FloodLayer(proj, 400);
+    const l = new FloodLayer(proj, 400, 400);
     l.setPoints(Array.from({ length: 80 }, (_, i) => p({ id: 'p' + i })));
     expect(l.mesh.count).toBe(64);
     l.dispose();

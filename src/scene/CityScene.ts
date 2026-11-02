@@ -175,6 +175,8 @@ export class CityScene {
     this.renderer.shadowMap.needsUpdate = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    // Flood discs clip themselves to the model (scene/flood.ts); no other material sets clipping planes.
+    this.renderer.localClippingEnabled = true;
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
 
@@ -557,7 +559,7 @@ export class CityScene {
       // Off again, or another model built, while the module loaded.
       if (!this.floodPoints || this.proj !== proj) return;
       if (!this.flood) {
-        this.flood = new FloodLayer(proj, Math.max(this.size.width, this.size.depth) / 2, { labelLayer: this.labelLayer });
+        this.flood = new FloodLayer(proj, this.size.width / 2, this.size.depth / 2, { labelLayer: this.labelLayer });
         this.scene.add(this.flood.group);
       }
     }

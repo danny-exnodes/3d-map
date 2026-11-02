@@ -6,7 +6,8 @@ const MAX_DISCS = 64;
 
 /**
  * Flood points on the ground: one instanced mesh of flat translucent discs, each with a name label.
- * Names come from a remote feed, so they only ever reach the DOM through `textContent`.
+ * Discs are clipped at the model's edges (a TP.HCM zone can be 900 m wide), which needs the renderer's
+ * `localClippingEnabled`. Names come from a remote feed, so they only ever reach the DOM through `textContent`.
  */
 export class FloodLayer {
   readonly group = new THREE.Group();
@@ -18,11 +19,18 @@ export class FloodLayer {
 
   constructor(
     private readonly proj: LocalProjection,
-    private readonly half: number,
+    private readonly halfW: number,
+    private readonly halfD: number,
     opts: { labelLayer?: HTMLElement } = {},
   ) {
     const geo = new THREE.CircleGeometry(1, 32).rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false });
+    const clippingPlanes = [
+      new THREE.Plane(new THREE.Vector3(-1, 0, 0), halfW),
+      new THREE.Plane(new THREE.Vector3(1, 0, 0), halfW),
+      new THREE.Plane(new THREE.Vector3(0, 0, -1), halfD),
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), halfD),
+    ];
+    const mat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false, clippingPlanes });
     this.mesh = new THREE.InstancedMesh(geo, mat, MAX_DISCS);
     this.mesh.name = 'flood';
     this.mesh.count = 0;
@@ -40,9 +48,9 @@ export class FloodLayer {
       if (this.drawn.length >= MAX_DISCS) break;
       if (p.level < 1) continue;
       const [x, z] = this.proj.project([p.lon, p.lat]);
-      if (Math.abs(x) > this.half || Math.abs(z) > this.half) continue;
+      if (Math.abs(x) > this.halfW || Math.abs(z) > this.halfD) continue;
       const pos = new THREE.Vector3(x, 0.3, z);
-      const r = Math.min(Math.max(p.radiusM, 1), this.half);
+      const r = Math.max(p.radiusM, 1);
       this.mesh.setMatrixAt(this.drawn.length, m.makeScale(r, 1, r).setPosition(pos));
       this.drawn.push({ p, pos });
     }

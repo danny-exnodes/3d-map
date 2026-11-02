@@ -35,7 +35,7 @@ Nothing about flooding exists yet: no code, no issue, no PR, not on the roadmap 
 
 ### Display
 - Toolbar toggle `#btn-flood` 💧 "Điểm ngập", **off by default**, persisted in `localStorage` `tinymap:flood`, forced with `?flood=1|0`. Hidden and off in `?bench`. (call)
-- Points within the model: a translucent blue disc on the ground (one instanced mesh, ≤ 1 draw call), radius by level for stations (1 → 40 m, 2 → 70 m, 3 → 100 m), the zone's `radius_m` for forecasts, clamped to half the model size. A DOM label `💧 <name>` like the POI labels. (call)
+- Points within the model: a translucent blue disc on the ground (one instanced mesh, ≤ 1 draw call), radius by level for stations (1 → 40 m, 2 → 70 m, 3 → 100 m), the zone's `radius_m` for forecasts, clipped at the model's edges (implemented as clipping planes after review; the first version clamped the radius to half the model and still spilled off-centre). A DOM label `💧 <name>` like the POI labels. (call)
 - Card line `#i-flood` under `#i-flights`:
   - `💧 <n> điểm đang ngập trong 5 km · <source> · cập nhật HH:MM` (n counts level ≥ 1 within 5 km of the centre), or `💧 Không có điểm ngập nào trong 5 km · …`;
   - TP.HCM wording says "nguy cơ ngập" (forecast), Hà Nội says "đang ngập" (observed);
