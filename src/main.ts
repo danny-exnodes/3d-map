@@ -1135,7 +1135,8 @@ function storedFlood(): boolean {
     return false;
   }
 }
-let floodOn = !BENCH && storedFlood();
+// As for planes (#41): a relay handed over in a link never starts polling by itself.
+let floodOn = !BENCH && !flightsFromLink && storedFlood();
 let floodTimer = 0;
 let floodAbort: AbortController | null = null;
 let floodLine = '';
@@ -1186,7 +1187,7 @@ function syncFlood() {
 async function pollFlood() {
   const c = city;
   const relay = flightsSource;
-  if (!c?.data || !relay) return;
+  if (!floodOn || !c?.data || !relay) return;
   const b = c.data.bbox;
   const lat = (b.south + b.north) / 2;
   const lon = (b.west + b.east) / 2;
@@ -1201,6 +1202,8 @@ async function pollFlood() {
     const points = await fetchFlood(relay, region, fc.signal);
     if (ac.signal.aborted) return;
     await c.setFlood(points);
+    // Turned off, or replaced by a newer poll, while the layer's module loaded.
+    if (ac.signal.aborted || floodAbort !== ac) return;
     floodLine = floodSummary(points, region, lat, lon, new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false }));
   } catch (e) {
     if (ac.signal.aborted) return;
