@@ -29,6 +29,8 @@ import { Boats, boatRoutes } from './boats';
 import { Traffic } from './traffic';
 import type { Aircraft } from './aircraft';
 import type { Flight } from '../data/flights';
+import type { FloodLayer } from './flood';
+import type { FloodPoint } from '../data/flood';
 
 export interface BuildStats {
   buildings: number;
@@ -87,6 +89,9 @@ export class CityScene {
   /** Latest planes, kept so a lazily loaded or rebuilt `Aircraft` starts with them. */
   private flights: Flight[] = [];
   private wantPlanes = false;
+  private flood: FloodLayer | null = null;
+  /** Latest flood points; null while the layer is off. */
+  private floodPoints: FloodPoint[] | null = null;
   private boatTime = 0;
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
@@ -170,6 +175,8 @@ export class CityScene {
     this.renderer.shadowMap.needsUpdate = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    // Flood discs clip themselves to the model (scene/flood.ts); no other material sets clipping planes.
+    this.renderer.localClippingEnabled = true;
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
 
@@ -411,6 +418,7 @@ export class CityScene {
     for (const l of this.labels) l.el.remove();
     this.labels = [];
     this.dropAircraft();
+    this.dropFlood();
     if (this.clouds) {
       this.scene.remove(this.clouds.mesh);
       this.clouds.dispose();
@@ -538,6 +546,36 @@ export class CityScene {
   /** How many planes are being drawn from the last poll. */
   get planeCount(): number {
     return this.aircraft?.count() ?? 0;
+  }
+
+  /** Flood discs for these points, or off with `null`. The module loads on first use. */
+  async setFlood(points: FloodPoint[] | null): Promise<void> {
+    this.floodPoints = points;
+    if (!points) return this.dropFlood();
+    if (!this.proj) return;
+    if (!this.flood) {
+      const proj = this.proj;
+      const { FloodLayer } = await import('./flood');
+      // Off again, or another model built, while the module loaded.
+      if (!this.floodPoints || this.proj !== proj) return;
+      if (!this.flood) {
+        this.flood = new FloodLayer(proj, this.size.width / 2, this.size.depth / 2, { labelLayer: this.labelLayer });
+        this.scene.add(this.flood.group);
+      }
+    }
+    if (this.floodPoints) this.flood.setPoints(this.floodPoints);
+  }
+
+  /** How many flood discs are drawn. */
+  get floodCount(): number {
+    return this.flood?.count ?? 0;
+  }
+
+  private dropFlood() {
+    if (!this.flood) return;
+    this.scene.remove(this.flood.group);
+    this.flood.dispose();
+    this.flood = null;
   }
 
   private dropAircraft() {
@@ -821,6 +859,7 @@ export class CityScene {
     } catch (e) {
       console.error(e);
     }
+    this.flood?.updateLabels(this.camera);
     this.dome.mesh.position.copy(this.camera.position);
     this.pin.update(dt, this.camera);
     const now = performance.now();

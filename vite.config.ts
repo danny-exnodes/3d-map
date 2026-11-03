@@ -53,8 +53,13 @@ function precacheManifest(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [heightsApi(), precacheManifest()],
-  // Dev relay for live flights; the published site uses the Cloudflare Worker in proxy/.
-  server: { proxy: { '/flights-api': { target: 'https://opendata.adsb.fi/api', changeOrigin: true, rewrite: (p) => p.replace(/^\/flights-api/, ''), bypass: (req) => (/^\/flights-api\/v2\/lat\/-?[\d.]+\/lon\/-?[\d.]+\/dist\/\d{1,3}(\?|$)/.test(req.url ?? '') ? undefined : false) } } },
+  // Dev relay for live flights and flood points; the published site uses the Cloudflare Worker in proxy/.
+  server: {
+    proxy: {
+      // Flood feeds first: Vite matches proxy keys in order, and '/flights-api' only lets the readsb query through.
+      '/flights-api/flood/hanoi': { target: 'https://thoatnuochanoi.vn', changeOrigin: true, rewrite: () => '/ungngap/api/flood/getflood' },
+      '/flights-api/flood/hcm': { target: 'https://bandotrieucuong.tuoitrethanhphobac.vn', changeOrigin: true, rewrite: () => '/api/forecasts' },
+      '/flights-api': { target: 'https://api.adsb.lol', changeOrigin: true, rewrite: (p) => p.replace(/^\/flights-api/, ''), bypass: (req) => (/^\/flights-api\/v2\/lat\/-?[\d.]+\/lon\/-?[\d.]+\/dist\/\d{1,3}(\?|$)/.test(req.url ?? '') ? undefined : false) } } },
   build: {
     chunkSizeWarningLimit: 2000,
     // Google Photorealistic 3D at the root, the OpenStreetMap builder at /openstreetmap/ (v0.0.5).

@@ -17,6 +17,7 @@ import { kindFromLive, parseWeatherKind, WEATHER_ICON, WEATHER_KINDS, WEATHER_LA
 import { fetchWeather, type Weather } from './services/weather';
 import { cityWorker } from './worker/client';
 import { DEFAULT_FLIGHTS_RELAY, fetchFlights, type Flight, flightsRelay, STALE_MS } from './data/flights';
+import { fetchFlood, floodRegion, floodSummary } from './data/flood';
 import { APP_ROOT, DEFAULT_AREA_HALF_M, DEFAULT_LOCATION, EXAMPLE_BBOX } from './config';
 import { getBrowserPosition, permissionDenied, resolveStartLocation } from './services/location';
 import { bboxAround, MapView } from './ui/MapView';
@@ -273,6 +274,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     city.onPickPlane = showPlaneInfo;
     // A new area: the old planes and their poll belong to the previous one.
     resetFlights();
+    resetFlood();
     liveWeather = null;
     const bench = /[?&]bench\b/.test(location.search) ? startBench(city) : null;
     if (bench) {
@@ -314,6 +316,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     busy = false;
     $('btn-build').textContent = 'Dựng 3D';
     syncFlights();
+    syncFlood();
     onBBox(mapView.bbox);
     // The style was changed while building (or loading, aborted or not).
     applyStyleIfShown();
@@ -940,6 +943,7 @@ async function rebuildInStyle() {
   for (const b of buttons) b.disabled = true;
   closeBuildingInfo();
   stopFlights();
+  stopFlood();
   const view = c.saveView();
   let ok = false;
   try {
@@ -961,6 +965,8 @@ async function rebuildInStyle() {
     for (const b of buttons) b.disabled = false;
     showFlightsLine();
     syncFlights();
+    showFloodLine();
+    syncFlood();
     onBBox(mapView.bbox);
   }
   // Picked again while building.
@@ -974,10 +980,10 @@ showStyle();
 // ---------- Live planes ----------
 
 const FLIGHTS_KEY = 'tinymap:flights';
-/** adsb.fi radius around the area centre (nm) and the poll period. */
+/** adsb.lol radius around the area centre (nm) and the poll period. */
 const FLIGHTS_NM = 40;
 const FLIGHTS_POLL_MS = 15_000;
-const FLIGHTS_SOURCE = 'adsb.fi';
+const FLIGHTS_SOURCE = 'adsb.lol';
 const flightsSource = (() => {
   try {
     return flightsRelay(location.search, localStorage, import.meta.env.DEV);
@@ -993,7 +999,7 @@ function storedFlights(): boolean | null {
     return null;
   }
 }
-/** The default relay and the dev proxy are adsb.fi; a relay chosen with ?flights= or from storage shows its own host. */
+/** The default relay and the dev proxy are adsb.lol; a relay chosen with ?flights= or from storage shows its own host. */
 const flightsLabel = (() => {
   if (!flightsSource || flightsSource === DEFAULT_FLIGHTS_RELAY || flightsSource === '/flights-api') return FLIGHTS_SOURCE;
   try {
@@ -1109,9 +1115,121 @@ const viewKey = () => `${$('city-view').hidden}|${document.visibilityState}`;
 function onViewChange() {
   if (!city?.data || busy || viewKey() === flightsViewKey) return;
   syncFlights();
+  syncFlood();
 }
 document.addEventListener('visibilitychange', onViewChange);
 showFlightsLine();
+
+// ---------- Flood points ----------
+
+const FLOOD_KEY = 'tinymap:flood';
+const FLOOD_POLL_MS = 300_000;
+const FLOOD_TIMEOUT_MS = 15_000;
+/** Off unless turned on: `?flood=1|0` first, then the stored choice. */
+function storedFlood(): boolean {
+  const q = new URLSearchParams(location.search).get('flood');
+  if (q === '1' || q === '0') return q === '1';
+  try {
+    return localStorage.getItem(FLOOD_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+// As for planes (#41): a relay handed over in a link never starts polling by itself.
+let floodOn = !BENCH && !flightsFromLink && storedFlood();
+let floodTimer = 0;
+let floodAbort: AbortController | null = null;
+let floodLine = '';
+
+function showFloodLine() {
+  const el = $('i-flood');
+  const btn = $<HTMLButtonElement>('btn-flood');
+  btn.hidden = BENCH;
+  btn.disabled = !flightsSource || busy;
+  btn.classList.toggle('on', floodOn);
+  btn.setAttribute('aria-pressed', String(floodOn));
+  const text = BENCH || !floodOn ? '' : !flightsSource ? '💧 Chưa cấu hình nguồn dữ liệu ngập' : floodLine;
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+function stopFlood() {
+  clearTimeout(floodTimer);
+  floodAbort?.abort();
+  floodAbort = null;
+}
+
+/** A new area: the old points may belong to another city. */
+function resetFlood() {
+  stopFlood();
+  floodLine = '';
+  void city?.setFlood(null);
+}
+
+/** Starts or stops flood polling to match the toggle, the area's city, the visible view and the tab. */
+function syncFlood() {
+  const c = city;
+  if (!c?.data || busy) return;
+  stopFlood();
+  const b = c.data.bbox;
+  const region = floodRegion((b.south + b.north) / 2, (b.west + b.east) / 2);
+  if (!floodOn || !flightsSource || BENCH || !region) {
+    void c.setFlood(null);
+    if (floodOn && !region) floodLine = '💧 Chưa có dữ liệu ngập cho khu vực này';
+    showFloodLine();
+    return;
+  }
+  showFloodLine();
+  if ($('city-view').hidden || document.visibilityState !== 'visible') return;
+  void pollFlood();
+}
+
+async function pollFlood() {
+  const c = city;
+  const relay = flightsSource;
+  if (!floodOn || !c?.data || !relay) return;
+  const b = c.data.bbox;
+  const lat = (b.south + b.north) / 2;
+  const lon = (b.west + b.east) / 2;
+  const region = floodRegion(lat, lon);
+  if (!region) return;
+  // `ac` is stopFlood's switch; `fc` is what fetch sees, also aborted by the timeout.
+  const ac = (floodAbort = new AbortController());
+  const fc = new AbortController();
+  ac.signal.addEventListener('abort', () => fc.abort());
+  const timer = setTimeout(() => fc.abort(), FLOOD_TIMEOUT_MS);
+  try {
+    const points = await fetchFlood(relay, region, fc.signal);
+    if (ac.signal.aborted) return;
+    await c.setFlood(points);
+    // Turned off, or replaced by a newer poll, while the layer's module loaded.
+    if (ac.signal.aborted || floodAbort !== ac) return;
+    floodLine = floodSummary(points, region, lat, lon, new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false }));
+  } catch (e) {
+    if (ac.signal.aborted) return;
+    console.warn('flood poll failed', e);
+    // The discs already shown stay.
+    floodLine = '💧 Không lấy được dữ liệu ngập';
+  } finally {
+    clearTimeout(timer);
+  }
+  showFloodLine();
+  floodTimer = window.setTimeout(() => void pollFlood(), FLOOD_POLL_MS);
+}
+
+$('btn-flood').addEventListener('click', () => {
+  if (!flightsSource || busy) return;
+  floodOn = !floodOn;
+  try {
+    localStorage.setItem(FLOOD_KEY, floodOn ? '1' : '0');
+  } catch {
+    /* storage blocked */
+  }
+  floodLine = '';
+  showFloodLine();
+  syncFlood();
+});
+showFloodLine();
 
 /** hex of the plane whose card is open. */
 let openPlane: string | null = null;

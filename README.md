@@ -45,7 +45,7 @@
 - **Bầu trời**: vòm trời gradient theo tâm trạng, quầng sáng mặt trời, sao ban đêm và mây low-poly trôi quanh mô hình (số mây theo độ phủ mây). Mây ở gần camera tự mờ đi.
 - **Thời tiết**: nút trên thanh 3D chọn **Tự động** (thời tiết thực từ Open‑Meteo: nhiệt độ, mây, mưa), **Nắng**, **Nhiều mây**, **Mưa**, **Dông** (mưa nặng, chớp), **Sương mù**; hoặc `?weather=auto|clear|cloudy|rain|storm|fog`. Lựa chọn được lưu.
 - **Tàu thuyền**: thuyền nhỏ, thuyền đạp thiên nga và sà lan chạy trên sông, kênh, hồ, không ra khỏi mặt nước.
-- **Máy bay thật**: nút ✈ hiện máy bay đang bay quanh khu vực (dữ liệu adsb.fi, 15 giây một lần), có nhãn callsign, bấm để xem loại, độ cao, tốc độ. Vị trí trên màn hình **bị nén** cho vừa mô hình (không phải vị trí thật). Cần một relay CORS: `npm run dev` có sẵn, còn trang đã đăng cần triển khai Cloudflare Worker ([`proxy/README.md`](proxy/README.md)) rồi đặt `DEFAULT_FLIGHTS_RELAY` trong `src/data/flights.ts`, hoặc dùng `?flights=<url>`. Không có relay thì không có máy bay.
+- **Máy bay thật**: nút ✈ hiện máy bay đang bay quanh khu vực (dữ liệu adsb.lol, giấy phép ODbL, 15 giây một lần), có nhãn callsign, bấm để xem loại, độ cao, tốc độ. Vị trí trên màn hình **bị nén** cho vừa mô hình (không phải vị trí thật). Đi qua relay CORS là Cloudflare Worker `tinymap-flights.ian-exnodes.workers.dev` ([`proxy/README.md`](proxy/README.md)); đổi relay bằng `?flights=<url>`. Không có relay thì không có máy bay.
 
 **Hiệu năng**
 - Dữ liệu tải và mô hình dựng trong Web Worker, main thread không bị đơ.
@@ -53,6 +53,10 @@
 - Tiến độ hiện theo số byte tải thật. Có nút huỷ.
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
+
+**Mới trong v0.0.9**
+- Điểm ngập 💧 (bản OSM, mặc định tắt, `?flood=1`): Hà Nội hiện trạm đo ngập thật của Thoát nước Hà Nội, TP.HCM hiện khu nguy cơ ngập (dự báo) của Bản đồ triều cường (Tuổi Trẻ). Đĩa xanh và nhãn trên mặt đất, một dòng trong thẻ thông tin, cập nhật 5 phút một lần. Cần relay; chỉ bật trên trang đã đăng khi được phép dùng dữ liệu.
+- Máy bay thật chạy trên trang đã đăng: relay Cloudflare `tinymap-flights.ian-exnodes.workers.dev`, nguồn adsb.lol.
 
 **Mới trong v0.0.8**
 - Nút phong cách trở lại: Đồ chơi, Khối, Siêu thực (`?style=`).
@@ -156,6 +160,9 @@ Yêu cầu Node 22.18+ (CLI chiều cao chạy thẳng file `.ts`) và trình du
 | [Google Routes API](https://developers.google.com/maps/documentation/routes) | giao thông thực (tuỳ chọn) | REST, key của người dùng | Google Maps Platform ToS |
 | [NASA GIBS](https://earthdata.nasa.gov/gibs) Blue Marble | ảnh trái đất (Space view) | WMTS (CORS) | public domain |
 | [Open‑Meteo](https://open-meteo.com/) | thời tiết | trình duyệt | CC BY 4.0 |
+| [adsb.lol](https://www.adsb.lol/) | máy bay thật | qua relay Cloudflare (`proxy/`) | ODbL 1.0 |
+| [Thoát nước Hà Nội](https://thoatnuochanoi.vn/ungngap/) | trạm đo ngập Hà Nội | qua relay (`/flood/hanoi`), không CORS | không công bố; chỉ dùng khi được phép |
+| [Bản đồ triều cường (Tuổi Trẻ)](https://bandotrieucuong.tuoitrethanhphobac.vn/) | khu nguy cơ ngập TP.HCM (dự báo) | qua relay (`/flood/hcm`), không CORS | không công bố; chỉ dùng khi được phép |
 | [OpenFreeMap](https://openfreemap.org/) lớp `landuse`/`landcover`/`park` | thửa tham khảo (không phải thửa địa chính) | vector tiles z14 (CORS) | ODbL |
 | [Chợ Tốt Nhà](https://www.nhatot.com/) | tin rao bán đất (giá rao, không phải giá giao dịch) | snapshot hằng ngày do CI tạo (`tools/listings.ts`), hoặc proxy của người dùng; bỏ dữ liệu cá nhân người bán | dữ liệu của Chợ Tốt; liên kết về tin gốc |
 | [Anthropic Claude API](https://platform.claude.com/) | trợ lý tư vấn đầu tư (tuỳ chọn) | gọi thẳng từ trình duyệt, key của người dùng | Anthropic ToS |
@@ -214,7 +221,9 @@ src/
   scene/weather.ts        # sáu kiểu thời tiết, chớp
   scene/boats.ts          # tàu thuyền trên nước
   scene/aircraft.ts       # máy bay thật (nén vị trí, nhãn, bấm chọn)
-  data/flights.ts         # adsb.fi qua relay
+  scene/flood.ts          # đĩa xanh và nhãn điểm ngập
+  data/flights.ts         # adsb.lol qua relay
+  data/flood.ts           # điểm ngập Hà Nội (Thoát nước HN) và TP.HCM (Tuổi Trẻ) qua relay
   scene/prototypes.ts     # nhà mẫu dùng chung (instancing)
   scene/trafficModel.ts   # mô hình lưu lượng, tỉ lệ phương tiện
   scene/nightLights.ts    # tỉ lệ cửa sổ sáng, vũng đèn đường
@@ -233,6 +242,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.9](docs/releases/v0.0.9.md) (2026-11-02): điểm ngập 💧 (Hà Nội đo thật, TP.HCM dự báo), máy bay thật trên trang đã đăng qua relay Cloudflare (adsb.lol).
 - [v0.0.8](docs/releases/v0.0.8.md) (2026-11-01): nút phong cách (Đồ chơi / Khối / Siêu thực), bầu trời và mây, chọn thời tiết, tàu thuyền, máy bay thật qua relay.
 - [v0.0.7](docs/releases/v0.0.7.md) (2026-10-31): thửa đất trong vùng chọn (loại đất, kích thước), giá rao bán Chợ Tốt quanh thửa, định giá so sánh, hồ sơ JSON và trợ lý AI.
 - [v0.0.6](docs/releases/v0.0.6.md) (2026-10-27): phong cách đồ chơi duy nhất (nhà bo tròn, pastel), bốn tâm trạng và thẻ chọn trước khi dựng; bỏ Có màu / Đơn sắc / Siêu thực.
