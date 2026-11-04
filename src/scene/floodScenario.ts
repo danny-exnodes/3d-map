@@ -54,7 +54,13 @@ export function floodPace(depth: number): number {
   return 1 - 0.85 * t * t * (3 - 2 * t);
 }
 
-/** Muddy flood water: brown, see-through near the ground, darker at night; small moving ripples. */
+/**
+ * Flood water colour: a murky blue-grey. Brown read as bare earth over the light Toy ground in daylight,
+ * so the water vanished; blue-grey stays water-like in all three styles.
+ */
+const WATER_COLOR = '#4a7180';
+
+/** Murky flood water: blue-grey, see-through near the ground, darker at night; small moving ripples. */
 export class FloodWater {
   readonly mesh: THREE.Mesh;
   private target = 0;
@@ -67,11 +73,11 @@ export class FloodWater {
     // A box whose bottom sits on the ground slab: its sides show the water column at the model's edge.
     const g = new THREE.BoxGeometry(width, 1, depth).translate(0, 0.5, 0);
     this.material = new THREE.MeshStandardMaterial({
-      color: '#6b5634',
+      color: WATER_COLOR,
       roughness: 0.22,
       metalness: 0,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.78,
       depthWrite: false,
     });
     const time = this.time, sky = this.sky;
@@ -136,9 +142,9 @@ export class FloodWater {
     this.sky.value.copy(c);
   }
 
-  /** Night darkens the water so it does not glow brown under the moon. */
+  /** Night darkens the water so it does not glow under the moon. */
   setNight(night: number) {
-    this.material.color.set('#6b5634').multiplyScalar(1 - 0.55 * night);
+    this.material.color.set(WATER_COLOR).multiplyScalar(1 - 0.55 * night);
   }
 
   /** Returns true while the level is still moving. */

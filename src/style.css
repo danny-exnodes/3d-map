@@ -66,10 +66,10 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 #water-presets { display: flex; flex-direction: column; gap: 2px; }
 #water-presets button { justify-content: space-between; }
 .water-slider { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 4px; }
-.water-slider input { width: 100%; accent-color: #b08a55; }
+.water-slider input { width: 100%; accent-color: #5f8fa3; }
 .water-slider b { min-width: 42px; text-align: right; }
 .water-note { padding: 0 4px 2px; line-height: 1.35; }
-.water-badge { color: #e7c48f; }
+.water-badge { color: #9cc7d8; }
 
 /* Map view */
 .search { position: absolute; top: 12px; left: 12px; width: min(380px, calc(100% - 24px)); display: flex; align-items: center; gap: 8px; padding: 6px 10px; z-index: 2; }
