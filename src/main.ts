@@ -1,7 +1,8 @@
 import './style.css';
 import { generateDemoCity } from './data/demo';
 import { cacheClearUnpinned, cacheUsage } from './data/cache';
-import { type CityId, deletePackage, downloadPackage, listPackages, loadWards, packageSize, registerServiceWorker, searchWards, type Ward, wardAreaKm2 } from './data/offline';
+import { CITIES, type CityId, deletePackage, downloadPackage, listPackages, loadWards, packageSize, registerServiceWorker, searchWards, type Ward, type WardList, wardAreaKm2 } from './data/offline';
+import { findWards, focusSlug, wardAnchor } from './data/wardFocus';
 import { loadCity } from './data/loader';
 import { removeOverlaps } from './data/overlap';
 import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressStep } from './data/types';
@@ -337,6 +338,7 @@ $('btn-cache').addEventListener('click', async () => {
 const BASE_URL = APP_ROOT;
 let offCity: CityId = 'hcm';
 let offWard: Ward | null = null;
+let offWardCity: CityId = 'hcm';
 let offAbort: AbortController | null = null;
 const offResults = $<HTMLUListElement>('off-results');
 const offSearch = $<HTMLInputElement>('off-search');
@@ -363,8 +365,9 @@ async function renderWardResults() {
   }
 }
 
-function selectWard(w: Ward) {
+function selectWard(w: Ward, city: CityId = offCity) {
   offWard = w;
+  offWardCity = city;
   mapView.setWard(w.polygon);
   mapView.fitBBox(w.bbox);
   $('off-selected').hidden = false;
@@ -387,7 +390,7 @@ function renderSaved() {
     li.querySelector('small')!.textContent = `${fmt(p.bytes / 1048576, 1)} MB`;
     li.addEventListener('click', async () => {
       const w = (await loadWards(p.city, BASE_URL).catch(() => null))?.wards.find((x) => x.id === p.id);
-      if (w) selectWard(w);
+      if (w) selectWard(w, p.city);
       else mapView.fitBBox(p.bbox);
     });
     li.querySelector('button')!.addEventListener('click', async (e) => {
@@ -395,7 +398,7 @@ function renderSaved() {
       if (!confirm(`Xoá bản đồ offline của ${p.name}?`)) return;
       await deletePackage(p.id);
       renderSaved();
-      if (offWard?.id === p.id) selectWard(offWard);
+      if (offWard?.id === p.id) selectWard(offWard, offWardCity);
     });
     ul.appendChild(li);
   }
@@ -426,14 +429,72 @@ offSearch.addEventListener('input', () => {
   clearTimeout(offTimer);
   offTimer = window.setTimeout(renderWardResults, 120);
 });
+/** A buildable area: the whole ward when small enough, else 800 m around a point inside it. */
+function wardBuildArea(w: Ward): BBox {
+  if (bboxAreaKm2(w.bbox) <= MAX_KM2) return w.bbox;
+  const [lon, lat] = wardAnchor(w);
+  return bboxAround(lon, lat, DEFAULT_AREA_HALF_M);
+}
 $('off-pick').addEventListener('click', () => {
   if (!offWard) return;
-  const b = offWard.bbox;
-  // A buildable area: the whole ward when small enough, else 800 m around its centre.
-  const sel = bboxAreaKm2(b) <= MAX_KM2 ? b : bboxAround((b.west + b.east) / 2, (b.south + b.north) / 2, DEFAULT_AREA_HALF_M);
+  const sel = wardBuildArea(offWard);
   mapView.setBBox(sel);
   mapView.fitBBox(sel);
 });
+// Copy a ?focus= link that opens this ward directly.
+$('off-link').addEventListener('click', async () => {
+  const w = offWard;
+  if (!w) return;
+  const lists = await allWardLists();
+  const url = new URL(location.href);
+  url.hash = '';
+  url.searchParams.set('focus', focusSlug(w, offWardCity, lists));
+  const text = url.toString();
+  try {
+    await navigator.clipboard.writeText(text);
+    $('off-status').textContent = `Đã sao chép link: ${text}`;
+  } catch {
+    prompt('Sao chép link mở thẳng phường này:', text);
+  }
+});
+
+/** Both cities' ward lists (one may be missing offline). */
+async function allWardLists(): Promise<WardList[]> {
+  const lists = await Promise.all(CITIES.map((c) => loadWards(c.id, BASE_URL).catch(() => null)));
+  return lists.filter((l): l is WardList => !!l);
+}
+
+/**
+ * `?focus=<phường>` (e.g. `?focus=ben-cat`): outline the ward, pre-select a buildable area in it
+ * and show it on the map. Returns false when the value matches no ward.
+ */
+async function focusFromUrl(raw: string): Promise<boolean> {
+  const lists = await allWardLists();
+  const found = findWards(lists, raw);
+  if (!found.length) return false; // boot() falls back to the usual start location and says why
+  const { ward, city } = found[0];
+  const sel = wardBuildArea(ward);
+  const [lon, lat] = sel === ward.bbox ? [(sel.west + sel.east) / 2, (sel.south + sel.north) / 2] : wardAnchor(ward);
+  mapView.setWard(ward.polygon);
+  mapView.flyTo(lon, lat, ward.name, 15.5);
+  mapView.setBBox(sel);
+  // Frame the whole ward, but never zoom out past FOCUS_MIN_ZOOM: big xã then stay centred on the build area.
+  const showWard = () => {
+    const b = ward.bbox;
+    const cam = mapView.map.cameraForBounds([[b.west, b.south], [b.east, b.north]], { padding: 80 });
+    if (!cam || (cam.zoom ?? 0) < FOCUS_MIN_ZOOM) mapView.map.flyTo({ center: [lon, lat], zoom: FOCUS_MIN_ZOOM, essential: true });
+    else mapView.fitBBox(b);
+  };
+  mapView.whenLoaded(showWard);
+  const cityOf = (c: CityId) => CITIES.find((x) => x.id === c)?.name ?? '';
+  const others = found
+    .slice(1, 3)
+    .map((m) => `${m.ward.name}, ${cityOf(m.city)}: ?focus=${focusSlug(m.ward, m.city, lists)}`)
+    .join(' · ');
+  setLocationNotice(`Đang mở ${ward.name}, ${cityOf(city)} (từ link).` + (others ? ` Nơi khác cùng tên: ${others}` : ''));
+  return true;
+}
+const FOCUS_MIN_ZOOM = 13;
 $('off-download').addEventListener('click', async () => {
   const w = offWard;
   if (!w) return;
@@ -1387,15 +1448,19 @@ async function bootPreview() {
 async function boot() {
   if (PREVIEW) return bootPreview();
   const fromUrl = bboxFromHash();
+  const focus = new URLSearchParams(location.search).get('focus')?.trim();
   if (fromUrl) {
     mapView.setBBox(fromUrl);
     mapView.map.once('load', () => mapView.fitBBox(fromUrl));
+  } else if (focus && (await focusFromUrl(focus))) {
+    // Opened on the ward from ?focus= (a #bbox= in the same link wins, so shared areas stay exact).
   } else if (!/[?&]demo\b/.test(location.search)) {
     const loc = await resolveStartLocation(DEFAULT_LOCATION);
     if (mapView.bbox) return; // the user already picked something while we waited
     const label = loc.source === 'default' ? DEFAULT_LOCATION.label : 'Vị trí của bạn';
     goTo(loc.lat, loc.lon, label);
     if (loc.source === 'default') setLocationNotice(`Không lấy được vị trí — đang hiển thị ${DEFAULT_LOCATION.label}.`);
+    if (focus) setLocationNotice(`Không tìm thấy phường/xã “${focus}” trong link. ${locationNotice}`.trim());
   }
   if (/[?&]demo\b/.test(location.search)) build('demo');
 }

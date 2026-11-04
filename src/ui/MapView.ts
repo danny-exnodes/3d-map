@@ -21,6 +21,14 @@ export class MapView {
   private marker: Marker | null = null;
   bbox: BBox | null = null;
   private ward: GeoJSON.Feature | null = null;
+  private styleLoaded = false;
+  private onLoaded: (() => void)[] = [];
+
+  /** Runs `fn` once the map's 'load' has fired (now if it already has; `map.loaded()` turns false again while tiles load). */
+  whenLoaded(fn: () => void) {
+    if (this.styleLoaded) fn();
+    else this.onLoaded.push(fn);
+  }
   onChange?: (b: BBox | null) => void;
 
   constructor(
@@ -52,6 +60,8 @@ export class MapView {
       this.map.addLayer({ id: 'ward-line', type: 'line', source: 'ward', paint: { 'line-color': '#60a5fa', 'line-width': 2, 'line-dasharray': [2, 1] } }, 'sel-fill');
       this.addLandLayers();
       if (this.bbox) this.render();
+      this.styleLoaded = true;
+      for (const fn of this.onLoaded.splice(0)) fn();
     });
 
     const canvas = this.map.getCanvasContainer();
