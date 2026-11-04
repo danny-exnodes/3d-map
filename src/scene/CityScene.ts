@@ -27,7 +27,7 @@ import { bakeToyInstances } from './toyGeometry';
 import { tiltShiftStrength } from './tiltShift';
 import { Boats, boatRoutes } from './boats';
 import { Traffic } from './traffic';
-import { clampFlood, FloodLayer, floodPace } from './flood';
+import { clampFlood, FloodWater, floodPace } from './floodScenario';
 import type { Aircraft } from './aircraft';
 import type { Flight } from '../data/flights';
 
@@ -90,8 +90,8 @@ export class CityScene {
   private wantPlanes = false;
   private boatTime = 0;
   /** "Mưa · triều · ngập": flood water over the model, and the depth asked for (m). */
-  private flood: FloodLayer | null = null;
-  private floodDepth = 0;
+  private floodWater: FloodWater | null = null;
+  private floodWaterDepth = 0;
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
   private details: THREE.Object3D[] = [];
@@ -315,13 +315,13 @@ export class CityScene {
     this.scene.add(this.traffic.group);
     this.boats = new Boats(boatRoutes(data, proj), 4321, pastel);
     this.scene.add(this.boats.group);
-    this.flood = new FloodLayer(this.size.width, this.size.depth);
-    this.flood.setDepth(this.floodDepth, true);
-    this.flood.setSky(this.lastSky);
-    this.scene.add(this.flood.mesh);
+    this.floodWater = new FloodWater(this.size.width, this.size.depth);
+    this.floodWater.setDepth(this.floodWaterDepth, true);
+    this.floodWater.setSky(this.lastSky);
+    this.scene.add(this.floodWater.mesh);
     this.applyFloodLevel();
     // Both are see-through or shaped in their shaders: keep them out of the AO pre-pass.
-    this.gtao.skip = [this.boats.group, this.flood.mesh];
+    this.gtao.skip = [this.boats.group, this.floodWater.mesh];
 
     for (const p of data.pois) {
       const [x, z] = proj.project(p.pos);
@@ -418,10 +418,10 @@ export class CityScene {
       this.boats.dispose();
       this.boats = null;
     }
-    if (this.flood) {
-      this.scene.remove(this.flood.mesh);
-      this.flood.dispose();
-      this.flood = null;
+    if (this.floodWater) {
+      this.scene.remove(this.floodWater.mesh);
+      this.floodWater.dispose();
+      this.floodWater = null;
     }
     for (const l of this.labels) l.el.remove();
     this.labels = [];
@@ -477,7 +477,7 @@ export class CityScene {
     this.bloom.threshold = s.night > 0.5 ? 0.8 : 0.95;
     this.applyStreetGlow();
     if (this.buildingUniforms) this.buildingUniforms.uNight.value = s.night;
-    this.flood?.setNight(s.night);
+    this.floodWater?.setNight(s.night);
     if (this.lampBulbs) this.lampBulbs.visible = s.night > 0.35;
     if (this.lampPools) {
       this.lampPools.visible = s.night > 0.3;
@@ -490,7 +490,7 @@ export class CityScene {
 
   private applySky() {
     this.scene.background = this.lastSky;
-    this.flood?.setSky(this.lastSky);
+    this.floodWater?.setSky(this.lastSky);
     (this.scene.fog as THREE.Fog).color.copy(this.lastSky);
     this.cloudLight.copy(this.lastSky).lerp(this.white, 0.55);
     this.clouds?.setLight(isFlashing(this.lightning) ? this.white : this.cloudLight);
@@ -580,14 +580,14 @@ export class CityScene {
   }
 
   /** Flood water depth in metres (0 = dry); the water rises or drains to it over a few seconds. */
-  setFlood(depth: number) {
-    this.floodDepth = clampFlood(depth);
-    this.flood?.setDepth(this.floodDepth);
+  setFloodWater(depth: number) {
+    this.floodWaterDepth = clampFlood(depth);
+    this.floodWater?.setDepth(this.floodWaterDepth);
   }
 
   /** Boats float on the flood, traffic on ground-level streets slows down with it. */
   private applyFloodLevel() {
-    const level = this.flood?.level ?? 0;
+    const level = this.floodWater?.level ?? 0;
     if (this.boats) this.boats.group.position.y = level;
     this.traffic?.setFloodPace(floodPace(level));
   }
@@ -845,7 +845,7 @@ export class CityScene {
     this.controls.update();
     this.traffic?.update(dt);
     if (this.boats) this.boats.update(dt, (this.boatTime += dt));
-    if (this.flood?.update(dt, this.reduceMotion)) this.applyFloodLevel();
+    if (this.floodWater?.update(dt, this.reduceMotion)) this.applyFloodLevel();
     this.clouds?.update(dt, this.camera.position);
     try {
       this.aircraft?.update(Date.now(), this.camera);

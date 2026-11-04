@@ -55,7 +55,7 @@ export function floodPace(depth: number): number {
 }
 
 /** Muddy flood water: brown, see-through near the ground, darker at night; small moving ripples. */
-export class FloodLayer {
+export class FloodWater {
   readonly mesh: THREE.Mesh;
   private target = 0;
   private depth = 0;

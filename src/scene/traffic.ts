@@ -163,7 +163,7 @@ export class Traffic {
   private boost: Float32Array;
   private peak: Float32Array;
   private night = 0;
-  /** Speed factor on flooded ground-level streets (flood.ts); flyovers keep their speed. */
+  /** Speed factor on flooded ground-level streets (floodScenario.ts); flyovers keep their speed. */
   private floodPace = 1;
   private walk = 0.5;
   private r = rng(99);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { clampFlood, FLOOD_MAX, FLOOD_PRESETS, FloodLayer, floodLabel, floodPace, parseFloodDepth } from '../src/scene/flood';
+import { clampFlood, FLOOD_MAX, FLOOD_PRESETS, FloodWater, floodLabel, floodPace, parseFloodDepth } from '../src/scene/floodScenario';
 
-describe('flood depth (?flood=)', () => {
+describe('flood depth (?ngap=)', () => {
   it('parses metres, centimetres and a Vietnamese decimal comma', () => {
     expect(parseFloodDepth('0.5')).toBe(0.5);
     expect(parseFloodDepth('0,3')).toBeCloseTo(0.3);
@@ -51,9 +51,9 @@ describe('floodPace', () => {
   });
 });
 
-describe('FloodLayer', () => {
+describe('FloodWater', () => {
   it('is hidden when dry and rises smoothly to the target', () => {
-    const f = new FloodLayer(800, 600);
+    const f = new FloodWater(800, 600);
     expect(f.mesh.visible).toBe(false);
     f.setDepth(0.5);
     expect(f.level).toBe(0);
@@ -70,7 +70,7 @@ describe('FloodLayer', () => {
   });
 
   it('jumps straight to the level with reduced motion', () => {
-    const f = new FloodLayer(100, 100);
+    const f = new FloodWater(100, 100);
     f.setDepth(1);
     f.update(1 / 60, true);
     expect(f.level).toBe(1);
