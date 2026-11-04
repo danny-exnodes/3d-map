@@ -13,6 +13,7 @@ import { compassLabel, sunState } from './scene/sun';
 import { TOY_ROOFS, TOY_WALLS } from './scene/toyPalette';
 import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { googleKey, setGoogleKey } from './data/googleTraffic';
+import { clampFlood, FLOOD_MAX, FLOOD_NOTE, FLOOD_PRESETS, FLOOD_STEP, floodLabel, parseFloodDepth } from './scene/flood';
 import { kindFromLive, parseWeatherKind, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL, type WeatherKind, weatherPreset } from './scene/weather';
 import { fetchWeather, type Weather } from './services/weather';
 import { cityWorker } from './worker/client';
@@ -282,6 +283,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     const stats = await city.build(data, progress, style);
     bench?.(stats.seconds, data);
     applyWeather();
+    applyFlood();
     applyTime();
     const km2 = bboxAreaKm2(b);
     $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
@@ -882,6 +884,87 @@ document.addEventListener('pointerdown', (e) => {
   if (!weatherMenu.hidden && !weatherMenu.contains(e.target as Node) && !weatherBtn.contains(e.target as Node)) closeWeatherMenu(false);
 });
 showWeatherCard();
+
+// ---------- Mưa · triều · ngập (flood illustration) ----------
+
+const FLOOD_KEY = 'tinymap:flood';
+function storedFlood(): number | null {
+  try {
+    return parseFloodDepth(localStorage.getItem(FLOOD_KEY));
+  } catch {
+    return null;
+  }
+}
+/** `?flood=` wins over the stored choice; the benchmark stays dry unless the link asks. */
+const urlFlood = parseFloodDepth(new URLSearchParams(location.search).get('flood'));
+let floodDepth = urlFlood ?? (BENCH ? 0 : storedFlood() ?? 0);
+
+const floodMenu = $('flood-menu');
+const floodBtn = $('btn-flood');
+const floodSlider = $<HTMLInputElement>('flood-depth');
+floodSlider.max = String(FLOOD_MAX);
+floodSlider.step = String(FLOOD_STEP);
+$('flood-note').textContent = FLOOD_NOTE;
+for (const p of FLOOD_PRESETS) {
+  const item = document.createElement('button');
+  item.setAttribute('role', 'menuitemradio');
+  item.dataset.depth = String(p.depth);
+  item.innerHTML = '<span></span><small class="muted"></small>';
+  item.firstElementChild!.textContent = p.label;
+  item.lastElementChild!.textContent = p.depth ? floodLabel(p.depth) : '';
+  item.addEventListener('click', () => setFloodDepth(p.depth));
+  $('flood-presets').append(item);
+}
+floodSlider.addEventListener('input', () => setFloodDepth(Number(floodSlider.value)));
+
+function setFloodDepth(d: number) {
+  floodDepth = clampFlood(d);
+  try {
+    localStorage.setItem(FLOOD_KEY, String(floodDepth));
+  } catch {
+    /* storage blocked */
+  }
+  applyFlood();
+}
+
+function applyFlood() {
+  const on = floodDepth > 0;
+  floodBtn.classList.toggle('on', on);
+  floodBtn.setAttribute('aria-pressed', String(on));
+  floodBtn.title = on ? `Ngập ${floodLabel(floodDepth)} (minh hoạ)` : 'Mưa · triều · ngập (minh hoạ)';
+  floodSlider.value = String(floodDepth);
+  $('flood-value').textContent = floodLabel(floodDepth);
+  floodMenu.querySelectorAll<HTMLButtonElement>('button[data-depth]').forEach((b) => b.setAttribute('aria-checked', String(Math.abs(Number(b.dataset.depth) - floodDepth) < 1e-6)));
+  $('i-flood').hidden = !on;
+  $('i-flood').textContent = on ? `🌊 Ngập ${floodLabel(floodDepth)} · minh hoạ, không phải mô phỏng thuỷ lực` : '';
+  city?.setFlood(floodDepth);
+}
+
+function openFloodMenu() {
+  closeWeatherMenu(false);
+  const r = floodBtn.getBoundingClientRect();
+  floodMenu.hidden = false;
+  const w = floodMenu.offsetWidth;
+  floodMenu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+  floodMenu.style.top = `${Math.min(r.bottom + 6, innerHeight - floodMenu.offsetHeight - 8)}px`;
+  floodBtn.setAttribute('aria-expanded', 'true');
+  floodMenu.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+}
+function closeFloodMenu(refocus = true) {
+  if (floodMenu.hidden) return;
+  floodMenu.hidden = true;
+  floodBtn.setAttribute('aria-expanded', 'false');
+  if (refocus) floodBtn.focus();
+}
+floodBtn.addEventListener('click', () => (floodMenu.hidden ? openFloodMenu() : closeFloodMenu()));
+weatherBtn.addEventListener('click', () => closeFloodMenu(false));
+document.addEventListener('keydown', (e) => {
+  if (!floodMenu.hidden && e.key === 'Escape') closeFloodMenu();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!floodMenu.hidden && !floodMenu.contains(e.target as Node) && !floodBtn.contains(e.target as Node)) closeFloodMenu(false);
+});
+applyFlood();
 
 // ---------- Style: Đồ chơi / Khối / Siêu thực ----------
 
