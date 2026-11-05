@@ -163,6 +163,8 @@ export class Traffic {
   private boost: Float32Array;
   private peak: Float32Array;
   private night = 0;
+  /** Speed factor on flooded ground-level streets (floodScenario.ts); flyovers keep their speed. */
+  private floodPace = 1;
   private walk = 0.5;
   private r = rng(99);
   private tmp = new THREE.Object3D();
@@ -410,6 +412,11 @@ export class Traffic {
     if (this.overlay) (this.overlay.material as THREE.MeshBasicMaterial).color.setScalar(0.9 + night * 0.25);
   }
 
+  /** Slows traffic on ground-level streets while they are flooded (1 = normal). */
+  setFloodPace(pace: number) {
+    this.floodPace = Math.min(1, Math.max(0, pace));
+  }
+
   setOverlayVisible(v: boolean) {
     if (this.overlay) this.overlay.visible = v;
   }
@@ -425,7 +432,8 @@ export class Traffic {
       const v = this.vehicles[i];
       if (!this.peak[v.path]) continue;
       let p = this.paths[v.path];
-      v.d += speedOf(v.kind, p.road.cls) * v.pace * this.speedRatio[v.path] * dt * v.dir;
+      const wade = p.road.layer > 0 ? 1 : this.floodPace;
+      v.d += speedOf(v.kind, p.road.cls) * v.pace * this.speedRatio[v.path] * wade * dt * v.dir;
       if (v.d > p.length || v.d < 0) {
         this.advance(v);
         p = this.paths[v.path];
@@ -482,7 +490,7 @@ export class Traffic {
     for (const w of this.people) {
       if (w.threshold >= active) continue;
       const p = this.paths[w.path];
-      w.d += w.speed * dt * w.dir;
+      w.d += w.speed * (p.road.layer > 0 ? 1 : this.floodPace) * dt * w.dir;
       if (w.d > p.length || w.d < 0) {
         w.dir = w.dir > 0 ? -1 : 1;
         w.d = Math.min(Math.max(w.d, 0), p.length);

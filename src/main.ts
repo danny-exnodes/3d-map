@@ -14,6 +14,7 @@ import { compassLabel, sunState } from './scene/sun';
 import { TOY_ROOFS, TOY_WALLS } from './scene/toyPalette';
 import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { googleKey, setGoogleKey } from './data/googleTraffic';
+import { clampFlood, FLOOD_MAX, FLOOD_NOTE, FLOOD_PRESETS, FLOOD_STEP, floodLabel, parseFloodDepth } from './scene/floodScenario';
 import { kindFromLive, parseWeatherKind, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL, type WeatherKind, weatherPreset } from './scene/weather';
 import { fetchWeather, type Weather } from './services/weather';
 import { cityWorker } from './worker/client';
@@ -283,6 +284,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     const stats = await city.build(data, progress, style);
     bench?.(stats.seconds, data);
     applyWeather();
+    applyWater();
     applyTime();
     const km2 = bboxAreaKm2(b);
     $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
@@ -943,6 +945,87 @@ document.addEventListener('pointerdown', (e) => {
   if (!weatherMenu.hidden && !weatherMenu.contains(e.target as Node) && !weatherBtn.contains(e.target as Node)) closeWeatherMenu(false);
 });
 showWeatherCard();
+
+// ---------- Mưa · triều · ngập (flood illustration) ----------
+
+const WATER_KEY = 'tinymap:water';
+function storedWater(): number | null {
+  try {
+    return parseFloodDepth(localStorage.getItem(WATER_KEY));
+  } catch {
+    return null;
+  }
+}
+/** `?ngap=` wins over the stored choice; the benchmark stays dry unless the link asks. */
+const urlWater = parseFloodDepth(new URLSearchParams(location.search).get('ngap'));
+let waterDepth = urlWater ?? (BENCH ? 0 : storedWater() ?? 0);
+
+const waterMenu = $('water-menu');
+const waterBtn = $('btn-water');
+const waterSlider = $<HTMLInputElement>('water-depth');
+waterSlider.max = String(FLOOD_MAX);
+waterSlider.step = String(FLOOD_STEP);
+$('water-note').textContent = FLOOD_NOTE;
+for (const p of FLOOD_PRESETS) {
+  const item = document.createElement('button');
+  item.setAttribute('role', 'menuitemradio');
+  item.dataset.depth = String(p.depth);
+  item.innerHTML = '<span></span><small class="muted"></small>';
+  item.firstElementChild!.textContent = p.label;
+  item.lastElementChild!.textContent = p.depth ? floodLabel(p.depth) : '';
+  item.addEventListener('click', () => setWaterDepth(p.depth));
+  $('water-presets').append(item);
+}
+waterSlider.addEventListener('input', () => setWaterDepth(Number(waterSlider.value)));
+
+function setWaterDepth(d: number) {
+  waterDepth = clampFlood(d);
+  try {
+    localStorage.setItem(WATER_KEY, String(waterDepth));
+  } catch {
+    /* storage blocked */
+  }
+  applyWater();
+}
+
+function applyWater() {
+  const on = waterDepth > 0;
+  waterBtn.classList.toggle('on', on);
+  waterBtn.setAttribute('aria-pressed', String(on));
+  waterBtn.title = on ? `Ngập ${floodLabel(waterDepth)} (minh hoạ)` : 'Mưa · triều · ngập (minh hoạ)';
+  waterSlider.value = String(waterDepth);
+  $('water-value').textContent = floodLabel(waterDepth);
+  waterMenu.querySelectorAll<HTMLButtonElement>('button[data-depth]').forEach((b) => b.setAttribute('aria-checked', String(Math.abs(Number(b.dataset.depth) - waterDepth) < 1e-6)));
+  $('i-water').hidden = !on;
+  $('i-water').textContent = on ? `🌊 Ngập ${floodLabel(waterDepth)} · minh hoạ, không phải mô phỏng thuỷ lực` : '';
+  city?.setFloodWater(waterDepth);
+}
+
+function openWaterMenu() {
+  closeWeatherMenu(false);
+  const r = waterBtn.getBoundingClientRect();
+  waterMenu.hidden = false;
+  const w = waterMenu.offsetWidth;
+  waterMenu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+  waterMenu.style.top = `${Math.min(r.bottom + 6, innerHeight - waterMenu.offsetHeight - 8)}px`;
+  waterBtn.setAttribute('aria-expanded', 'true');
+  waterMenu.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+}
+function closeWaterMenu(refocus = true) {
+  if (waterMenu.hidden) return;
+  waterMenu.hidden = true;
+  waterBtn.setAttribute('aria-expanded', 'false');
+  if (refocus) waterBtn.focus();
+}
+waterBtn.addEventListener('click', () => (waterMenu.hidden ? openWaterMenu() : closeWaterMenu()));
+weatherBtn.addEventListener('click', () => closeWaterMenu(false));
+document.addEventListener('keydown', (e) => {
+  if (!waterMenu.hidden && e.key === 'Escape') closeWaterMenu();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!waterMenu.hidden && !waterMenu.contains(e.target as Node) && !waterBtn.contains(e.target as Node)) closeWaterMenu(false);
+});
+applyWater();
 
 // ---------- Style: Đồ chơi / Khối / Siêu thực ----------
 
