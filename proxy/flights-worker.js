@@ -1,5 +1,5 @@
-// Cloudflare Worker: CORS relay for adsb.fi. Forwards one path pattern, answers only the app's origins, caches 10 s.
-const UPSTREAM = 'https://opendata.adsb.fi/api';
+// Cloudflare Worker: CORS relay for adsb.lol (adsb.fi blocks Cloudflare). Forwards one path pattern, answers only the app's origins, caches 10 s.
+const UPSTREAM = 'https://api.adsb.lol';
 const ORIGINS = ['https://danny-exnodes.github.io', 'http://localhost:5173'];
 const PATH = /^\/v2\/lat\/(-?\d{1,3}(?:\.\d{1,4})?)\/lon\/(-?\d{1,3}(?:\.\d{1,4})?)\/dist\/(\d{1,3})$/;
 

@@ -1,4 +1,4 @@
-/** Live aircraft from adsb.fi (readsb JSON) through a CORS relay; the free feeds send no CORS headers. */
+/** Live aircraft from adsb.lol (readsb JSON) through a CORS relay; the free feeds send no CORS headers. */
 
 export interface Flight {
   hex: string;
@@ -16,8 +16,8 @@ export interface Flight {
 /** A plane with no report for this long is gone. */
 export const STALE_MS = 60_000;
 
-/** URL of the deployed Cloudflare Worker (proxy/flights-worker.js); empty until the owner deploys it. */
-export const DEFAULT_FLIGHTS_RELAY = '';
+/** URL of the deployed Cloudflare Worker (proxy/flights-worker.js, see proxy/README.md). */
+export const DEFAULT_FLIGHTS_RELAY = 'https://tinymap-flights.ian-exnodes.workers.dev';
 
 const FT_M = 0.3048;
 const KT_MS = 1852 / 3600;

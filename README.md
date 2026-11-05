@@ -17,6 +17,13 @@
 **Chọn vùng**
 - Mở app sẽ tự lấy vị trí hiện tại. Không lấy được thì về mặc định Én Nam – 101 Châu Thị Hoá (TP.HCM). Nút 📍 để lấy lại vị trí.
 - Tìm địa điểm (Nominatim), kéo chuột vẽ hình chữ nhật, hoặc chọn nhanh 800 m quanh tâm bản đồ. Vùng được lưu vào URL (`#bbox=…`) để chia sẻ.
+- Mở thẳng một phường/xã bằng `?focus=<tên>`, ví dụ `/openstreetmap/?focus=ben-cat`: vẽ ranh phường, chọn sẵn vùng dựng (cả phường nếu ≤ 4 km², nếu không thì 800 m nằm trong phường). Không cần dấu, không phân biệt hoa thường. Các dạng được hỗ trợ:
+  - `ben-cat`: theo tên, bỏ "Phường"/"Xã";
+  - `phuong-ben-cat`: kèm loại, để chọn giữa phường và xã cùng tên;
+  - `hn:an-khanh`: giới hạn trong một thành phố (`hcm:` hoặc `hn:`);
+  - `thanh-an~2`: phường thứ 2 trùng tên (Xã Thanh An, Xã Thạnh An).
+
+  Link có cả `#bbox=` thì `#bbox=` thắng. Không tìm thấy phường thì app báo rồi mở như bình thường. Trong bảng 📥, nút "🔗 Link" sao chép link mở đúng phường đang chọn.
 
 **Dữ liệu** (xem [Nguồn dữ liệu](#nguồn-dữ-liệu))
 - Footprint nhà gộp từ **OpenStreetMap** và **Overture Maps** (Google/Microsoft ML buildings). Ở nhiều khu của VN, Overture có nhiều nhà hơn OSM hàng chục lần.
@@ -44,8 +51,9 @@
 - **Giao thông (mô phỏng)**: xe máy, ô tô, xe buýt chạy theo làn bên phải, mật độ đổi theo giờ cao điểm. Lớp 🚦 tô màu tốc độ. Có tàu chạy trên ray.
 - **Bầu trời**: vòm trời gradient theo tâm trạng, quầng sáng mặt trời, sao ban đêm và mây low-poly trôi quanh mô hình (số mây theo độ phủ mây). Mây ở gần camera tự mờ đi.
 - **Thời tiết**: nút trên thanh 3D chọn **Tự động** (thời tiết thực từ Open‑Meteo: nhiệt độ, mây, mưa), **Nắng**, **Nhiều mây**, **Mưa**, **Dông** (mưa nặng, chớp), **Sương mù**; hoặc `?weather=auto|clear|cloudy|rain|storm|fog`. Lựa chọn được lưu.
+- **Mưa · triều · ngập** (🌊 trên thanh 3D): phủ một lớp nước đục lên toàn mô hình, chọn nhanh **Khô**, **Triều cường** (0,3 m), **Mưa lớn** (0,5 m), **Mưa lớn + triều** (1 m) hoặc kéo thanh mực nước 0 đến 1,5 m; hoặc `?ngap=0.5` (nhận cả `30cm`, `0,3`). Nước dâng và rút dần, thuyền nổi theo, xe trên đường mặt đất chậm lại khi ngập sâu (cầu vượt không bị ảnh hưởng). Lựa chọn được lưu. **Chỉ để minh hoạ**: mô hình phẳng, không dùng địa hình (DEM), nên mọi nơi ngập như nhau và các mốc chỉ là tên gọi, không phải số đo.
 - **Tàu thuyền**: thuyền nhỏ, thuyền đạp thiên nga và sà lan chạy trên sông, kênh, hồ, không ra khỏi mặt nước.
-- **Máy bay thật**: nút ✈ hiện máy bay đang bay quanh khu vực (dữ liệu adsb.fi, 15 giây một lần), có nhãn callsign, bấm để xem loại, độ cao, tốc độ. Vị trí trên màn hình **bị nén** cho vừa mô hình (không phải vị trí thật). Cần một relay CORS: `npm run dev` có sẵn, còn trang đã đăng cần triển khai Cloudflare Worker ([`proxy/README.md`](proxy/README.md)) rồi đặt `DEFAULT_FLIGHTS_RELAY` trong `src/data/flights.ts`, hoặc dùng `?flights=<url>`. Không có relay thì không có máy bay.
+- **Máy bay thật**: nút ✈ hiện máy bay đang bay quanh khu vực (dữ liệu adsb.lol, giấy phép ODbL, 15 giây một lần), có nhãn callsign, bấm để xem loại, độ cao, tốc độ. Vị trí trên màn hình **bị nén** cho vừa mô hình (không phải vị trí thật). Đi qua relay CORS là Cloudflare Worker `tinymap-flights.ian-exnodes.workers.dev` ([`proxy/README.md`](proxy/README.md)); đổi relay bằng `?flights=<url>`. Không có relay thì không có máy bay.
 
 **Hiệu năng**
 - Dữ liệu tải và mô hình dựng trong Web Worker, main thread không bị đơ.
@@ -53,6 +61,11 @@
 - Tiến độ hiện theo số byte tải thật. Có nút huỷ.
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
+
+**Mới trong v0.0.9** (bản OSM)
+- Mở thẳng một phường/xã bằng link `?focus=<tên phường>`, ví dụ `?focus=ben-cat`. Bảng 📥 có nút 🔗 Link.
+- Kịch bản 🌊 "Mưa · triều · ngập" (`?ngap=0.5`): nước đục phủ mô hình, thuyền nổi, xe chậm lại. Chỉ là minh hoạ, không phải mô phỏng thuỷ lực.
+- Máy bay thật trên trang đã đăng (bấm ✈ để bật), nguồn adsb.lol (ODbL) qua relay Cloudflare.
 
 **Mới trong v0.0.8**
 - Nút phong cách trở lại: Đồ chơi, Khối, Siêu thực (`?style=`).
@@ -214,7 +227,7 @@ src/
   scene/weather.ts        # sáu kiểu thời tiết, chớp
   scene/boats.ts          # tàu thuyền trên nước
   scene/aircraft.ts       # máy bay thật (nén vị trí, nhãn, bấm chọn)
-  data/flights.ts         # adsb.fi qua relay
+  data/flights.ts         # adsb.lol qua relay
   scene/prototypes.ts     # nhà mẫu dùng chung (instancing)
   scene/trafficModel.ts   # mô hình lưu lượng, tỉ lệ phương tiện
   scene/nightLights.ts    # tỉ lệ cửa sổ sáng, vũng đèn đường
@@ -233,6 +246,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.9](docs/releases/v0.0.9.md) (2026-11-05): link `?focus=` mở thẳng phường, kịch bản ngập 🌊 minh hoạ, máy bay thật trên trang đã đăng (bật theo lựa chọn).
 - [v0.0.8](docs/releases/v0.0.8.md) (2026-11-01): nút phong cách (Đồ chơi / Khối / Siêu thực), bầu trời và mây, chọn thời tiết, tàu thuyền, máy bay thật qua relay.
 - [v0.0.7](docs/releases/v0.0.7.md) (2026-10-31): thửa đất trong vùng chọn (loại đất, kích thước), giá rao bán Chợ Tốt quanh thửa, định giá so sánh, hồ sơ JSON và trợ lý AI.
 - [v0.0.6](docs/releases/v0.0.6.md) (2026-10-27): phong cách đồ chơi duy nhất (nhà bo tròn, pastel), bốn tâm trạng và thẻ chọn trước khi dựng; bỏ Có màu / Đơn sắc / Siêu thực.

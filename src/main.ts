@@ -1,7 +1,8 @@
 import './style.css';
 import { generateDemoCity } from './data/demo';
 import { cacheClearUnpinned, cacheUsage } from './data/cache';
-import { type CityId, deletePackage, downloadPackage, listPackages, loadWards, packageSize, registerServiceWorker, searchWards, type Ward, wardAreaKm2 } from './data/offline';
+import { CITIES, type CityId, deletePackage, downloadPackage, listPackages, loadWards, packageSize, registerServiceWorker, searchWards, type Ward, type WardList, wardAreaKm2 } from './data/offline';
+import { findWards, focusSlug, wardAnchor } from './data/wardFocus';
 import { loadCity } from './data/loader';
 import { removeOverlaps } from './data/overlap';
 import type { BBox, Building, CityData, FootprintSource, HeightSource, ProgressStep } from './data/types';
@@ -13,6 +14,7 @@ import { compassLabel, sunState } from './scene/sun';
 import { TOY_ROOFS, TOY_WALLS } from './scene/toyPalette';
 import { reverseGeocode, searchPlaces, type Place } from './services/geocode';
 import { googleKey, setGoogleKey } from './data/googleTraffic';
+import { clampFlood, FLOOD_MAX, FLOOD_NOTE, FLOOD_PRESETS, FLOOD_STEP, floodLabel, parseFloodDepth } from './scene/floodScenario';
 import { kindFromLive, parseWeatherKind, WEATHER_ICON, WEATHER_KINDS, WEATHER_LABEL, type WeatherKind, weatherPreset } from './scene/weather';
 import { fetchWeather, type Weather } from './services/weather';
 import { cityWorker } from './worker/client';
@@ -282,6 +284,7 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     const stats = await city.build(data, progress, style);
     bench?.(stats.seconds, data);
     applyWeather();
+    applyWater();
     applyTime();
     const km2 = bboxAreaKm2(b);
     $('i-title').textContent = snapshot ? snapshot.name : source === 'demo' ? 'Thành phố mẫu' : 'Vùng mới';
@@ -337,6 +340,7 @@ $('btn-cache').addEventListener('click', async () => {
 const BASE_URL = APP_ROOT;
 let offCity: CityId = 'hcm';
 let offWard: Ward | null = null;
+let offWardCity: CityId = 'hcm';
 let offAbort: AbortController | null = null;
 const offResults = $<HTMLUListElement>('off-results');
 const offSearch = $<HTMLInputElement>('off-search');
@@ -363,8 +367,9 @@ async function renderWardResults() {
   }
 }
 
-function selectWard(w: Ward) {
+function selectWard(w: Ward, city: CityId = offCity) {
   offWard = w;
+  offWardCity = city;
   mapView.setWard(w.polygon);
   mapView.fitBBox(w.bbox);
   $('off-selected').hidden = false;
@@ -387,7 +392,7 @@ function renderSaved() {
     li.querySelector('small')!.textContent = `${fmt(p.bytes / 1048576, 1)} MB`;
     li.addEventListener('click', async () => {
       const w = (await loadWards(p.city, BASE_URL).catch(() => null))?.wards.find((x) => x.id === p.id);
-      if (w) selectWard(w);
+      if (w) selectWard(w, p.city);
       else mapView.fitBBox(p.bbox);
     });
     li.querySelector('button')!.addEventListener('click', async (e) => {
@@ -395,7 +400,7 @@ function renderSaved() {
       if (!confirm(`Xoá bản đồ offline của ${p.name}?`)) return;
       await deletePackage(p.id);
       renderSaved();
-      if (offWard?.id === p.id) selectWard(offWard);
+      if (offWard?.id === p.id) selectWard(offWard, offWardCity);
     });
     ul.appendChild(li);
   }
@@ -426,14 +431,77 @@ offSearch.addEventListener('input', () => {
   clearTimeout(offTimer);
   offTimer = window.setTimeout(renderWardResults, 120);
 });
+/** A buildable area: the whole ward when small enough, else 800 m around a point inside it. */
+function wardBuildArea(w: Ward): BBox {
+  if (bboxAreaKm2(w.bbox) <= MAX_KM2) return w.bbox;
+  const [lon, lat] = wardAnchor(w);
+  return bboxAround(lon, lat, DEFAULT_AREA_HALF_M);
+}
 $('off-pick').addEventListener('click', () => {
   if (!offWard) return;
-  const b = offWard.bbox;
-  // A buildable area: the whole ward when small enough, else 800 m around its centre.
-  const sel = bboxAreaKm2(b) <= MAX_KM2 ? b : bboxAround((b.west + b.east) / 2, (b.south + b.north) / 2, DEFAULT_AREA_HALF_M);
+  const sel = wardBuildArea(offWard);
   mapView.setBBox(sel);
   mapView.fitBBox(sel);
 });
+// Copy a ?focus= link that opens this ward directly.
+$('off-link').addEventListener('click', async () => {
+  const w = offWard;
+  if (!w) return;
+  const lists = await allWardLists();
+  const url = new URL(location.href);
+  url.hash = '';
+  url.searchParams.set('focus', focusSlug(w, offWardCity, lists));
+  const text = url.toString();
+  try {
+    await navigator.clipboard.writeText(text);
+    $('off-status').textContent = `Đã sao chép link: ${text}`;
+  } catch {
+    prompt('Sao chép link mở thẳng phường này:', text);
+  }
+});
+
+/** Both cities' ward lists (one may be missing offline). */
+async function allWardLists(): Promise<WardList[]> {
+  const lists = await Promise.all(CITIES.map((c) => loadWards(c.id, BASE_URL).catch(() => null)));
+  return lists.filter((l): l is WardList => !!l);
+}
+
+/**
+ * `?focus=<phường>` (e.g. `?focus=ben-cat`): outline the ward, pre-select a buildable area in it
+ * and show it on the map. Returns false when the value matches no ward.
+ */
+async function focusFromUrl(raw: string): Promise<boolean> {
+  const lists = await allWardLists();
+  const found = findWards(lists, raw);
+  if (!found.length) return false; // boot() falls back to the usual start location and says why
+  const { ward, city } = found[0];
+  // The ward lists can take a while: if the visitor drew an area meanwhile, outline the ward but keep their area.
+  if (mapView.bbox) {
+    mapView.setWard(ward.polygon);
+    return true;
+  }
+  const sel = wardBuildArea(ward);
+  const [lon, lat] = sel === ward.bbox ? [(sel.west + sel.east) / 2, (sel.south + sel.north) / 2] : wardAnchor(ward);
+  mapView.setWard(ward.polygon);
+  mapView.flyTo(lon, lat, ward.name, 15.5);
+  mapView.setBBox(sel);
+  // Frame the whole ward, but never zoom out past FOCUS_MIN_ZOOM: big xã then stay centred on the build area.
+  const showWard = () => {
+    const b = ward.bbox;
+    const cam = mapView.map.cameraForBounds([[b.west, b.south], [b.east, b.north]], { padding: 80 });
+    if (!cam || (cam.zoom ?? 0) < FOCUS_MIN_ZOOM) mapView.map.flyTo({ center: [lon, lat], zoom: FOCUS_MIN_ZOOM, essential: true });
+    else mapView.fitBBox(b);
+  };
+  mapView.whenLoaded(showWard);
+  const cityOf = (c: CityId) => CITIES.find((x) => x.id === c)?.name ?? '';
+  const others = found
+    .slice(1, 3)
+    .map((m) => `${m.ward.name}, ${cityOf(m.city)}: ?focus=${focusSlug(m.ward, m.city, lists)}`)
+    .join(' · ');
+  setLocationNotice(`Đang mở ${ward.name}, ${cityOf(city)} (từ link).` + (others ? ` Nơi khác cùng tên: ${others}` : ''));
+  return true;
+}
+const FOCUS_MIN_ZOOM = 13;
 $('off-download').addEventListener('click', async () => {
   const w = offWard;
   if (!w) return;
@@ -761,7 +829,7 @@ function closeBuildingInfo() {
   city?.select(-1);
 }
 $('bi-close').addEventListener('click', closeBuildingInfo);
-document.addEventListener('keydown', (e) => e.key === 'Escape' && !weatherMenuOpen() && closeBuildingInfo());
+document.addEventListener('keydown', (e) => e.key === 'Escape' && !weatherMenuOpen() && $('water-menu').hidden && closeBuildingInfo());
 
 // ---------- Weather ----------
 
@@ -883,6 +951,87 @@ document.addEventListener('pointerdown', (e) => {
 });
 showWeatherCard();
 
+// ---------- Mưa · triều · ngập (flood illustration) ----------
+
+const WATER_KEY = 'tinymap:water';
+function storedWater(): number | null {
+  try {
+    return parseFloodDepth(localStorage.getItem(WATER_KEY));
+  } catch {
+    return null;
+  }
+}
+/** `?ngap=` wins over the stored choice; the benchmark stays dry unless the link asks. */
+const urlWater = parseFloodDepth(new URLSearchParams(location.search).get('ngap'));
+let waterDepth = urlWater ?? (BENCH ? 0 : storedWater() ?? 0);
+
+const waterMenu = $('water-menu');
+const waterBtn = $('btn-water');
+const waterSlider = $<HTMLInputElement>('water-depth');
+waterSlider.max = String(FLOOD_MAX);
+waterSlider.step = String(FLOOD_STEP);
+$('water-note').textContent = FLOOD_NOTE;
+for (const p of FLOOD_PRESETS) {
+  const item = document.createElement('button');
+  item.setAttribute('role', 'menuitemradio');
+  item.dataset.depth = String(p.depth);
+  item.innerHTML = '<span></span><small class="muted"></small>';
+  item.firstElementChild!.textContent = p.label;
+  item.lastElementChild!.textContent = p.depth ? floodLabel(p.depth) : '';
+  item.addEventListener('click', () => setWaterDepth(p.depth));
+  $('water-presets').append(item);
+}
+waterSlider.addEventListener('input', () => setWaterDepth(Number(waterSlider.value)));
+
+function setWaterDepth(d: number) {
+  waterDepth = clampFlood(d);
+  try {
+    localStorage.setItem(WATER_KEY, String(waterDepth));
+  } catch {
+    /* storage blocked */
+  }
+  applyWater();
+}
+
+function applyWater() {
+  const on = waterDepth > 0;
+  waterBtn.classList.toggle('on', on);
+  waterBtn.setAttribute('aria-pressed', String(on));
+  waterBtn.title = on ? `Ngập ${floodLabel(waterDepth)} (minh hoạ)` : 'Mưa · triều · ngập (minh hoạ)';
+  waterSlider.value = String(waterDepth);
+  $('water-value').textContent = floodLabel(waterDepth);
+  waterMenu.querySelectorAll<HTMLButtonElement>('button[data-depth]').forEach((b) => b.setAttribute('aria-checked', String(Math.abs(Number(b.dataset.depth) - waterDepth) < 1e-6)));
+  $('i-water').hidden = !on;
+  $('i-water').textContent = on ? `🌊 Ngập ${floodLabel(waterDepth)} · minh hoạ, không phải mô phỏng thuỷ lực` : '';
+  city?.setFloodWater(waterDepth);
+}
+
+function openWaterMenu() {
+  closeWeatherMenu(false);
+  const r = waterBtn.getBoundingClientRect();
+  waterMenu.hidden = false;
+  const w = waterMenu.offsetWidth;
+  waterMenu.style.left = `${Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+  waterMenu.style.top = `${Math.min(r.bottom + 6, innerHeight - waterMenu.offsetHeight - 8)}px`;
+  waterBtn.setAttribute('aria-expanded', 'true');
+  waterMenu.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+}
+function closeWaterMenu(refocus = true) {
+  if (waterMenu.hidden) return;
+  waterMenu.hidden = true;
+  waterBtn.setAttribute('aria-expanded', 'false');
+  if (refocus) waterBtn.focus();
+}
+waterBtn.addEventListener('click', () => (waterMenu.hidden ? openWaterMenu() : closeWaterMenu()));
+weatherBtn.addEventListener('click', () => closeWaterMenu(false));
+document.addEventListener('keydown', (e) => {
+  if (!waterMenu.hidden && e.key === 'Escape') closeWaterMenu();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!waterMenu.hidden && !waterMenu.contains(e.target as Node) && !waterBtn.contains(e.target as Node)) closeWaterMenu(false);
+});
+applyWater();
+
 // ---------- Style: Đồ chơi / Khối / Siêu thực ----------
 
 const STYLE_KEY = 'tinymap:style';
@@ -974,10 +1123,10 @@ showStyle();
 // ---------- Live planes ----------
 
 const FLIGHTS_KEY = 'tinymap:flights';
-/** adsb.fi radius around the area centre (nm) and the poll period. */
+/** adsb.lol radius around the area centre (nm) and the poll period. */
 const FLIGHTS_NM = 40;
 const FLIGHTS_POLL_MS = 15_000;
-const FLIGHTS_SOURCE = 'adsb.fi';
+const FLIGHTS_SOURCE = 'adsb.lol';
 const flightsSource = (() => {
   try {
     return flightsRelay(location.search, localStorage, import.meta.env.DEV);
@@ -993,7 +1142,7 @@ function storedFlights(): boolean | null {
     return null;
   }
 }
-/** The default relay and the dev proxy are adsb.fi; a relay chosen with ?flights= or from storage shows its own host. */
+/** The default relay and the dev proxy are adsb.lol; a relay chosen with ?flights= or from storage shows its own host. */
 const flightsLabel = (() => {
   if (!flightsSource || flightsSource === DEFAULT_FLIGHTS_RELAY || flightsSource === '/flights-api') return FLIGHTS_SOURCE;
   try {
@@ -1005,7 +1154,9 @@ const flightsLabel = (() => {
 // A relay handed over in a link (?flights=) never starts on by itself: the page would send the area's
 // position to a host the visitor did not choose. The visitor turns it on with ✈ (#41).
 const flightsFromLink = !!flightsSource && new URLSearchParams(location.search).get('flights') === flightsSource;
-let flightsOn = !BENCH && !!flightsSource && !flightsFromLink && (storedFlights() ?? true);
+// Planes are opt-in: the default relay is a third-party Worker that gets the area centre (~1 km) and the
+// visitor's IP every 15 s, so nothing is sent until the visitor presses ✈ once (v0.0.9).
+let flightsOn = !BENCH && !!flightsSource && !flightsFromLink && (storedFlights() ?? false);
 let flightList: Flight[] = [];
 let flightsTimer = 0;
 let flightsAbort: AbortController | null = null;
@@ -1387,15 +1538,19 @@ async function bootPreview() {
 async function boot() {
   if (PREVIEW) return bootPreview();
   const fromUrl = bboxFromHash();
+  const focus = new URLSearchParams(location.search).get('focus')?.trim();
   if (fromUrl) {
     mapView.setBBox(fromUrl);
     mapView.map.once('load', () => mapView.fitBBox(fromUrl));
+  } else if (focus && (await focusFromUrl(focus))) {
+    // Opened on the ward from ?focus= (a #bbox= in the same link wins, so shared areas stay exact).
   } else if (!/[?&]demo\b/.test(location.search)) {
     const loc = await resolveStartLocation(DEFAULT_LOCATION);
     if (mapView.bbox) return; // the user already picked something while we waited
     const label = loc.source === 'default' ? DEFAULT_LOCATION.label : 'Vị trí của bạn';
     goTo(loc.lat, loc.lon, label);
     if (loc.source === 'default') setLocationNotice(`Không lấy được vị trí — đang hiển thị ${DEFAULT_LOCATION.label}.`);
+    if (focus) setLocationNotice(`Không tìm thấy phường/xã “${focus}” trong link. ${locationNotice}`.trim());
   }
   if (/[?&]demo\b/.test(location.search)) build('demo');
 }
