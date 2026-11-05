@@ -17,6 +17,13 @@
 **Chọn vùng**
 - Mở app sẽ tự lấy vị trí hiện tại. Không lấy được thì về mặc định Én Nam – 101 Châu Thị Hoá (TP.HCM). Nút 📍 để lấy lại vị trí.
 - Tìm địa điểm (Nominatim), kéo chuột vẽ hình chữ nhật, hoặc chọn nhanh 800 m quanh tâm bản đồ. Vùng được lưu vào URL (`#bbox=…`) để chia sẻ.
+- Mở thẳng một phường/xã bằng `?focus=<tên>`, ví dụ `/openstreetmap/?focus=ben-cat`: vẽ ranh phường, chọn sẵn vùng dựng (cả phường nếu ≤ 4 km², nếu không thì 800 m nằm trong phường). Không cần dấu, không phân biệt hoa thường. Các dạng được hỗ trợ:
+  - `ben-cat`: theo tên, bỏ "Phường"/"Xã";
+  - `phuong-ben-cat`: kèm loại, để chọn giữa phường và xã cùng tên;
+  - `hn:an-khanh`: giới hạn trong một thành phố (`hcm:` hoặc `hn:`);
+  - `thanh-an~2`: phường thứ 2 trùng tên (Xã Thanh An, Xã Thạnh An).
+
+  Link có cả `#bbox=` thì `#bbox=` thắng. Không tìm thấy phường thì app báo rồi mở như bình thường. Trong bảng 📥, nút "🔗 Link" sao chép link mở đúng phường đang chọn.
 
 **Dữ liệu** (xem [Nguồn dữ liệu](#nguồn-dữ-liệu))
 - Footprint nhà gộp từ **OpenStreetMap** và **Overture Maps** (Google/Microsoft ML buildings). Ở nhiều khu của VN, Overture có nhiều nhà hơn OSM hàng chục lần.
