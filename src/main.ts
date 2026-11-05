@@ -475,6 +475,11 @@ async function focusFromUrl(raw: string): Promise<boolean> {
   const found = findWards(lists, raw);
   if (!found.length) return false; // boot() falls back to the usual start location and says why
   const { ward, city } = found[0];
+  // The ward lists can take a while: if the visitor drew an area meanwhile, outline the ward but keep their area.
+  if (mapView.bbox) {
+    mapView.setWard(ward.polygon);
+    return true;
+  }
   const sel = wardBuildArea(ward);
   const [lon, lat] = sel === ward.bbox ? [(sel.west + sel.east) / 2, (sel.south + sel.north) / 2] : wardAnchor(ward);
   mapView.setWard(ward.polygon);
@@ -824,7 +829,7 @@ function closeBuildingInfo() {
   city?.select(-1);
 }
 $('bi-close').addEventListener('click', closeBuildingInfo);
-document.addEventListener('keydown', (e) => e.key === 'Escape' && !weatherMenuOpen() && closeBuildingInfo());
+document.addEventListener('keydown', (e) => e.key === 'Escape' && !weatherMenuOpen() && $('water-menu').hidden && closeBuildingInfo());
 
 // ---------- Weather ----------
 
@@ -1149,7 +1154,9 @@ const flightsLabel = (() => {
 // A relay handed over in a link (?flights=) never starts on by itself: the page would send the area's
 // position to a host the visitor did not choose. The visitor turns it on with ✈ (#41).
 const flightsFromLink = !!flightsSource && new URLSearchParams(location.search).get('flights') === flightsSource;
-let flightsOn = !BENCH && !!flightsSource && !flightsFromLink && (storedFlights() ?? true);
+// Planes are opt-in: the default relay is a third-party Worker that gets the area centre (~1 km) and the
+// visitor's IP every 15 s, so nothing is sent until the visitor presses ✈ once (v0.0.9).
+let flightsOn = !BENCH && !!flightsSource && !flightsFromLink && (storedFlights() ?? false);
 let flightList: Flight[] = [];
 let flightsTimer = 0;
 let flightsAbort: AbortController | null = null;
