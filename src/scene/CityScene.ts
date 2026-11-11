@@ -28,6 +28,7 @@ import { tiltShiftStrength } from './tiltShift';
 import { Boats, boatRoutes } from './boats';
 import { Traffic } from './traffic';
 import { clampFlood, FloodWater, floodPace } from './floodScenario';
+import { floodMaskGrid } from './floodMask';
 import type { Aircraft } from './aircraft';
 import type { Flight } from '../data/flights';
 
@@ -313,9 +314,14 @@ export class CityScene {
     const traffic = this.traffic;
     if (real) this.timeRealism(() => this.realism.apply(traffic.group));
     this.scene.add(this.traffic.group);
-    this.boats = new Boats(boatRoutes(data, proj), 4321, pastel);
+    const waterRoutes = boatRoutes(data, proj);
+    this.boats = new Boats(waterRoutes, 4321, pastel);
     this.scene.add(this.boats.group);
     this.floodWater = new FloodWater(this.size.width, this.size.depth);
+    if (waterRoutes.length > 0) {
+      const resolution = 48;
+      this.floodWater.setMask(floodMaskGrid(waterRoutes, this.size.width / 2, this.size.depth / 2, resolution), resolution);
+    }
     this.floodWater.setDepth(this.floodWaterDepth, true);
     this.floodWater.setSky(this.lastSky);
     this.scene.add(this.floodWater.mesh);
