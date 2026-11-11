@@ -129,7 +129,7 @@ button.toggle.on, .draw-tools button.on { background: rgba(255, 122, 69, 0.25); 
 .w-icon { font-size: 20px; }
 .toolbar { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 4px; padding: 4px; }
 .toolbar button { padding: 6px 10px; }
-.tb-group { display: flex; gap: 4px; padding: 0 6px; border-left: 1px solid var(--line); }
+.tb-group { display: flex; flex: none; gap: 4px; padding: 0 0 0 4px; border-left: 1px solid var(--line); }
 .tb-group:first-of-type { border-left: none; padding-left: 0; }
 .compass { font-size: 12px; text-align: center; padding: 0 10px; line-height: 1.15; }
 .compass small { color: var(--muted); font-size: 10px; }
@@ -288,7 +288,7 @@ main[data-layout="split"] .info { top: 64px; }
   .toolbar { top: 8px; bottom: auto; left: 8px; right: 8px; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; -webkit-overflow-scrolling: touch; }
   .toolbar button, .draw-tools button { min-width: 40px; min-height: 40px; flex: none; }
   .info { top: 64px; left: 8px; max-width: calc(100% - 70px); padding: 8px 10px; }
-  .info:not(.open) .small, .info:not(.open) .weather { display: none; }
+  .info:not(.open) .small, .info:not(.open) .weather, .info:not(.open) .info-group { display: none; }
   .info .strong::after { content: ' ▾'; color: var(--muted); }
   .info.open .strong::after { content: ' ▴'; }
   .cam-tools { top: auto; bottom: 92px; transform: none; right: 8px; }
