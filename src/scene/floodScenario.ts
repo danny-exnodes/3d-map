@@ -1,11 +1,14 @@
 import * as THREE from 'three';
+import { FLOOD_MASK_MAX_DIST, floodSpreadMetres } from './floodMask';
 
 /**
  * "Mưa · triều · ngập" (idea from e-City, saigon-citylab.vercel.app): a flat sheet of muddy water
  * over the whole model, `depth` metres above the ground.
  *
  * It is an illustration, not a hydraulic model: the model is flat (no DEM), so every street gets
- * the same depth. The UI says so next to the control.
+ * the same depth. The UI says so next to the control. `setMask` (optional, `floodMask.ts`) adds a
+ * gradient from real rivers/canals/lakes so the sheet reads stronger near them; it never drops the
+ * look to fully dry (`FLOOD_COVERAGE_FLOOR`), so the base "ngập khắp nơi" guarantee still holds.
  */
 
 /** Deepest water the slider offers, m. */
@@ -20,7 +23,7 @@ export const FLOOD_PRESETS: readonly { id: string; label: string; depth: number 
   { id: 'rain-tide', label: 'Mưa lớn + triều', depth: 1 },
 ];
 
-export const FLOOD_NOTE = 'Minh hoạ, không phải mô phỏng thuỷ lực: mô hình phẳng, không dùng địa hình (DEM) nên mọi nơi ngập như nhau.';
+export const FLOOD_NOTE = 'Minh hoạ, không phải mô phỏng thuỷ lực: mô hình phẳng, không dùng địa hình (DEM). Nơi nào cũng coi như ngập, chỉ rõ hơn gần sông, kênh, hồ thật.';
 
 /** Clamps to [0, FLOOD_MAX] and snaps to FLOOD_STEP. */
 export function clampFlood(depth: number): number {
@@ -67,6 +70,9 @@ export class FloodWater {
   private depth = 0;
   private time = { value: 0 };
   private sky = { value: new THREE.Color('#9fd3f2') };
+  private spread = { value: floodSpreadMetres(0) };
+  private maskSize: { value: THREE.Vector2 };
+  private maskTex: { value: THREE.DataTexture };
   private material: THREE.MeshStandardMaterial;
 
   constructor(width: number, depth: number) {
@@ -80,10 +86,18 @@ export class FloodWater {
       opacity: 0.78,
       depthWrite: false,
     });
-    const time = this.time, sky = this.sky;
+    // Default: distance 0 everywhere, so the mask contributes full coverage (same look as no mask at all).
+    const defaultMask = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat, THREE.UnsignedByteType);
+    defaultMask.needsUpdate = true;
+    this.maskTex = { value: defaultMask };
+    this.maskSize = { value: new THREE.Vector2(width, depth) };
+    const time = this.time, sky = this.sky, spread = this.spread, maskSize = this.maskSize, maskTex = this.maskTex;
     this.material.onBeforeCompile = (shader) => {
       shader.uniforms.uFloodTime = time;
       shader.uniforms.uFloodSky = sky;
+      shader.uniforms.uFloodSpread = spread;
+      shader.uniforms.uFloodMaskSize = maskSize;
+      shader.uniforms.uFloodMask = maskTex;
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vFloodPos;\nvarying float vFloodTop;')
         .replace(
@@ -91,7 +105,17 @@ export class FloodWater {
           '#include <begin_vertex>\nvFloodPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvFloodTop = step(0.5, normal.y);',
         );
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform float uFloodTime;\nuniform vec3 uFloodSky;\nvarying vec3 vFloodPos;\nvarying float vFloodTop;')
+        .replace(
+          '#include <common>',
+          `#include <common>
+          uniform float uFloodTime;
+          uniform vec3 uFloodSky;
+          uniform float uFloodSpread;
+          uniform vec2 uFloodMaskSize;
+          uniform sampler2D uFloodMask;
+          varying vec3 vFloodPos;
+          varying float vFloodTop;`,
+        )
         .replace(
           '#include <normal_fragment_maps>',
           `#include <normal_fragment_maps>
@@ -113,6 +137,13 @@ export class FloodWater {
           float band = sin(fp.x * 0.35 + uFloodTime * 0.9) * sin(fp.y * 0.3 - uFloodTime * 0.7);
           outgoingLight *= 1.0 + vFloodTop * 0.16 * band;
           diffuseColor.a = mix(diffuseColor.a, 0.9, floodFres);
+          // Fades toward the shore the farther the ground is from a real river/canal/lake (floodMask.ts);
+          // never below 0.45 so the sheet still reads as flooded away from any mapped water.
+          vec2 floodUv = vFloodPos.xz / uFloodMaskSize + 0.5;
+          float floodDist = texture2D(uFloodMask, floodUv).r * ${FLOOD_MASK_MAX_DIST.toFixed(1)};
+          float floodT = clamp(floodDist / max(uFloodSpread, 1.0), 0.0, 1.0);
+          float floodSmooth = 1.0 - floodT * floodT * (3.0 - 2.0 * floodT);
+          diffuseColor.a *= 0.45 + 0.55 * floodSmooth;
           #include <opaque_fragment>`,
         );
     };
@@ -123,6 +154,22 @@ export class FloodWater {
     this.mesh.renderOrder = 2;
     this.mesh.visible = false;
     this.mesh.scale.y = 0.001;
+  }
+
+  /**
+   * Shapes the sheet by distance to real water (`floodMaskGrid`, `floodMask.ts`): `resolution` x
+   * `resolution`, row-major z then x, over the model's own [-hx,hx] x [-hz,hz]. Call again after a
+   * rebuild (new area); omit when the area has no mapped water, which leaves the default (no change).
+   */
+  setMask(grid: Uint8Array, resolution: number) {
+    const tex = new THREE.DataTexture(grid, resolution, resolution, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    this.maskTex.value.dispose();
+    this.maskTex.value = tex; // same uniform object, so no shader recompile
   }
 
   /** Water rises or drains toward this depth over a couple of seconds. */
@@ -160,10 +207,12 @@ export class FloodWater {
   private apply() {
     this.mesh.visible = this.depth > 0.005;
     this.mesh.scale.y = Math.max(0.001, this.depth);
+    this.spread.value = floodSpreadMetres(this.depth);
   }
 
   dispose() {
     this.mesh.geometry.dispose();
     this.material.dispose();
+    this.maskTex.value.dispose();
   }
 }
