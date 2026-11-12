@@ -61,8 +61,8 @@ function ringArea(ring: XZ[]): number {
 
 const lineLength = (pts: XZ[]) => pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0), 0);
 
-/** Longest run of consecutive vertices inside the model; the map edge cuts rivers that run off it. */
-function clipLine(pts: XZ[], hx: number, hz: number): XZ[] {
+/** Longest run of consecutive vertices inside the model; the map edge cuts rivers (or bus routes, transit.ts) that run off it. */
+export function clipLine(pts: XZ[], hx: number, hz: number): XZ[] {
   let best: XZ[] = [], cur: XZ[] = [];
   for (const p of pts) {
     if (Math.abs(p[0]) <= hx && Math.abs(p[1]) <= hz) cur.push(p);
