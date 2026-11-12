@@ -44,6 +44,10 @@ export const MOBILE = typeof matchMedia !== 'undefined' && matchMedia('(pointer:
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
+/** Hero trees (#55): full-detail EZ-Tree around the selected building, within this radius, capped. */
+const HERO_RADIUS = 30;
+const HERO_MAX = 10;
+
 /**
  * GTAO whose normal/depth pre-pass leaves out `skip`: meshes shaped in their vertex shader (the boats'
  * shape pick), which the pass's override material would draw as every hull kind at once.
@@ -102,6 +106,14 @@ export class CityScene {
   private buildingIds: string[] = [];
   private buildingById = new Map<string, Building>();
   private raycaster = new THREE.Raycaster();
+  private treeTrunks: THREE.InstancedMesh | null = null;
+  private treeCrowns: THREE.InstancedMesh | null = null;
+  private treeSpots: THREE.Vector3[] = [];
+  private heroIndices: number[] = [];
+  private heroOriginalMatrices: THREE.Matrix4[] = [];
+  private heroGroups: THREE.Group[] = [];
+  private heroModule: typeof import('./proceduralTree') | null = null;
+  private heroToken = 0;
   /** Called with the picked building (or null) when the user clicks the model (#10). */
   onPick?: (b: Building | null) => void;
   /** A plane was clicked (or, with null, something else was). */
@@ -301,6 +313,21 @@ export class CityScene {
     this.lampBulbs = (built.group.getObjectByName('lampBulbs') as THREE.InstancedMesh | undefined) ?? null;
     this.lampPools = this.lampBulbs ? createLampPools(this.lampBulbs) : null;
     if (this.lampPools) built.group.add(this.lampPools);
+    this.treeTrunks = (built.group.getObjectByName('trunks') as THREE.InstancedMesh | undefined) ?? null;
+    this.treeCrowns = (built.group.getObjectByName('crowns') as THREE.InstancedMesh | undefined) ?? null;
+    this.treeSpots = [];
+    if (this.treeTrunks) {
+      // Trunks hold one instance per tree spot (bushes only live in `crowns`), in the same order.
+      const m = new THREE.Matrix4();
+      const p = new THREE.Vector3();
+      const q = new THREE.Quaternion();
+      const s = new THREE.Vector3();
+      for (let i = 0; i < this.treeTrunks.count; i++) {
+        this.treeTrunks.getMatrixAt(i, m);
+        m.decompose(p, q, s);
+        this.treeSpots.push(p.clone());
+      }
+    }
     this.details = [];
     built.group.traverse((o) => o.name.startsWith('detail-') && this.details.push(o));
 
@@ -402,6 +429,18 @@ export class CityScene {
         else mat?.dispose();
       });
     this.realism.reset();
+    // The instances `heroIndices`/`heroOriginalMatrices` point at are about to be disposed anyway.
+    this.heroToken++;
+    for (const g of this.heroGroups) {
+      this.heroModule?.disposeHeroTreeGroup(g);
+      this.scene.remove(g);
+    }
+    this.heroGroups = [];
+    this.heroIndices = [];
+    this.heroOriginalMatrices = [];
+    this.treeTrunks = null;
+    this.treeCrowns = null;
+    this.treeSpots = [];
     dispose(this.city);
     this.city.clear();
     this.buildingsMesh = null;
@@ -529,7 +568,77 @@ export class CityScene {
     const b = bid >= 0 ? (this.buildingById.get(this.buildingIds[bid]) ?? null) : null;
     this.select(b ? bid : -1);
     this.onPick?.(b);
+    void this.focusHeroTrees(b);
     return b;
+  }
+
+  /**
+   * Hero trees (#55): swaps the cheap placeholder trees within `HERO_RADIUS` of the selected
+   * building (capped at `HERO_MAX`) for full-detail procedural (EZ-Tree) ones. The module and the
+   * library it wraps are loaded lazily, only once a building is actually picked.
+   */
+  private async focusHeroTrees(b: Building | null) {
+    const token = ++this.heroToken;
+    this.clearHeroTrees();
+    if (!b || !this.proj || !this.treeTrunks || !this.treeCrowns || !this.treeSpots.length) return;
+    const proj = this.proj;
+    const ring = b.polygon[0];
+    let cx = 0;
+    let cz = 0;
+    for (const ll of ring) {
+      const [x, z] = proj.project(ll);
+      cx += x;
+      cz += z;
+    }
+    cx /= ring.length;
+    cz /= ring.length;
+    const near = this.treeSpots
+      .map((p, i) => ({ i, d: Math.hypot(p.x - cx, p.z - cz) }))
+      .filter((e) => e.d <= HERO_RADIUS)
+      .sort((a, c) => a.d - c.d)
+      .slice(0, HERO_MAX);
+    if (!near.length) return;
+    if (!this.heroModule) this.heroModule = await import('./proceduralTree');
+    if (token !== this.heroToken) return; // superseded by a later pick/clear while the module loaded
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    const m = new THREE.Matrix4();
+    for (const { i } of near) {
+      this.treeCrowns.getMatrixAt(i, m);
+      this.heroOriginalMatrices.push(m.clone());
+      this.heroIndices.push(i);
+      this.treeCrowns.setMatrixAt(i, zero);
+      this.treeTrunks.setMatrixAt(i, zero);
+    }
+    this.treeCrowns.instanceMatrix.needsUpdate = true;
+    this.treeTrunks.instanceMatrix.needsUpdate = true;
+    const groups = await Promise.all(near.map(({ i }) => this.heroModule!.heroTreeGroup(this.treeSpots[i].x, this.treeSpots[i].z)));
+    if (token !== this.heroToken) {
+      groups.forEach((g) => this.heroModule!.disposeHeroTreeGroup(g));
+      return;
+    }
+    for (const g of groups) {
+      this.heroGroups.push(g);
+      this.scene.add(g);
+    }
+  }
+
+  /** Restores any hidden placeholder trees and drops the current hero-tree groups. */
+  private clearHeroTrees() {
+    if (this.treeCrowns && this.treeTrunks && this.heroIndices.length) {
+      this.heroIndices.forEach((i, k) => {
+        this.treeCrowns!.setMatrixAt(i, this.heroOriginalMatrices[k]);
+        this.treeTrunks!.setMatrixAt(i, this.heroOriginalMatrices[k]);
+      });
+      this.treeCrowns.instanceMatrix.needsUpdate = true;
+      this.treeTrunks.instanceMatrix.needsUpdate = true;
+    }
+    for (const g of this.heroGroups) {
+      this.heroModule?.disposeHeroTreeGroup(g);
+      this.scene.remove(g);
+    }
+    this.heroGroups = [];
+    this.heroIndices = [];
+    this.heroOriginalMatrices = [];
   }
 
   /** Planes on or off. The module loads on first use; it is not part of the bench or of a page without planes. */
@@ -566,6 +675,12 @@ export class CityScene {
 
   select(bid: number) {
     if (this.buildingUniforms) this.buildingUniforms.uSelected.value = bid;
+    // Deselecting (bid < 0) also drops any hero trees; selecting is handled by `pick()`, the only
+    // call site that has the `Building` a positive bid refers to.
+    if (bid < 0) {
+      this.heroToken++;
+      this.clearHeroTrees();
+    }
   }
 
   /** Colour buildings by where their height comes from (#3). */

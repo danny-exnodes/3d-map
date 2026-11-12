@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",
+    "@dgreenheck/ez-tree": "1.1.0",
     "@mapbox/vector-tile": "^3.0.0",
     "3d-tiles-renderer": "^0.5.3",
     "maplibre-gl": "^6.16.0",
