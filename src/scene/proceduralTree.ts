@@ -93,8 +93,13 @@ function heroMaterials(preset: HeroPreset): { branches: THREE.Material; leaves: 
   return m;
 }
 
-/** A full-detail hero tree at local (x, z); caller positions/adds it and disposes geometry on removal. */
-export async function heroTreeGroup(x: number, z: number): Promise<THREE.Group> {
+/**
+ * A full-detail hero tree at local (x, z); caller positions/adds it and disposes geometry on removal.
+ * EZ-Tree's own scale has nothing to do with the placeholder it replaces (#55 QA), so the group is
+ * scaled to `targetHeight` (the placeholder tree's actual on-screen height) instead of using the
+ * library's raw size.
+ */
+export async function heroTreeGroup(x: number, z: number, targetHeight: number): Promise<THREE.Group> {
   const seed = heroSeed(x, z);
   const preset = heroPreset(seed);
   const [geo, mats] = await Promise.all([heroGeometry(preset, seed), Promise.resolve(heroMaterials(preset))]);
@@ -102,10 +107,16 @@ export async function heroTreeGroup(x: number, z: number): Promise<THREE.Group> 
   const leaves = new THREE.Mesh(fromBuffers(geo.leaves), mats.leaves);
   branches.castShadow = branches.receiveShadow = true;
   leaves.castShadow = true;
+  branches.geometry.computeBoundingBox();
+  leaves.geometry.computeBoundingBox();
+  const minY = Math.min(branches.geometry.boundingBox!.min.y, leaves.geometry.boundingBox!.min.y);
+  const maxY = Math.max(branches.geometry.boundingBox!.max.y, leaves.geometry.boundingBox!.max.y);
+  const naturalHeight = maxY - minY;
   const group = new THREE.Group();
   group.name = 'hero-tree';
   group.add(branches, leaves);
   group.position.set(x, 0, z);
+  if (naturalHeight > 0) group.scale.setScalar(targetHeight / naturalHeight);
   return group;
 }
 

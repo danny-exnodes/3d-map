@@ -47,6 +47,9 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()
 /** Hero trees (#55): full-detail EZ-Tree around the selected building, within this radius, capped. */
 const HERO_RADIUS = 30;
 const HERO_MAX = 10;
+/** Crown radius 2.2 + its translate 3.4 (`landscape.ts:toyCrown`): a placeholder tree's unscaled top
+ *  height, so `* k` (that spot's own instance scale) gives the on-screen height to match (#55 QA). */
+const PLACEHOLDER_TREE_HEIGHT = 3.4 + 2.2;
 
 /**
  * GTAO whose normal/depth pre-pass leaves out `skip`: meshes shaped in their vertex shader (the boats'
@@ -325,7 +328,10 @@ export class CityScene {
       for (let i = 0; i < this.treeTrunks.count; i++) {
         this.treeTrunks.getMatrixAt(i, m);
         m.decompose(p, q, s);
-        this.treeSpots.push(p.clone());
+        // Trunks sit at ground level (y is always 0), so the y slot is free to carry the spot's own
+        // instance scale `k` instead — read back by `focusHeroTrees` to size the hero tree that
+        // replaces it at the same height the placeholder had (#55 QA).
+        this.treeSpots.push(new THREE.Vector3(p.x, s.x, p.z));
       }
     }
     this.details = [];
@@ -433,7 +439,7 @@ export class CityScene {
     this.heroToken++;
     for (const g of this.heroGroups) {
       this.heroModule?.disposeHeroTreeGroup(g);
-      this.scene.remove(g);
+      this.city.remove(g);
     }
     this.heroGroups = [];
     this.heroIndices = [];
@@ -611,14 +617,22 @@ export class CityScene {
     }
     this.treeCrowns.instanceMatrix.needsUpdate = true;
     this.treeTrunks.instanceMatrix.needsUpdate = true;
-    const groups = await Promise.all(near.map(({ i }) => this.heroModule!.heroTreeGroup(this.treeSpots[i].x, this.treeSpots[i].z)));
+    const groups = await Promise.all(
+      near.map(({ i }) => {
+        const spot = this.treeSpots[i];
+        return this.heroModule!.heroTreeGroup(spot.x, spot.z, PLACEHOLDER_TREE_HEIGHT * spot.y);
+      }),
+    );
     if (token !== this.heroToken) {
       groups.forEach((g) => this.heroModule!.disposeHeroTreeGroup(g));
       return;
     }
     for (const g of groups) {
       this.heroGroups.push(g);
-      this.scene.add(g);
+      // Added under `this.city` (not `this.scene`), same as the placeholder instances they replace,
+      // so `exportGLB`'s `this.city.clone()` carries them into the exported file (#55 QA: a GLB
+      // exported while a building is selected dropped these 10 trees entirely).
+      this.city.add(g);
     }
   }
 
@@ -634,7 +648,7 @@ export class CityScene {
     }
     for (const g of this.heroGroups) {
       this.heroModule?.disposeHeroTreeGroup(g);
-      this.scene.remove(g);
+      this.city.remove(g);
     }
     this.heroGroups = [];
     this.heroIndices = [];
