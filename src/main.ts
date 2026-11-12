@@ -283,6 +283,10 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     }
     const stats = await city.build(data, progress, style);
     bench?.(stats.seconds, data);
+    // A new area: the old transit layer belonged to the previous bbox (`city.clear()` already
+    // dropped it), so re-fetch it for this one if the 🚌 toggle was on; otherwise the button and
+    // info line are left showing the previous area's state until toggled off and back on.
+    if (transitOn) void city.setTransitVisible(true, BASE_URL).then(showTransitLine);
     applyWeather();
     applyWater();
     applyTime();

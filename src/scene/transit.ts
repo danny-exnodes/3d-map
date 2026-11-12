@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import type { BBox } from '../data/types';
 import type { TransitFile, TransitRoute, TransitStop } from '../data/transit';
 import { bboxSizeMeters, type LocalProjection } from '../geo/projection';
-import { clipLine } from './boats';
 import { MeshBuilder, merge, ribbon, type XZ } from './geometry';
 
 /**
@@ -52,15 +51,68 @@ function routeColor(hex: string | undefined): string {
   return /^#[0-9a-fA-F]{6}$/.test(h) ? h : DEFAULT_ROUTE_COLOR;
 }
 
+/** Liang–Barsky clip of one segment against the box [-hx,hx] x [-hz,hz] (the model's ground extent). */
+function clipSegmentToBox(a: XZ, c: XZ, hx: number, hz: number): [XZ, XZ, boolean, boolean] | null {
+  const dx = c[0] - a[0], dz = c[1] - a[1];
+  let t0 = 0, t1 = 1;
+  const edges: [number, number][] = [[-dx, a[0] + hx], [dx, hx - a[0]], [-dz, a[1] + hz], [dz, hz - a[1]]];
+  for (const [p, q] of edges) {
+    if (p === 0) {
+      if (q < 0) return null;
+    } else {
+      const r = q / p;
+      if (p < 0) {
+        if (r > t1) return null;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return null;
+        if (r < t1) t1 = r;
+      }
+    }
+  }
+  const P = (t: number): XZ => [a[0] + dx * t, a[1] + dz * t];
+  return [P(t0), P(t1), t0 === 0, t1 === 1];
+}
+
+/**
+ * Clips a route shape against the model box, keeping every segment inside it. Unlike `clipLine`
+ * (boats.ts), which keeps only the single longest run — fine for a boat that sails one continuous
+ * leg — a bus route that crosses the box boundary more than once must keep every crossing (#56 QA).
+ */
+function clipPolylineToBox(pts: XZ[], hx: number, hz: number): XZ[][] {
+  const out: XZ[][] = [];
+  let cur: XZ[] = [];
+  const flush = () => {
+    if (cur.length >= 2) out.push(cur);
+    cur = [];
+  };
+  for (let i = 1; i < pts.length; i++) {
+    const seg = clipSegmentToBox(pts[i - 1], pts[i], hx, hz);
+    if (!seg) {
+      flush();
+      continue;
+    }
+    const [p, q, enteredInside, leftInside] = seg;
+    if (!cur.length || !enteredInside) {
+      flush();
+      cur = [p];
+    }
+    cur.push(q);
+    if (!leftInside) flush();
+  }
+  flush();
+  return out;
+}
+
 function buildRoutes(routes: TransitRoute[], proj: LocalProjection, hx: number, hz: number): { mesh: THREE.Mesh | null; count: number } {
   const mb = new MeshBuilder();
   let count = 0;
   for (const route of routes) {
-    const pts: XZ[] = clipLine(route.shape.map((p) => proj.project(p)), hx, hz);
-    if (pts.length < 2) continue;
+    const segments = clipPolylineToBox(route.shape.map((p) => proj.project(p)), hx, hz);
+    if (!segments.length) continue;
     count++;
     mb.setColor(routeColor(route.color));
-    ribbon(mb, pts, pts.map(() => ROUTE_Y), ROUTE_WIDTH);
+    for (const pts of segments) ribbon(mb, pts, pts.map(() => ROUTE_Y), ROUTE_WIDTH);
   }
   if (mb.empty) return { mesh: null, count: 0 };
   const geo = mb.build();
