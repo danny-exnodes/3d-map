@@ -62,6 +62,9 @@
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
 
+**Mới trong v0.0.10** (bản OSM)
+- Bấm chọn một nhà: tối đa 10 cây quanh đó (bán kính 30 m) đổi từ khối hình học đơn giản thành cây thật (procedural, EZ-Tree), giữ nguyên hình dáng giữa các lần tải lại. Mọi cây khác trong cảnh vẫn là khối đơn giản.
+
 **Mới trong v0.0.9** (bản OSM)
 - Mở thẳng một phường/xã bằng link `?focus=<tên phường>`, ví dụ `?focus=ben-cat`. Bảng 📥 có nút 🔗 Link.
 - Kịch bản 🌊 "Mưa · triều · ngập" (`?ngap=0.5`): nước đục phủ mô hình, thuyền nổi, xe chậm lại. Chỉ là minh hoạ, không phải mô phỏng thuỷ lực.
@@ -246,6 +249,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.10](docs/releases/v0.0.10.md) (2026-11-12): cây hero procedural (EZ-Tree) quanh nhà đang chọn, thay cho khối cây placeholder.
 - [v0.0.9](docs/releases/v0.0.9.md) (2026-11-05): link `?focus=` mở thẳng phường, kịch bản ngập 🌊 minh hoạ, máy bay thật trên trang đã đăng (bật theo lựa chọn).
 - [v0.0.8](docs/releases/v0.0.8.md) (2026-11-01): nút phong cách (Đồ chơi / Khối / Siêu thực), bầu trời và mây, chọn thời tiết, tàu thuyền, máy bay thật qua relay.
 - [v0.0.7](docs/releases/v0.0.7.md) (2026-10-31): thửa đất trong vùng chọn (loại đất, kích thước), giá rao bán Chợ Tốt quanh thửa, định giá so sánh, hồ sơ JSON và trợ lý AI.
