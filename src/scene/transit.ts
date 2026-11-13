@@ -116,13 +116,18 @@ function buildRoutes(routes: TransitRoute[], proj: LocalProjection, hx: number, 
   }
   if (mb.empty) return { mesh: null, count: 0 };
   const geo = mb.build();
-  // A flat ribbon this thin (ROUTE_Y) z-fights against the ground/road slabs at normal depthWrite;
-  // like those layers (roads.ts, traffic.ts), skip depth writes and sort it in the ground stack (#56 fix).
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, depthWrite: false }));
+  // A route is an informational overlay ("where the bus goes"), not a ground decal: unlike roads
+  // or markings, it must stay visible even where it runs under a building's footprint (sample and
+  // real feeds both drift off the generated street layout — #56 QA retest on the Ga Hà Nội sample).
+  // Ground-stack tricks (depthWrite off + negative renderOrder, the previous #56 fix) only sort it
+  // before buildings in paint order, so a building drawn afterward still overwrites it outright —
+  // same bug, not fixed. Draw it on top of everything instead, like the "you are here" pin
+  // (locationPin.ts): depthTest off, high renderOrder.
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, depthTest: false, depthWrite: false }));
   mesh.name = 'transit-routes';
   mesh.castShadow = false;
   mesh.receiveShadow = false;
-  mesh.renderOrder = -3;
+  mesh.renderOrder = 15;
   return { mesh, count };
 }
 
@@ -132,7 +137,10 @@ function buildStops(stops: TransitStop[], proj: LocalProjection, hx: number, hz:
     .filter(([x, z]) => Math.abs(x) <= hx && Math.abs(z) <= hz)
     .slice(0, MAX_STOPS);
   if (!placed.length) return null;
-  const mesh = new THREE.InstancedMesh(stopGeometry(), new THREE.MeshLambertMaterial({ vertexColors: true }), placed.length);
+  // Same reasoning as the route ribbon above: a stop marker that happens to fall inside a
+  // building's footprint (sample or real data, off the generated layout) must still show, so it
+  // draws on top of everything rather than being buried inside solid geometry (#56 QA retest).
+  const mesh = new THREE.InstancedMesh(stopGeometry(), new THREE.MeshLambertMaterial({ vertexColors: true, depthTest: false, depthWrite: false }), placed.length);
   const m = new THREE.Matrix4();
   placed.forEach(([x, z], i) => {
     m.makeTranslation(x, 0, z);
@@ -140,6 +148,7 @@ function buildStops(stops: TransitStop[], proj: LocalProjection, hx: number, hz:
   });
   mesh.name = 'transit-stops';
   mesh.castShadow = false;
+  mesh.renderOrder = 15;
   return mesh;
 }
 
