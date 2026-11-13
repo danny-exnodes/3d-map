@@ -30,6 +30,8 @@ import { Traffic } from './traffic';
 import { clampFlood, FloodWater, floodPace } from './floodScenario';
 import type { Aircraft } from './aircraft';
 import type { Flight } from '../data/flights';
+import { loadTransit, transitCityFor, type TransitMeta } from '../data/transit';
+import { buildTransit } from './transit';
 
 export interface BuildStats {
   buildings: number;
@@ -92,6 +94,12 @@ export class CityScene {
   /** "Mưa · triều · ngập": flood water over the model, and the depth asked for (m). */
   private floodWater: FloodWater | null = null;
   private floodWaterDepth = 0;
+  /** Real bus routes (#56), lazily built on the first toggle. */
+  private transitGroup: THREE.Group | null = null;
+  private wantTransit = false;
+  private transitBuildStats = { routes: 0, stops: 0 };
+  /** Where the shown feed came from (official/unofficial, date), for the UI label. */
+  transitMeta: TransitMeta | null = null;
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
   private details: THREE.Object3D[] = [];
@@ -423,6 +431,13 @@ export class CityScene {
       this.floodWater.dispose();
       this.floodWater = null;
     }
+    if (this.transitGroup) {
+      dispose(this.transitGroup);
+      this.scene.remove(this.transitGroup);
+      this.transitGroup = null;
+    }
+    this.transitMeta = null;
+    this.transitBuildStats = { routes: 0, stops: 0 };
     for (const l of this.labels) l.el.remove();
     this.labels = [];
     this.dropAircraft();
@@ -685,6 +700,38 @@ export class CityScene {
 
   get trafficStats() {
     return this.traffic?.stats ?? { vehicles: 0, segments: 0, flow: 1, people: 0, byKind: {} as Record<string, number>, observed: 0 };
+  }
+
+  /**
+   * Real bus routes (#56). The feed loads from `transit/<city>.json` under `base` on first use.
+   * `data`/`proj` are snapshotted so a fetch started before the user toggles off, or before another
+   * area replaces this one, is dropped instead of landing on the wrong model.
+   */
+  async setTransitVisible(on: boolean, base: string): Promise<{ routes: number; stops: number }> {
+    this.wantTransit = on;
+    if (!on) {
+      if (this.transitGroup) this.transitGroup.visible = false;
+      return { routes: 0, stops: 0 };
+    }
+    if (this.transitGroup) {
+      this.transitGroup.visible = true;
+      return this.transitBuildStats;
+    }
+    const data = this.data, proj = this.proj;
+    if (!data || !proj) return { routes: 0, stops: 0 };
+    const city = transitCityFor((data.bbox.south + data.bbox.north) / 2);
+    const file = await loadTransit(city, base);
+    if (!this.wantTransit || this.data !== data || this.proj !== proj) return { routes: 0, stops: 0 };
+    const built = buildTransit(file, data.bbox, proj);
+    this.transitGroup = built.group;
+    this.transitMeta = file.meta;
+    this.transitBuildStats = { routes: built.routes, stops: built.stops };
+    this.scene.add(built.group);
+    return this.transitBuildStats;
+  }
+
+  get transitStats() {
+    return this.transitBuildStats;
   }
 
   setPixelMode(on: boolean) {

@@ -283,6 +283,10 @@ async function build(source: 'osm' | 'demo' | 'snapshot', snapshot?: SnapshotEnt
     }
     const stats = await city.build(data, progress, style);
     bench?.(stats.seconds, data);
+    // A new area: the old transit layer belonged to the previous bbox (`city.clear()` already
+    // dropped it), so re-fetch it for this one if the 🚌 toggle was on; otherwise the button and
+    // info line are left showing the previous area's state until toggled off and back on.
+    if (transitOn) void city.setTransitVisible(true, BASE_URL).then(showTransitLine);
     applyWeather();
     applyWater();
     applyTime();
@@ -1095,6 +1099,7 @@ async function rebuildInStyle() {
     await c.build(c.data, () => {}, style);
     c.restoreView(view);
     c.setTrafficOverlay(trafficOn);
+    if (transitOn) void c.setTransitVisible(true, BASE_URL).then(showTransitLine);
     applyWeather();
     applyTime();
     ok = true;
@@ -1438,6 +1443,49 @@ $('btn-traffic').addEventListener('click', () => {
   trafficOn = !trafficOn;
   city?.setTrafficOverlay(trafficOn);
   $('btn-traffic').classList.toggle('on', trafficOn);
+});
+
+/** "🚌 12 tuyến · 48 điểm dừng · TUMI Data Hub, 2023-11" — hidden until the layer is on and loaded. */
+function showTransitLine() {
+  const el = $('i-transit');
+  if (!transitOn || !city) {
+    el.hidden = true;
+    return;
+  }
+  const meta = city.transitMeta;
+  if (!meta) {
+    el.textContent = '🚌 Đang tải dữ liệu tuyến buýt…';
+    el.hidden = false;
+    return;
+  }
+  const st = city.transitStats;
+  const src = meta.official ? meta.source : `${meta.source} (không chính thức)`;
+  el.textContent = `🚌 ${fmt(st.routes)} tuyến · ${fmt(st.stops)} điểm dừng · ${src}, ${meta.sourceDate}`;
+  el.hidden = false;
+}
+
+let transitOn = false;
+$('btn-transit').addEventListener('click', async () => {
+  const btn = $<HTMLButtonElement>('btn-transit');
+  if (!city?.data || btn.disabled) return;
+  transitOn = !transitOn;
+  btn.classList.toggle('on', transitOn);
+  if (!transitOn) {
+    void city.setTransitVisible(false, BASE_URL);
+    showTransitLine();
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await city.setTransitVisible(true, BASE_URL);
+  } catch (e) {
+    console.error(e);
+    transitOn = false;
+    btn.classList.toggle('on', false);
+  } finally {
+    btn.disabled = false;
+    showTransitLine();
+  }
 });
 let pixelOn = false;
 $('btn-pixel').addEventListener('click', () => {
