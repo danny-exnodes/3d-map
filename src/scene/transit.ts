@@ -116,10 +116,13 @@ function buildRoutes(routes: TransitRoute[], proj: LocalProjection, hx: number, 
   }
   if (mb.empty) return { mesh: null, count: 0 };
   const geo = mb.build();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  // A flat ribbon this thin (ROUTE_Y) z-fights against the ground/road slabs at normal depthWrite;
+  // like those layers (roads.ts, traffic.ts), skip depth writes and sort it in the ground stack (#56 fix).
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, depthWrite: false }));
   mesh.name = 'transit-routes';
   mesh.castShadow = false;
   mesh.receiveShadow = false;
+  mesh.renderOrder = -3;
   return { mesh, count };
 }
 
