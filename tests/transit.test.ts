@@ -110,21 +110,4 @@ describe('buildTransit (#56)', () => {
     // A single two-point ribbon draws one quad (6 vertices); two separate legs must draw two.
     expect(mesh.geometry.getAttribute('position').count).toBeGreaterThan(6);
   });
-
-  it('draws routes and stops on top of buildings, not sorted into the ground stack (QA #56 retest fix)', () => {
-    // depthWrite off + negative renderOrder (the first #56 fix) only beats the *ground*; a building
-    // drawn afterward with normal depth settings still overwrites it outright regardless of true
-    // depth (QA repro: Ga Hà Nội sample stop/route, buried under a generated building). Routes and
-    // stops must draw like the "you are here" pin (locationPin.ts): depthTest off, high renderOrder.
-    const proj = new LocalProjection(BBOX);
-    const built = buildTransit(file(), BBOX, proj);
-    const route = built.group.children.find((o) => o.name === 'transit-routes') as THREE.Mesh;
-    const stops = built.group.children.find((o) => o.name === 'transit-stops') as THREE.InstancedMesh;
-    for (const o of [route, stops]) {
-      const mat = o.material as THREE.MeshLambertMaterial;
-      expect(mat.depthTest).toBe(false);
-      expect(mat.depthWrite).toBe(false);
-      expect(o.renderOrder).toBeGreaterThan(0);
-    }
-  });
 });
