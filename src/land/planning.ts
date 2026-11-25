@@ -246,19 +246,27 @@ export async function loadPlanning(lon: number, lat: number, signal?: AbortSigna
   const onAbort = () => ctl.abort();
   signal?.addEventListener('abort', onAbort);
   if (signal?.aborted) ctl.abort();
-  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctl.abort();
+  }, TIMEOUT_MS);
   try {
     // Plain form POST: a CORS "simple request", so no preflight.
     const res = await fetch(PLANNING_API, { method: 'POST', body: new URLSearchParams({ Lat: String(lat), Lon: String(lon) }), signal: ctl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const info = parsePlanning(await res.json(), lon, lat);
+    // The portal sometimes answers 200 with an HTML page: say so in words, not a JSON parser message.
+    const raw = await res.json().catch(() => {
+      throw new Error('Cổng trả dữ liệu không hợp lệ');
+    });
+    const info = parsePlanning(raw, lon, lat);
     await cacheSet(NS, key, info ? { info } : { none: true }, TTL_MS);
     return info;
   } catch (e) {
     if (signal?.aborted) throw e;
     const stale = await cacheGet<Cached>(NS, key, true);
     if (stale) return 'none' in stale ? null : stale.info;
-    throw e;
+    throw timedOut ? new Error(`Cổng không phản hồi (quá ${TIMEOUT_MS / 1000} giây)`) : e;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);

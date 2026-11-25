@@ -130,6 +130,7 @@ export class LandPanel {
     this.btn.classList.add('on');
     this.ensureParcels();
     this.renderAll();
+    if (this.selected && !this.plan) void this.refreshPlanning();
     this.applyPlanningOverlay();
   }
 
@@ -139,6 +140,8 @@ export class LandPanel {
     this.loadAbort?.abort();
     this.askAbort?.abort();
     this.planAbort?.abort();
+    // An aborted lookup would otherwise stay "loading" forever; open() re-runs it.
+    if (this.plan?.status === 'loading') this.plan = null;
     this.mapView.setParcels(null);
     this.mapView.setMarket(null);
     this.mapView.setPlanning(null);

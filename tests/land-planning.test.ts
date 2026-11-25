@@ -150,6 +150,20 @@ describe('loadPlanning', () => {
     expect((await loadPlanning(106.7, 10.77))?.district).toBe('Quận 5');
   });
 
+  it('says in words when the portal answers 200 with a non-JSON page, or never answers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<!DOCTYPE html>', { status: 200 })));
+    await expect(loadPlanning(106.7, 10.77)).rejects.toThrow('Cổng trả dữ liệu không hợp lệ');
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', vi.fn((_u: unknown, init?: RequestInit) => new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('x', 'AbortError'))))));
+      const p = expect(loadPlanning(106.9, 10.9)).rejects.toThrow('Cổng không phản hồi (quá 20 giây)');
+      await vi.advanceTimersByTimeAsync(20100);
+      await p;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('propagates an abort instead of falling back', async () => {
     const f = vi.fn((_u: unknown, init?: RequestInit) => new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')))));
     vi.stubGlobal('fetch', f);
