@@ -28,8 +28,11 @@ import { tiltShiftStrength } from './tiltShift';
 import { Boats, boatRoutes } from './boats';
 import { Traffic } from './traffic';
 import { clampFlood, FloodWater, floodPace } from './floodScenario';
+import { floodMaskGrid } from './floodMask';
 import type { Aircraft } from './aircraft';
 import type { Flight } from '../data/flights';
+import { loadTransit, transitCityFor, type TransitMeta } from '../data/transit';
+import { buildTransit } from './transit';
 
 export interface BuildStats {
   buildings: number;
@@ -43,6 +46,13 @@ export interface BuildStats {
 export const MOBILE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+/** Hero trees (#55): full-detail EZ-Tree around the selected building, within this radius, capped. */
+const HERO_RADIUS = 30;
+const HERO_MAX = 10;
+/** Crown radius 2.2 + its translate 3.4 (`landscape.ts:toyCrown`): a placeholder tree's unscaled top
+ *  height, so `* k` (that spot's own instance scale) gives the on-screen height to match (#55 QA). */
+const PLACEHOLDER_TREE_HEIGHT = 3.4 + 2.2;
 
 /**
  * GTAO whose normal/depth pre-pass leaves out `skip`: meshes shaped in their vertex shader (the boats'
@@ -92,6 +102,12 @@ export class CityScene {
   /** "Mưa · triều · ngập": flood water over the model, and the depth asked for (m). */
   private floodWater: FloodWater | null = null;
   private floodWaterDepth = 0;
+  /** Real bus routes (#56), lazily built on the first toggle. */
+  private transitGroup: THREE.Group | null = null;
+  private wantTransit = false;
+  private transitBuildStats = { routes: 0, stops: 0 };
+  /** Where the shown feed came from (official/unofficial, date), for the UI label. */
+  transitMeta: TransitMeta | null = null;
   private lampBulbs: THREE.InstancedMesh | null = null;
   /** Small procedural detail, only drawn when the camera is close (LOD, #5). */
   private details: THREE.Object3D[] = [];
@@ -102,6 +118,14 @@ export class CityScene {
   private buildingIds: string[] = [];
   private buildingById = new Map<string, Building>();
   private raycaster = new THREE.Raycaster();
+  private treeTrunks: THREE.InstancedMesh | null = null;
+  private treeCrowns: THREE.InstancedMesh | null = null;
+  private treeSpots: THREE.Vector3[] = [];
+  private heroIndices: number[] = [];
+  private heroOriginalMatrices: THREE.Matrix4[] = [];
+  private heroGroups: THREE.Group[] = [];
+  private heroModule: typeof import('./proceduralTree') | null = null;
+  private heroToken = 0;
   /** Called with the picked building (or null) when the user clicks the model (#10). */
   onPick?: (b: Building | null) => void;
   /** A plane was clicked (or, with null, something else was). */
@@ -301,6 +325,24 @@ export class CityScene {
     this.lampBulbs = (built.group.getObjectByName('lampBulbs') as THREE.InstancedMesh | undefined) ?? null;
     this.lampPools = this.lampBulbs ? createLampPools(this.lampBulbs) : null;
     if (this.lampPools) built.group.add(this.lampPools);
+    this.treeTrunks = (built.group.getObjectByName('trunks') as THREE.InstancedMesh | undefined) ?? null;
+    this.treeCrowns = (built.group.getObjectByName('crowns') as THREE.InstancedMesh | undefined) ?? null;
+    this.treeSpots = [];
+    if (this.treeTrunks) {
+      // Trunks hold one instance per tree spot (bushes only live in `crowns`), in the same order.
+      const m = new THREE.Matrix4();
+      const p = new THREE.Vector3();
+      const q = new THREE.Quaternion();
+      const s = new THREE.Vector3();
+      for (let i = 0; i < this.treeTrunks.count; i++) {
+        this.treeTrunks.getMatrixAt(i, m);
+        m.decompose(p, q, s);
+        // Trunks sit at ground level (y is always 0), so the y slot is free to carry the spot's own
+        // instance scale `k` instead — read back by `focusHeroTrees` to size the hero tree that
+        // replaces it at the same height the placeholder had (#55 QA).
+        this.treeSpots.push(new THREE.Vector3(p.x, s.x, p.z));
+      }
+    }
     this.details = [];
     built.group.traverse((o) => o.name.startsWith('detail-') && this.details.push(o));
 
@@ -313,9 +355,14 @@ export class CityScene {
     const traffic = this.traffic;
     if (real) this.timeRealism(() => this.realism.apply(traffic.group));
     this.scene.add(this.traffic.group);
-    this.boats = new Boats(boatRoutes(data, proj), 4321, pastel);
+    const waterRoutes = boatRoutes(data, proj);
+    this.boats = new Boats(waterRoutes, 4321, pastel);
     this.scene.add(this.boats.group);
     this.floodWater = new FloodWater(this.size.width, this.size.depth);
+    if (waterRoutes.length > 0) {
+      const resolution = 48;
+      this.floodWater.setMask(floodMaskGrid(waterRoutes, this.size.width / 2, this.size.depth / 2, resolution), resolution);
+    }
     this.floodWater.setDepth(this.floodWaterDepth, true);
     this.floodWater.setSky(this.lastSky);
     this.scene.add(this.floodWater.mesh);
@@ -402,6 +449,18 @@ export class CityScene {
         else mat?.dispose();
       });
     this.realism.reset();
+    // The instances `heroIndices`/`heroOriginalMatrices` point at are about to be disposed anyway.
+    this.heroToken++;
+    for (const g of this.heroGroups) {
+      this.heroModule?.disposeHeroTreeGroup(g);
+      this.city.remove(g);
+    }
+    this.heroGroups = [];
+    this.heroIndices = [];
+    this.heroOriginalMatrices = [];
+    this.treeTrunks = null;
+    this.treeCrowns = null;
+    this.treeSpots = [];
     dispose(this.city);
     this.city.clear();
     this.buildingsMesh = null;
@@ -423,6 +482,13 @@ export class CityScene {
       this.floodWater.dispose();
       this.floodWater = null;
     }
+    if (this.transitGroup) {
+      dispose(this.transitGroup);
+      this.scene.remove(this.transitGroup);
+      this.transitGroup = null;
+    }
+    this.transitMeta = null;
+    this.transitBuildStats = { routes: 0, stops: 0 };
     for (const l of this.labels) l.el.remove();
     this.labels = [];
     this.dropAircraft();
@@ -529,7 +595,85 @@ export class CityScene {
     const b = bid >= 0 ? (this.buildingById.get(this.buildingIds[bid]) ?? null) : null;
     this.select(b ? bid : -1);
     this.onPick?.(b);
+    void this.focusHeroTrees(b);
     return b;
+  }
+
+  /**
+   * Hero trees (#55): swaps the cheap placeholder trees within `HERO_RADIUS` of the selected
+   * building (capped at `HERO_MAX`) for full-detail procedural (EZ-Tree) ones. The module and the
+   * library it wraps are loaded lazily, only once a building is actually picked.
+   */
+  private async focusHeroTrees(b: Building | null) {
+    const token = ++this.heroToken;
+    this.clearHeroTrees();
+    if (!b || !this.proj || !this.treeTrunks || !this.treeCrowns || !this.treeSpots.length) return;
+    const proj = this.proj;
+    const ring = b.polygon[0];
+    let cx = 0;
+    let cz = 0;
+    for (const ll of ring) {
+      const [x, z] = proj.project(ll);
+      cx += x;
+      cz += z;
+    }
+    cx /= ring.length;
+    cz /= ring.length;
+    const near = this.treeSpots
+      .map((p, i) => ({ i, d: Math.hypot(p.x - cx, p.z - cz) }))
+      .filter((e) => e.d <= HERO_RADIUS)
+      .sort((a, c) => a.d - c.d)
+      .slice(0, HERO_MAX);
+    if (!near.length) return;
+    if (!this.heroModule) this.heroModule = await import('./proceduralTree');
+    if (token !== this.heroToken) return; // superseded by a later pick/clear while the module loaded
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    const m = new THREE.Matrix4();
+    for (const { i } of near) {
+      this.treeCrowns.getMatrixAt(i, m);
+      this.heroOriginalMatrices.push(m.clone());
+      this.heroIndices.push(i);
+      this.treeCrowns.setMatrixAt(i, zero);
+      this.treeTrunks.setMatrixAt(i, zero);
+    }
+    this.treeCrowns.instanceMatrix.needsUpdate = true;
+    this.treeTrunks.instanceMatrix.needsUpdate = true;
+    const groups = await Promise.all(
+      near.map(({ i }) => {
+        const spot = this.treeSpots[i];
+        return this.heroModule!.heroTreeGroup(spot.x, spot.z, PLACEHOLDER_TREE_HEIGHT * spot.y);
+      }),
+    );
+    if (token !== this.heroToken) {
+      groups.forEach((g) => this.heroModule!.disposeHeroTreeGroup(g));
+      return;
+    }
+    for (const g of groups) {
+      this.heroGroups.push(g);
+      // Added under `this.city` (not `this.scene`), same as the placeholder instances they replace,
+      // so `exportGLB`'s `this.city.clone()` carries them into the exported file (#55 QA: a GLB
+      // exported while a building is selected dropped these 10 trees entirely).
+      this.city.add(g);
+    }
+  }
+
+  /** Restores any hidden placeholder trees and drops the current hero-tree groups. */
+  private clearHeroTrees() {
+    if (this.treeCrowns && this.treeTrunks && this.heroIndices.length) {
+      this.heroIndices.forEach((i, k) => {
+        this.treeCrowns!.setMatrixAt(i, this.heroOriginalMatrices[k]);
+        this.treeTrunks!.setMatrixAt(i, this.heroOriginalMatrices[k]);
+      });
+      this.treeCrowns.instanceMatrix.needsUpdate = true;
+      this.treeTrunks.instanceMatrix.needsUpdate = true;
+    }
+    for (const g of this.heroGroups) {
+      this.heroModule?.disposeHeroTreeGroup(g);
+      this.city.remove(g);
+    }
+    this.heroGroups = [];
+    this.heroIndices = [];
+    this.heroOriginalMatrices = [];
   }
 
   /** Planes on or off. The module loads on first use; it is not part of the bench or of a page without planes. */
@@ -566,6 +710,12 @@ export class CityScene {
 
   select(bid: number) {
     if (this.buildingUniforms) this.buildingUniforms.uSelected.value = bid;
+    // Deselecting (bid < 0) also drops any hero trees; selecting is handled by `pick()`, the only
+    // call site that has the `Building` a positive bid refers to.
+    if (bid < 0) {
+      this.heroToken++;
+      this.clearHeroTrees();
+    }
   }
 
   /** Colour buildings by where their height comes from (#3). */
@@ -685,6 +835,38 @@ export class CityScene {
 
   get trafficStats() {
     return this.traffic?.stats ?? { vehicles: 0, segments: 0, flow: 1, people: 0, byKind: {} as Record<string, number>, observed: 0 };
+  }
+
+  /**
+   * Real bus routes (#56). The feed loads from `transit/<city>.json` under `base` on first use.
+   * `data`/`proj` are snapshotted so a fetch started before the user toggles off, or before another
+   * area replaces this one, is dropped instead of landing on the wrong model.
+   */
+  async setTransitVisible(on: boolean, base: string): Promise<{ routes: number; stops: number }> {
+    this.wantTransit = on;
+    if (!on) {
+      if (this.transitGroup) this.transitGroup.visible = false;
+      return { routes: 0, stops: 0 };
+    }
+    if (this.transitGroup) {
+      this.transitGroup.visible = true;
+      return this.transitBuildStats;
+    }
+    const data = this.data, proj = this.proj;
+    if (!data || !proj) return { routes: 0, stops: 0 };
+    const city = transitCityFor((data.bbox.south + data.bbox.north) / 2);
+    const file = await loadTransit(city, base);
+    if (!this.wantTransit || this.data !== data || this.proj !== proj) return { routes: 0, stops: 0 };
+    const built = buildTransit(file, data.bbox, proj);
+    this.transitGroup = built.group;
+    this.transitMeta = file.meta;
+    this.transitBuildStats = { routes: built.routes, stops: built.stops };
+    this.scene.add(built.group);
+    return this.transitBuildStats;
+  }
+
+  get transitStats() {
+    return this.transitBuildStats;
   }
 
   setPixelMode(on: boolean) {

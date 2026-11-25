@@ -240,6 +240,10 @@ body.preview #btn-example, body.preview #btn-google, body.preview #btn-back, bod
 .land-adj a, .land-links a { color: var(--accent); }
 .land-links { color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
 .land-notes { margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.land-plan { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.land-plan .land-table td:first-child { text-align: left; }
+.land-plan-err { color: #f3b4a4; }
+.plan-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(255, 255, 255, 0.25); }
 .conf-high { color: var(--ok); }
 .conf-medium { color: var(--accent-2); }
 .conf-low { color: #ff6b6b; }

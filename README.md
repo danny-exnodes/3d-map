@@ -62,6 +62,9 @@
 - Bóng đổ chỉ render lại khi cần. Pixel ratio tự hạ khi FPS thấp. Chi tiết nhỏ chỉ hiện khi zoom gần (LOD).
 - Benchmark tự động trong CI.
 
+**Mới trong v0.0.10** (bản OSM)
+- Bấm chọn một nhà: tối đa 10 cây quanh đó (bán kính 30 m) đổi từ khối hình học đơn giản thành cây thật (procedural, EZ-Tree), giữ nguyên hình dáng giữa các lần tải lại. Mọi cây khác trong cảnh vẫn là khối đơn giản.
+
 **Mới trong v0.0.9** (bản OSM)
 - Mở thẳng một phường/xã bằng link `?focus=<tên phường>`, ví dụ `?focus=ben-cat`. Bảng 📥 có nút 🔗 Link.
 - Kịch bản 🌊 "Mưa · triều · ngập" (`?ngap=0.5`): nước đục phủ mô hình, thuyền nổi, xe chậm lại. Chỉ là minh hoạ, không phải mô phỏng thuỷ lực.
@@ -74,6 +77,7 @@
 
 **Mới trong v0.0.7** (bản OSM, nút 🗺 trên bản đồ)
 - **Thửa đất trong vùng chọn:** mã và tên loại đất theo TT 08/2024 (kèm mã cũ), diện tích, chu vi, từng cạnh, mặt tiền, chiều sâu, hình dạng. Có thửa tham khảo từ lớp sử dụng đất OSM; thửa thật nhập bằng bảng toạ độ VN2000 trong sổ đỏ, hoặc file GeoJSON/KML.
+- **Quy hoạch TP.HCM theo thửa (#59):** chọn một thửa thì hiện loại đất quy hoạch từng ô (màu theo chú giải của Sở), diện tích và % phủ lên thửa, lộ giới các đường tiếp giáp, đồ án phân khu áp dụng, kèm ranh vẽ lên bản đồ; có trong hồ sơ định giá. Chỉ TP.HCM, chỉ để tham khảo. Nguồn: cổng của Sở Quy hoạch - Kiến trúc TP.HCM, gọi một lần mỗi lần chọn thửa.
 - **Giá rao bán quanh thửa:** tin đất Chợ Tốt Nhà (snapshot hằng ngày), trung vị và P25 đến P75 giá/m², lọc tin giá sai, liên kết về tin gốc. Có thể nhập CSV hoặc dùng proxy riêng để lấy dữ liệu trực tiếp.
 - **Định giá và tư vấn:** ước tính theo phương pháp so sánh, chỉnh được giả định (vị trí, lô góc, pháp lý, lộ giới); xuất hồ sơ JSON `tinymap.valuation/v1` cho AI agent khác; trợ lý AI Claude chạy bằng key Anthropic của bạn. Kết quả chỉ để tham khảo, không phải chứng thư thẩm định giá.
 
@@ -170,6 +174,7 @@ Yêu cầu Node 22.18+ (CLI chiều cao chạy thẳng file `.ts`) và trình du
 | [NASA GIBS](https://earthdata.nasa.gov/gibs) Blue Marble | ảnh trái đất (Space view) | WMTS (CORS) | public domain |
 | [Open‑Meteo](https://open-meteo.com/) | thời tiết | trình duyệt | CC BY 4.0 |
 | [OpenFreeMap](https://openfreemap.org/) lớp `landuse`/`landcover`/`park` | thửa tham khảo (không phải thửa địa chính) | vector tiles z14 (CORS) | ODbL |
+| [Cổng thông tin quy hoạch TP.HCM](https://thongtinquyhoach.hochiminhcity.gov.vn/) | quy hoạch phân khu 1/2000, lộ giới, thông tin thửa (#59) | gọi trực tiếp từ trình duyệt khi chọn thửa (không key, có CORS), cache IndexedDB 24 giờ; API của cổng không có tài liệu công khai nên có thể đổi | Sở Quy hoạch - Kiến trúc TP.HCM; chỉ tham khảo, không thay giấy tờ pháp lý; không gọi hàng loạt |
 | [Chợ Tốt Nhà](https://www.nhatot.com/) | tin rao bán đất (giá rao, không phải giá giao dịch) | snapshot hằng ngày do CI tạo (`tools/listings.ts`), hoặc proxy của người dùng; bỏ dữ liệu cá nhân người bán | dữ liệu của Chợ Tốt; liên kết về tin gốc |
 | [Anthropic Claude API](https://platform.claude.com/) | trợ lý tư vấn đầu tư (tuỳ chọn) | gọi thẳng từ trình duyệt, key của người dùng | Anthropic ToS |
 
@@ -246,6 +251,7 @@ bench/                    # benchmark + ngân sách hiệu năng cho CI
 
 ## Phiên bản
 
+- [v0.0.10](docs/releases/v0.0.10.md) (2026-11-12): cây hero procedural (EZ-Tree) quanh nhà đang chọn, thay cho khối cây placeholder.
 - [v0.0.9](docs/releases/v0.0.9.md) (2026-11-05): link `?focus=` mở thẳng phường, kịch bản ngập 🌊 minh hoạ, máy bay thật trên trang đã đăng (bật theo lựa chọn).
 - [v0.0.8](docs/releases/v0.0.8.md) (2026-11-01): nút phong cách (Đồ chơi / Khối / Siêu thực), bầu trời và mây, chọn thời tiết, tàu thuyền, máy bay thật qua relay.
 - [v0.0.7](docs/releases/v0.0.7.md) (2026-10-31): thửa đất trong vùng chọn (loại đất, kích thước), giá rao bán Chợ Tốt quanh thửa, định giá so sánh, hồ sơ JSON và trợ lý AI.
