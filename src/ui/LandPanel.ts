@@ -6,6 +6,7 @@ import { GROUP_COLOR, GROUP_LABEL, LAND_TYPES, landColor, landGroup, landType } 
 import { filterOutliers, loadLive, loadMarket, marketProxy, marketStats, nearby, type NearbyListing, parseListingsCsv, setMarketProxy } from '../land/market';
 import { loadOsmParcels } from '../land/osmParcels';
 import { makeParcel } from '../land/parcels';
+import { inHcm, interiorPoint, loadPlanning, lotMismatchNote, PLANNING_DISCLAIMER, type PlanningInfo, planningToGeoJson, portalLink } from '../land/planning';
 import type { Access, LandGroup, LegalStatus, Listing, MarketStats, Parcel, ParcelShape, Street } from '../land/types';
 import { type Assumptions, defaultAssumptions, DISCLAIMER, ringCenter, type Valuation, valueParcel } from '../land/valuation';
 import { PROVINCE_MERIDIANS } from '../land/vn2000';
@@ -88,6 +89,10 @@ export class LandPanel {
   private advisor: Advisor | null = null;
   private advisorKey = '';
   private askAbort: AbortController | null = null;
+  /** Official HCMC planning for the selected parcel (#59). */
+  private plan: { status: 'loading' | 'ok' | 'none' | 'error' | 'outside'; info?: PlanningInfo; error?: string } | null = null;
+  private planAbort: AbortController | null = null;
+  private planOverlay = true;
 
   constructor(
     private readonly mapView: MapView,
@@ -125,6 +130,7 @@ export class LandPanel {
     this.btn.classList.add('on');
     this.ensureParcels();
     this.renderAll();
+    this.applyPlanningOverlay();
   }
 
   close() {
@@ -132,8 +138,10 @@ export class LandPanel {
     this.btn.classList.remove('on');
     this.loadAbort?.abort();
     this.askAbort?.abort();
+    this.planAbort?.abort();
     this.mapView.setParcels(null);
     this.mapView.setMarket(null);
+    this.mapView.setPlanning(null);
   }
 
   /** The selection rectangle changed: reload reference parcels (debounced) while open. */
@@ -315,6 +323,7 @@ export class LandPanel {
     if (changed) {
       this.assumptions = p ? defaultAssumptions(p) : null;
       this.syncAssumptionControls();
+      void this.refreshPlanning();
     }
     this.el.querySelectorAll<HTMLElement>('#land-list li').forEach((li) => li.classList.toggle('on', li.dataset.id === p?.id));
     if (fromMap) this.el.querySelector<HTMLElement>('#land-list li.on')?.scrollIntoView({ block: 'nearest' });
@@ -353,8 +362,96 @@ export class LandPanel {
     box.innerHTML =
       `<dl class="land-dl">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` +
       `<table class="land-table"><tbody>${edges}</tbody></table>` +
+      `<div class="land-plan" id="land-plan"></div>` +
       `<div class="off-row"><button class="ghost small" data-go="market">Giá thị trường →</button><button class="ghost small" data-go="value">Định giá →</button></div>`;
     box.querySelectorAll<HTMLButtonElement>('[data-go]').forEach((b) => b.addEventListener('click', () => this.setTab(b.dataset.go as Tab)));
+    this.renderPlanning();
+  }
+
+  // ---------- Planning (#59) ----------
+
+  /** Looks up the official HCMC planning at the selected parcel's middle point (one request). */
+  private async refreshPlanning() {
+    this.planAbort?.abort();
+    const p = this.selected;
+    if (!p) {
+      this.plan = null;
+      this.applyPlanningOverlay();
+      return void this.renderPlanning();
+    }
+    const [lon, lat] = interiorPoint(p.ring);
+    if (!inHcm(lon, lat)) {
+      this.plan = { status: 'outside' };
+      this.applyPlanningOverlay();
+      return void this.renderPlanning();
+    }
+    const ac = (this.planAbort = new AbortController());
+    this.plan = { status: 'loading' };
+    this.applyPlanningOverlay();
+    this.renderPlanning();
+    try {
+      const info = await loadPlanning(lon, lat, ac.signal);
+      if (ac.signal.aborted) return;
+      this.plan = info ? { status: 'ok', info } : { status: 'none' };
+    } catch (e) {
+      if (ac.signal.aborted) return;
+      this.plan = { status: 'error', error: (e as Error).message };
+    }
+    this.applyPlanningOverlay();
+    this.renderPlanning();
+    // The dossier on the valuation tab includes planning once it has arrived.
+    if (this.tab === 'value') this.renderValuation();
+  }
+
+  private applyPlanningOverlay() {
+    const info = !this.el.hidden && this.planOverlay && this.plan?.status === 'ok' ? this.plan.info! : null;
+    this.mapView.setPlanning(info ? planningToGeoJson(info) : null);
+  }
+
+  private renderPlanning() {
+    const box = this.el.querySelector<HTMLElement>('#land-plan');
+    const p = this.selected;
+    if (!box || !p) return;
+    const [lon, lat] = interiorPoint(p.ring);
+    const link = `<a href="${esc(portalLink(lon, lat))}" target="_blank" rel="noopener">Mở cổng quy hoạch ↗</a>`;
+    const head = '<div class="strong small">Quy hoạch · Sở Quy hoạch - Kiến trúc TP.HCM</div>';
+    const st = this.plan?.status;
+    let body: string;
+    if (!st || st === 'loading') body = '<div class="muted small">Đang tra quy hoạch…</div>';
+    else if (st === 'outside') body = '<div class="muted small">Chỉ tra được quy hoạch ở TP.HCM. Hà Nội: <a href="https://quyhoach.hanoi.vn/" target="_blank" rel="noopener">quyhoach.hanoi.vn ↗</a></div>';
+    else if (st === 'error') body = `<div class="small land-plan-err">Không tra được quy hoạch (${esc(this.plan?.error ?? 'lỗi mạng')}). <button class="ghost small" id="plan-retry">Thử lại</button> ${link}</div>`;
+    else if (st === 'none') body = `<div class="muted small">Cổng không có dữ liệu quy hoạch tại điểm giữa thửa. ${link}</div>`;
+    else {
+      const i = this.plan!.info!;
+      const lot = [i.soTo && i.soThua ? `tờ ${i.soTo}, thửa ${i.soThua}` : '', i.ward, i.district].filter(Boolean).join(', ');
+      const rows: [string, string][] = [];
+      if (lot || i.areaM2) rows.push(['Thửa của cổng', `${esc(lot || '–')}${i.areaM2 ? ` · ${nf(i.areaM2, 1)} m²` : ''}`]);
+      if (i.cadastralId) rows.push(['Mã thửa', esc(i.cadastralId)]);
+      for (const d of i.plans) rows.push(['Đồ án', esc(d)]);
+      const cells = i.cells
+        .map((c) => `<tr><td><i class="plan-sw" style="background:${c.color}"></i>${esc(c.name)}${c.block ? ` <small class="muted">(ô ${esc(c.block)})</small>` : ''}</td><td>${nf(c.areaM2)} m²</td><td>${nf(c.sharePct, 1)}%</td></tr>`)
+        .join('');
+      const roads = i.frontages
+        .filter((f) => f.roadWidthM != null)
+        .map((f) => `<li>${esc(f.street)}${f.side ? ` <small class="muted">(${esc(f.side)})</small>` : ''}: lộ giới <b>${nf(f.roadWidthM!, f.roadWidthM! % 1 ? 1 : 0)} m</b></li>`)
+        .join('');
+      const mismatch = lotMismatchNote(p.metrics.area, i);
+      body =
+        `<dl class="land-dl">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` +
+        (cells ? `<table class="land-table"><tbody>${cells}</tbody></table>` : '<div class="muted small">Cổng không trả về ô quy hoạch nào cho thửa này.</div>') +
+        (roads ? `<ul class="land-notes">${roads}</ul>` : '') +
+        (i.extraLayers ? `<div class="muted small">Cổng còn ${i.extraLayers} lớp khác (chi tiết, ngành, điều chỉnh cục bộ, công trình) chưa đọc ở đây. ${link}</div>` : '') +
+        (mismatch ? `<div class="land-banner small">${esc(mismatch)}</div>` : '') +
+        `<label class="small opt"><input id="plan-overlay" type="checkbox"${this.planOverlay ? ' checked' : ''} /> Vẽ ranh quy hoạch lên bản đồ</label>` +
+        `<div class="small land-links">${link}</div>` +
+        `<div class="muted small">${esc(PLANNING_DISCLAIMER)}</div>`;
+    }
+    box.innerHTML = head + body;
+    box.querySelector('#plan-retry')?.addEventListener('click', () => void this.refreshPlanning());
+    box.querySelector<HTMLInputElement>('#plan-overlay')?.addEventListener('change', (e) => {
+      this.planOverlay = (e.target as HTMLInputElement).checked;
+      this.applyPlanningOverlay();
+    });
   }
 
   private async doImport() {
@@ -542,6 +639,7 @@ export class LandPanel {
       radiusM: this.radius,
       marketSource: mk.data.source,
       snapshotTime: mk.data.generated || undefined,
+      planning: this.plan?.status === 'ok' ? this.plan.info : null,
     });
     return { v, dossier };
   }

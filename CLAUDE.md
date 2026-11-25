@@ -10,6 +10,6 @@ Tóm tắt:
 - Quy trình: mỗi việc là một issue, có PO đề xuất và TechLead phân tích. Chỉ code khi cả hai đã đồng ý (label `status: ready`).
 - Nhánh mặc định là `master`. Làm trên `feature/*` hoặc `fix/*`, mở PR, chờ CI xanh rồi merge. Merge vào `master` sẽ tự deploy GitHub Pages.
 - Trước khi push: `npm run typecheck && npm test && npm run build`. Với thay đổi về hiệu năng, chạy thêm `npm run bench`.
-- Mô-đun đất đai (thửa, giá thị trường, định giá, trợ lý AI) nằm ở `src/land/` (hàm thuần, có test) và `src/ui/LandPanel.ts`. Không có API địa chính công khai: thửa OSM chỉ là tham khảo. Không cào Guland, Meey Map, batdongsan.
+- Mô-đun đất đai (thửa, giá thị trường, định giá, trợ lý AI) nằm ở `src/land/` (hàm thuần, có test) và `src/ui/LandPanel.ts`. Không có API địa chính công khai: thửa OSM chỉ là tham khảo. Không cào Guland, Meey Map, batdongsan. Quy hoạch TP.HCM (`src/land/planning.ts`, #59) gọi API của cổng thongtinquyhoach.hochiminhcity.gov.vn theo từng lần chọn thửa, không gọi hàng loạt; test dùng fixture `tests/fixtures/quyhoach-hcm.json`, không gọi cổng thật.
 - Sandbox cloud không gọi được Overpass (đường mặc định giờ không cần Overpass); khi test nhánh Overpass, mock bằng Playwright.
 - Khi kết thúc một đợt việc, viết checkpoint mới `docs/releases/vX.Y.Z.md` theo đúng cấu trúc của bản trước.
