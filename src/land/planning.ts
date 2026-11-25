@@ -266,7 +266,7 @@ export async function loadPlanning(lon: number, lat: number, signal?: AbortSigna
     if (signal?.aborted) throw e;
     const stale = await cacheGet<Cached>(NS, key, true);
     if (stale) return 'none' in stale ? null : stale.info;
-    throw timedOut ? new Error(`Cổng không phản hồi (quá ${TIMEOUT_MS / 1000} giây)`) : e;
+    throw timedOut ? new Error(`Cổng không phản hồi sau ${TIMEOUT_MS / 1000} giây`) : e;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);

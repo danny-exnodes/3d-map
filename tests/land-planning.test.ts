@@ -156,7 +156,7 @@ describe('loadPlanning', () => {
     vi.useFakeTimers();
     try {
       vi.stubGlobal('fetch', vi.fn((_u: unknown, init?: RequestInit) => new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('x', 'AbortError'))))));
-      const p = expect(loadPlanning(106.9, 10.9)).rejects.toThrow('Cổng không phản hồi (quá 20 giây)');
+      const p = expect(loadPlanning(106.9, 10.9)).rejects.toThrow('Cổng không phản hồi sau 20 giây');
       await vi.advanceTimersByTimeAsync(20100);
       await p;
     } finally {
