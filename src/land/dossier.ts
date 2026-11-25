@@ -6,6 +6,7 @@
  */
 import type { LngLat } from '../data/types';
 import { GROUP_LABEL, landGroup, landType } from './landTypes';
+import { PLANNING_DISCLAIMER, PLANNING_SOURCE, type PlanningInfo, type PlanningSummary, summarizePlanning } from './planning';
 import type { Access, LandGroup, LegalStatus, MarketStats, Parcel, ParcelMetrics } from './types';
 import { type Assumptions, type Comparable, DISCLAIMER, type Valuation } from './valuation';
 
@@ -49,6 +50,8 @@ export interface ValuationDossier {
   };
   valuation: Valuation;
   assumptions: Assumptions;
+  /** Official HCMC planning at the parcel's middle point; present only when it was looked up (#59). */
+  planning?: PlanningSummary;
   disclaimers: string[];
   sources: { name: string; url?: string; license?: string }[];
 }
@@ -62,6 +65,8 @@ export interface DossierInput {
   /** e.g. 'Chợ Tốt (ảnh chụp hằng ngày)' or 'Chợ Tốt (trực tiếp qua proxy)'. */
   marketSource?: string;
   snapshotTime?: string;
+  /** Planning lookup result (#59); omitted when not looked up, outside HCMC or failed. */
+  planning?: PlanningInfo | null;
   /** Injected for deterministic tests. */
   now?: Date;
 }
@@ -123,8 +128,9 @@ export function buildDossier(input: DossierInput): ValuationDossier {
     },
     valuation,
     assumptions: valuation.assumptions,
-    disclaimers: [...DOSSIER_DISCLAIMERS],
-    sources: DOSSIER_SOURCES.map((s) => ({ ...s })),
+    ...(input.planning ? { planning: summarizePlanning(input.planning) } : {}),
+    disclaimers: [...DOSSIER_DISCLAIMERS, ...(input.planning ? [PLANNING_DISCLAIMER] : [])],
+    sources: [...DOSSIER_SOURCES, ...(input.planning ? [PLANNING_SOURCE] : [])].map((s) => ({ ...s })),
   };
 }
 
@@ -172,6 +178,18 @@ export function dossierToMarkdown(d: ValuationDossier): string {
   if (v.rejected.length) {
     out.push('', 'Tin bị loại:');
     for (const r of v.rejected) out.push(`- ${r.id}: ${r.reason}`);
+  }
+  if (d.planning) {
+    const pl = d.planning;
+    out.push('', '## Quy hoạch (cổng TP.HCM)');
+    const lot = [pl.lot.soTo && pl.lot.soThua ? `tờ ${pl.lot.soTo}, thửa ${pl.lot.soThua}` : '', pl.lot.ward, pl.lot.district].filter(Boolean).join(', ');
+    if (lot) out.push(`- Thửa theo cổng: ${lot}${pl.lot.areaM2 ? `, ${Math.round(pl.lot.areaM2).toLocaleString('vi-VN')} m²` : ''}`);
+    for (const x of pl.plans) out.push(`- Đồ án: ${x}`);
+    for (const c of pl.cells) out.push(`- ${c.name}${c.block ? ` (ô ${c.block})` : ''}: ${Math.round(c.areaM2).toLocaleString('vi-VN')} m², ${c.sharePct.toLocaleString('vi-VN', { maximumFractionDigits: 1 })}% thửa`);
+    for (const f of pl.frontages) {
+      if (f.roadWidthM != null) out.push(`- Lộ giới ${f.street}${f.side ? ` (${f.side})` : ''}: ${f.roadWidthM} m`);
+    }
+    if (pl.extraLayers) out.push(`- Cổng còn ${pl.extraLayers} lớp quy hoạch khác (chi tiết, ngành, điều chỉnh cục bộ, công trình) chưa đọc; xem ${pl.url}`);
   }
   out.push('', '## Lưu ý');
   for (const x of d.disclaimers) out.push(`- ${x}`);
@@ -303,6 +321,27 @@ export const DOSSIER_JSON_SCHEMA = {
         landCode: str,
         roadWideningShare: { type: 'number', minimum: 0, maximum: 1 },
         askDiscount: { type: 'number', minimum: 0, maximum: 1 },
+      },
+    },
+    planning: {
+      type: 'object',
+      required: ['source', 'url', 'queriedAt', 'point', 'lot', 'plans', 'cells', 'frontages'],
+      properties: {
+        source: str,
+        url: str,
+        queriedAt: { type: 'string', format: 'date-time' },
+        point: { type: 'array', items: num, minItems: 2, maxItems: 2 },
+        lot: { type: 'object', properties: { id: str, soTo: str, soThua: str, ward: str, district: str, areaM2: num } },
+        plans: { type: 'array', items: str },
+        cells: {
+          type: 'array',
+          items: { type: 'object', required: ['code', 'name', 'areaM2', 'sharePct'], properties: { code: str, name: str, block: str, areaM2: num, sharePct: num } },
+        },
+        frontages: {
+          type: 'array',
+          items: { type: 'object', required: ['street'], properties: { street: str, side: str, roadWidthM: num, frontageM: num, depthM: num } },
+        },
+        extraLayers: num,
       },
     },
     disclaimers: { type: 'array', items: str, minItems: 1 },

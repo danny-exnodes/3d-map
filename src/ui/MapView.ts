@@ -269,6 +269,7 @@ export class MapView {
 
   private parcels: GeoJSON.FeatureCollection = EMPTY;
   private market: GeoJSON.FeatureCollection = EMPTY;
+  private planning: GeoJSON.FeatureCollection = EMPTY;
   /** Called with a parcel id when the user clicks a parcel (not while drawing). */
   onParcelClick?: (id: string) => void;
 
@@ -287,6 +288,16 @@ export class MapView {
         source: 'parcels',
         paint: { 'line-color': ['case', ['get', 'sel'], '#ffffff', ['get', 'color']], 'line-width': ['case', ['get', 'sel'], 2.5, 0.8], 'line-opacity': 0.9 },
       },
+      'sel-fill',
+    );
+    // Official zoning cells (#59) over the OSM parcels, still under the selection rectangle.
+    m.addSource('planning', { type: 'geojson', data: this.planning });
+    m.addLayer(
+      { id: 'planning-fill', type: 'fill', source: 'planning', filter: ['==', ['get', 'kind'], 'cell'], paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.55 } },
+      'sel-fill',
+    );
+    m.addLayer(
+      { id: 'planning-line', type: 'line', source: 'planning', paint: { 'line-color': ['case', ['==', ['get', 'kind'], 'lot'], '#ffffff', '#1b0f08'], 'line-width': ['case', ['==', ['get', 'kind'], 'lot'], 2.5, 0.8], 'line-opacity': 0.9 } },
       'sel-fill',
     );
     m.addSource('market', { type: 'geojson', data: this.market });
@@ -320,6 +331,12 @@ export class MapView {
   setParcels(fc: GeoJSON.FeatureCollection | null, _selectedId?: string) {
     this.parcels = fc ?? EMPTY;
     (this.map.getSource('parcels') as GeoJSONSource | undefined)?.setData(this.parcels);
+  }
+
+  /** Shows the portal's zoning cells + lot outline (#59) or clears them. */
+  setPlanning(fc: GeoJSON.FeatureCollection | null) {
+    this.planning = fc ?? EMPTY;
+    (this.map.getSource('planning') as GeoJSONSource | undefined)?.setData(this.planning);
   }
 
   /** Shows market listings as points or clears them. */
